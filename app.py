@@ -156,7 +156,7 @@ def check_mandatory_empty_cells(df, columns_to_check):
             for idx in df.index[missing_mask]:
                 print(f"❌ EMPTY CELL - Row {get_excel_row(idx)}: Column '{col}' is missing a value.")
     if error_found: 
-        st.error("\n🛑 Execution stopped: Mandatory cells cannot be empty.")
+        st.error(f"❌ EMPTY CELL - Row {get_excel_row(idx)}: Column '{col}' is missing a value.")
         st.stop() 
 
 def validate_data_and_log_errors(df):
