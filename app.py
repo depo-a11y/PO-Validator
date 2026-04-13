@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import os
 import re
+import io
 
 st.set_page_config(page_title="Excel Validator", layout="wide")
 st.title("📦 Excel Product Validator")
@@ -134,7 +135,6 @@ def validate_tags_and_type(df, template_file="expected_tags.xlsx"):
         st.stop() 
 
 def check_mandatory_empty_cells(df, columns_to_check):
-    """Exits if any mandatory cell is empty, excluding specific optional/auto-filled columns."""
     optional_cols = [
         "Metafield: custom.made_in [single_line_text_field]",
         "Variant Metafield: Variant.gtin [single_line_text_field]",
@@ -146,18 +146,34 @@ def check_mandatory_empty_cells(df, columns_to_check):
         "Variant Inventory Tracker", "Variant Metafield: Variant.cost_price [single_line_text_field]"
     ]
     
-    print("🔍 Scanning for empty cells...")
-    error_found = False
+    st.write("🔍 Scanning for empty cells...")
+
+    errors = []
+
     for col in columns_to_check:
-        if col in optional_cols: continue
+        if col in optional_cols:
+            continue
+
         missing_mask = df[col].astype(str).str.strip().eq("") | df[col].isna()
+
         if missing_mask.any():
-            error_found = True
             for idx in df.index[missing_mask]:
-                print(f"❌ EMPTY CELL - Row {get_excel_row(idx)}: Column '{col}' is missing a value.")
-    if error_found: 
-        st.error(f"❌ EMPTY CELL - Row {get_excel_row(idx)}: Column '{col}' is missing a value.")
-        st.stop() 
+                errors.append({
+                    "Row": get_excel_row(idx),
+                    "Column": col
+                })
+
+    # 🔥 Show ALL errors
+    if errors:
+        st.error(f"🛑 Found {len(errors)} empty mandatory cells")
+
+        error_df = pd.DataFrame(errors)
+        st.dataframe(error_df)
+
+        st.stop()
+
+    else:
+        st.success("✅ No empty mandatory cells found")
 
 def validate_data_and_log_errors(df):
     """Flags margin errors and title tag length issues."""
@@ -206,7 +222,71 @@ def validate_cost_currency_format(df):
         st.error("\n🛑 Cost currency format error. Please fix before proceeding.")
         st.stop() 
     print("✅ Cost currency format passed.")
+
+def assign_size_scale(row):
+    """
+    Automatically assigns size scales based on Gender, Category, 
+    and the numerical range of the Size (Option2 Value).
+    """
+    # 1. Extract and Clean Variables
+    size_raw = str(row.get("Option2 Value", "")).strip().upper()
+    gender = str(row.get("Metafield: custom.gender [single_line_text_field]", "")).strip().upper()
+    category = str(row.get("Metafield: custom.category [single_line_text_field]", "")).strip().upper()
+    sub_cat = str(row.get("Metafield: custom.sub_category [single_line_text_field]", "")).strip().upper()
+
+    # Extract the first number found in the size string (e.g., '42.5' from 'EU 42.5')
+    try:
+        numbers = re.findall(r"\d+\.?\d*", size_raw)
+        size_num = float(numbers[0]) if numbers else None
+    except:
+        size_num = None
+
+    # 2. OVERRIDE: Global One Size check (If the literal size is OS)
+    if size_raw in ["OS", "ONE SIZE", "U", "UNI", "NS"]:
+        return "ONE_SIZE"
+
+    # 3. BELT LOGIC
+    if "BELT" in sub_cat or "BELT" in category:
+        # We already checked for 'OS' above, so we assume these are sized belts
+        return "BELTS MEN'S CM" if gender == "MEN" else "BELTS WOMEN'S CM"
+
+    # 4. MEN'S SHOE LOGIC (Range Based)
+    if gender == "MEN" and ("SHOE" in category or "FOOTWEAR" in category or "SHOE" in sub_cat):
+        if size_num is not None:
+            # US Scale (3 - 14)
+            if 3 <= size_num <= 14:
+                return "SHOES US MEN"
+            
+            # JAPAN Scale (24 - 29)
+            if 24 <= size_num <= 29:
+                return "SHOES MEN’S JAPAN"
+            
+            # EU Scale (35 - 47)
+            if 35 <= size_num <= 47:
+                return "MEN SHOES EUROPE"
+        
+        # Fallback for Men's Shoes if no number is found
+        return "MEN SHOES EUROPE"
+
+    # 5. WOMEN'S SHOE LOGIC
+    if gender == "WOMEN" and ("SHOE" in category or "FOOTWEAR" in category or "SHOE" in sub_cat):
+        # We can add Women's US/EU ranges here later if needed
+        return "WOMEN SHOES EUROPE"
+
+    # 6. JEANS LOGIC
+    if "JEANS" in sub_cat or "DENIM" in sub_cat:
+        return "MEN'S JEANS" if gender == "MEN" else "WOMEN'S JEANS"
+
+    # 7. CLOTHING LOGIC (Fallback to IT/FR for now)
+    clothing_keywords = ["CLOTHING", "KNITWEAR", "OUTERWEAR", "READY TO WEAR"]
+    if any(k in category for k in clothing_keywords) or any(k in sub_cat for k in clothing_keywords):
+        return "CLOTHING MEN'S IT/FR" if gender == "MEN" else "CLOTHING WOMEN’S IT/FR"
+
+    # 8. FINAL FALLBACK
+    return "ONE_SIZE"
+
 def run_transformations(df):
+
     """Handles formatting, SKU/Season/Sale syncs, and Inventory auto-fill."""
     
     # Load Expected Tags Mapping
@@ -256,7 +336,12 @@ def run_transformations(df):
     if m_code in df.columns:
         df["Metafield: my_fields.supplier_code [single_line_text_field]"] = df[m_code]
         df["Variant Metafield:custom.manufacture_code[single_line_text_field]"] = df[m_code]
-        df["Metafield: custom.brand_color_id [single_line_text_field]"] = df[m_code].astype(str).apply(lambda x: x.split()[-1] if " " in x.strip() else "")
+    try:
+        df["Metafield: custom.brand_color_id [single_line_text_field]"] = df[m_code].apply(extract_brand_color_id)
+
+    except ValueError as e:
+        st.error(f"🛑 Brand Color ID Error: {e}")
+        st.stop()
 
     # Sync Season, Sale, and SKU to Barcode
     df["Variant Metafield: custom.season [single_line_text_field]"] = df.get("Metafield: custom.product_season [single_line_text_field]", "")
@@ -272,6 +357,17 @@ def run_transformations(df):
 
     df.rename(columns={"HS Code": "Variant HS Code"}, inplace=True)
     return df
+
+def extract_brand_color_id(x):
+    x = str(x).strip()
+    parts = x.split()
+
+    if len(parts) < 2:
+        raise ValueError(f"Invalid manufacture_code format: '{x}' (expected at least 2 parts)")
+
+    return parts[-1]
+
+
 if uploaded_file:
 
     df = pd.read_excel(uploaded_file)
@@ -292,7 +388,7 @@ if uploaded_file:
 
         validate_vendors(df)
         validate_duplicate_skus(df)
-        # validate_size_scale(df)
+        validate_size_scale(df)
         validate_cost_currency_format(df)
 
         df = run_transformations(df)
@@ -300,11 +396,20 @@ if uploaded_file:
         validate_tags_and_type(df)
 
         columns_in_order = [
-            "Command", "Title", "Vendor", "Type", "Tags", "Body HTML", "Status",
-            "Published", "Option1 Name", "Option1 Value",
-            "Option2 Name", "Option2 Value", "Variant SKU",
-            "Variant Barcode", "Variant Price", "Variant Compare At Price",
-            "Variant Cost"
+           "Command", "Title", "Vendor", "Type", "Tags", "Body HTML", "Status", "Published", "Option1 Name", "Option1 Value", 
+            "Option2 Name", "Option2 Value", "Variant SKU", "Variant Barcode", "Variant Price", "Variant Compare At Price", "Variant Cost",
+            "Inventory Available: Defective", "Inventory Available: Marais Men Lux - Chadstone", "Inventory Available: Marais Men - Chadstone", 
+            "Inventory Available: Marais Men - QV", "Inventory Available: Marais Women - Bourke", "Inventory Available: Marais Women - QV", 
+            "Inventory Available: Photoshoot", "Inventory Available: Warehouse", "Variant Inventory Tracker", 
+            "Metafield: my_fields.manufacture_code", "Metafield: my_fields.supplier_code [single_line_text_field]", 
+            "Variant Metafield:custom.manufacture_code[single_line_text_field]", "Metafield: custom.brand_color_id [single_line_text_field]", 
+            "Metafield: custom.product_season [single_line_text_field]", "Variant Metafield: custom.season [single_line_text_field]", 
+            "Metafield: custom.gender [single_line_text_field]", "Metafield: custom.category [single_line_text_field]", 
+            "Metafield: custom.sub_category [single_line_text_field]", "Metafield: custom.size_scale [single_line_text_field]", 
+            "Metafield: custom.local_market_price [single_line_text_field]", "Metafield: custom.made_in [single_line_text_field]", 
+            "Metafield: custom.new_sale [single_line_text_field]", "Variant Metafield: custom.new_sale [single_line_text_field]", 
+            "FULLCODE", "Wholesale Price", "Variant Metafield: Variant.cost_price [single_line_text_field]",
+            "Variant Metafield: Variant.gtin [single_line_text_field]", "Variant HS Code", "Metafield: title_tag"
         ]
 
         for col in columns_in_order:
@@ -328,3 +433,16 @@ if uploaded_file:
         )
 
     st.info(f"Validation issues found: {total_errs}")
+    if errors:
+        output = io.BytesIO()
+        pd.DataFrame(errors).to_excel(output, index=False)
+        output.seek(0)
+
+        st.download_button(
+            label="⬇️ Download Error Report",
+            data=output,
+            file_name="VALIDATION_ERRORS_REPORT.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+
+        st.stop()
