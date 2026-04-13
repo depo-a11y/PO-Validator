@@ -65,7 +65,24 @@ def validate_vendors(df):
 
 def validate_size_scale(df):
     """Validates Size Scale against the approved 7 values (Case-Sensitive)."""
-    approved_scales = ["Standard", "EU", "FR", "IT", "ONE_SIZE", "Numeric", "Waist","BELTS MEN'S CM","BELTS WOMEN'S CM"]
+    approved_scales = [
+    "CLOTHING WOMEN’S IT/FR",
+    "ONE_SIZE",
+    "CLOTHING MEN'S STANDARD NUMERIC",
+    "CLOTHING MEN'S STANDARD",
+    "CLOTHING MEN'S IT/FR",
+    "WOMEN'S JEANS",
+    "WOMEN SHOES EUROPE",
+    "MEN SHOES EUROPE",
+    "CLOTHING WOMEN’S STANDARD",
+    "MEN'S JEANS",
+    "CLOTHING WOMEN'S STANDARD NUMERIC",
+    "BELTS WOMEN'S CM",
+    "BELTS MEN'S CM",
+    "SHOES US MEN",
+    "WOMEN SHOES US",
+    "SHOES MEN’S JAPAN"
+]
     col_name = "Metafield: custom.size_scale [single_line_text_field]"
     
     print("📏 Validating Size Scales...")
@@ -196,7 +213,7 @@ def validate_data_and_log_errors(df):
 
     if errors:
         pd.DataFrame(errors).to_excel("VALIDATION_ERRORS_REPORT.xlsx", index=False)
-    return len(errors)
+    return errors
 
 def validate_cost_currency_format(df):
 
@@ -280,7 +297,7 @@ def assign_size_scale(row):
     # 7. CLOTHING LOGIC (Fallback to IT/FR for now)
     clothing_keywords = ["CLOTHING", "KNITWEAR", "OUTERWEAR", "READY TO WEAR"]
     if any(k in category for k in clothing_keywords) or any(k in sub_cat for k in clothing_keywords):
-        return "CLOTHING MEN'S IT/FR" if gender == "MEN" else "CLOTHING WOMEN’S IT/FR"
+        return "CLOTHING MEN'S STANDARD" if gender == "MEN" else "CLOTHING WOMEN’S STANDARD"
 
     # 8. FINAL FALLBACK
     return "ONE_SIZE"
@@ -325,6 +342,9 @@ def run_transformations(df):
         p = str(val).split()
         return pd.Series([p[0], p[1], " ".join(p[2:4])]) if len(p) >= 3 else pd.Series(["", "", ""])
     df[["Metafield: custom.gender [single_line_text_field]", "Metafield: custom.category [single_line_text_field]", "Metafield: custom.sub_category [single_line_text_field]"]] = df["Type"].apply(split_t)
+
+    # Assign Size scale
+    df["Metafield: custom.size_scale [single_line_text_field]"] = df.apply(assign_size_scale, axis=1)
 
     # Auto-fill Inventory
     inventory_cols = ["Inventory Available: Defective", "Inventory Available: Marais Men Lux - Chadstone", "Inventory Available: Marais Men - Chadstone", "Inventory Available: Marais Men - QV", "Inventory Available: Marais Women - Bourke", "Inventory Available: Marais Women - QV", "Inventory Available: Photoshoot", "Inventory Available: Warehouse"]
@@ -388,11 +408,11 @@ if uploaded_file:
 
         validate_vendors(df)
         validate_duplicate_skus(df)
-        validate_size_scale(df)
+        
         validate_cost_currency_format(df)
 
         df = run_transformations(df)
-
+        validate_size_scale(df)
         validate_tags_and_type(df)
 
         columns_in_order = [
@@ -417,7 +437,20 @@ if uploaded_file:
                 df[col] = ""
 
         check_mandatory_empty_cells(df, columns_in_order)
-        total_errs = validate_data_and_log_errors(df)
+        errors = validate_data_and_log_errors(df)
+        if errors:
+            output = io.BytesIO()
+            pd.DataFrame(errors).to_excel(output, index=False)
+            output.seek(0)
+
+            st.download_button(
+                label="⬇️ Download Error Report",
+                data=output,
+                file_name="VALIDATION_ERRORS_REPORT.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+
+            st.stop()
 
         output_name = "processed.xlsx"
         df[columns_in_order].to_excel(output_name, index=False)
@@ -431,7 +464,7 @@ if uploaded_file:
             f,
             file_name=output_name
         )
-
+    total_errs=len(errors)
     st.info(f"Validation issues found: {total_errs}")
     if errors:
         output = io.BytesIO()
