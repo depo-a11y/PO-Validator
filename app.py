@@ -35,6 +35,7 @@ def get_excel_row(index):
     """Converts pandas index to Excel row number (1-based, plus 1 for header)."""
     return index + 2
 
+# Check Vendor is approved
 def validate_vendors(df):
     """Strictly validates Vendor names against the approved list (Case-Sensitive)."""
     approved_vendors = [
@@ -62,7 +63,7 @@ def validate_vendors(df):
         st.error("\n🛑 Vendor casing or naming error. Please fix before proceeding.")
         st.stop()   
     print("✅ Vendor validation passed.")
-
+# Check Size scale
 def validate_size_scale(df):
     """Validates Size Scale against the approved 7 values (Case-Sensitive)."""
     approved_scales = [
@@ -97,7 +98,7 @@ def validate_size_scale(df):
         st.error("\n🛑 Size Scale error detected. Process stopped.")
         st.stop()   
     print("✅ Size Scale validation passed.")
-
+# Check duplicate SKU's
 def validate_duplicate_skus(df):
     """Exits if duplicate Variant SKUs are found."""
     sku_col = "Variant SKU"
@@ -112,7 +113,7 @@ def validate_duplicate_skus(df):
             st.error("\n🛑 Duplicate SKUs detected. Process stopped.")
             st.stop()  
     print("✅ SKU uniqueness check passed.")
-
+# Check Tags and Type against expected
 def validate_tags_and_type(df, template_file="expected_tags.xlsx"):
     """Strictly validates Product Type and Tags against a template file."""
     if not os.path.exists(template_file):
@@ -150,7 +151,7 @@ def validate_tags_and_type(df, template_file="expected_tags.xlsx"):
     except Exception as e:
         st.error(f"❌ Fatal error reading {template_file}: {e}")
         st.stop() 
-
+# Check critical cells are not empty
 def check_mandatory_empty_cells(df, columns_to_check):
     optional_cols = [
         "Metafield: custom.made_in [single_line_text_field]",
@@ -191,7 +192,7 @@ def check_mandatory_empty_cells(df, columns_to_check):
 
     else:
         st.success("✅ No empty mandatory cells found")
-
+# Check Margin + Title Tag length
 def validate_data_and_log_errors(df):
     """Flags margin errors and title tag length issues."""
     errors = []
@@ -214,7 +215,7 @@ def validate_data_and_log_errors(df):
     if errors:
         pd.DataFrame(errors).to_excel("VALIDATION_ERRORS_REPORT.xlsx", index=False)
     return errors
-
+# Check Cost Curreny Format
 def validate_cost_currency_format(df):
 
     """Ensures Variant Cost Metafield is in format 'CURRENCY [space] VALUE' (e.g., EUR 150)."""
@@ -239,7 +240,7 @@ def validate_cost_currency_format(df):
         st.error("\n🛑 Cost currency format error. Please fix before proceeding.")
         st.stop() 
     print("✅ Cost currency format passed.")
-
+# Assign Size Scale
 def assign_size_scale(row):
     """
     Automatically assigns size scales based on Gender, Category, 
@@ -257,6 +258,10 @@ def assign_size_scale(row):
         size_num = float(numbers[0]) if numbers else None
     except:
         size_num = None
+
+    # Detect alpha sizes
+    alpha_sizes = ["XXS", "XS", "S", "M", "L", "XL", "XXL", "XXXL", "3XL", "4XL"]
+    is_alpha = any(a in size_raw for a in alpha_sizes)
 
     # 2. OVERRIDE: Global One Size check (If the literal size is OS)
     if size_raw in ["OS", "ONE SIZE", "U", "UNI", "NS"]:
@@ -287,7 +292,14 @@ def assign_size_scale(row):
 
     # 5. WOMEN'S SHOE LOGIC
     if gender == "WOMEN" and ("SHOE" in category or "FOOTWEAR" in category or "SHOE" in sub_cat):
-        # We can add Women's US/EU ranges here later if needed
+        if size_num is not None:
+
+            if 34 <= size_num <= 42:
+                return "WOMEN SHOES EUROPE"
+
+            if 4 <= size_num <= 12:
+                return "SHOES US WOMEN"
+
         return "WOMEN SHOES EUROPE"
 
     # 6. JEANS LOGIC
@@ -297,11 +309,30 @@ def assign_size_scale(row):
     # 7. CLOTHING LOGIC (Fallback to IT/FR for now)
     clothing_keywords = ["CLOTHING", "KNITWEAR", "OUTERWEAR", "READY TO WEAR"]
     if any(k in category for k in clothing_keywords) or any(k in sub_cat for k in clothing_keywords):
+
+        # Alpha sizes always win
+        if is_alpha:
+            return "CLOTHING MEN'S STANDARD" if gender == "MEN" else "CLOTHING WOMEN’S STANDARD"
+
+        if size_num is not None:
+
+            # WOMEN EU clothing
+            if gender == "WOMEN" and 32 <= size_num <= 50:
+                return "WOMEN CLOTHING EUROPE"
+
+            # MEN EU clothing
+            if gender == "MEN" and 44 <= size_num <= 60:
+                return "MEN CLOTHING EUROPE"
+
+            # Waist sizes (jeans-style numbers like 28–40)
+            if 26 <= size_num <= 40:
+                return "MEN'S JEANS" if gender == "MEN" else "WOMEN'S JEANS"
+
         return "CLOTHING MEN'S STANDARD" if gender == "MEN" else "CLOTHING WOMEN’S STANDARD"
 
     # 8. FINAL FALLBACK
     return "ONE_SIZE"
-
+# Generate tags, gender, category, sub-category, size scale, brand colour id, autofills inventory, syncs manufacture codes across metafields, variant metafields; season, barcode and sale/new, generate local market price
 def run_transformations(df):
 
     """Handles formatting, SKU/Season/Sale syncs, and Inventory auto-fill."""
@@ -336,8 +367,7 @@ def run_transformations(df):
     # Apply the automation
     df["Tags"] = df.apply(generate_all_tags, axis=1)
 
-    # ... (keep your existing sync codes and price logic) ...
-    
+    # Split Type into FF categories
     def split_t(val):
         p = str(val).split()
         return pd.Series([p[0], p[1], " ".join(p[2:4])]) if len(p) >= 3 else pd.Series(["", "", ""])
