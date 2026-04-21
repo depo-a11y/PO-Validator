@@ -42,13 +42,12 @@ def validate_vendors(df):
         "ALEXANDER MCQUEEN", "ALAIA", "AMI PARIS", "AMIRI", "AUTRY", "BALENCIAGA", 
         "BALMAIN", "CASABLANCA", "NOIR KEI NINOMIYA", "CFCL", "CHLOE", "DIESEL", 
         "DOUBLET", "DOVER STREET MARKET", "ENTIRE STUDIOS", "EGONLAB", 
-        "FENG CHEN WANG", "FEAR OF GOD", "FEAR OF GOD ESSENTIALS", "JIL SANDER", 
-        "KENZO", "KIDSUPER", "LOEWE", "LEMAIRE", "MARK GONG", "MAISON MARGIELA", 
+        "FENG CHEN WANG", "FEAR OF GOD", "FEAR OF GOD ESSENTIALS", "JIL SANDER","JUNNJ" 
+        "KENZO", "KIDSUPER", "LOEWE", "LEMAIRE", "MAISON MARGIELA", 
         "MAISON MIHARA YASUHIRO", "PALM ANGELS", "POST ARCHIVE FACTION", 
-        "REPRESENT", "REMAGINER", "RHUDE", "RICK OWENS", "RICK OWENS x Moncler", 
-        "RICK OWENS DRKSHDW", "SACAI", "STONE ISLAND", "TAION", "THUG CLUB", 
+        "REPRESENT", "REMAGINE", "RHUDE", "RICK OWENS", "RICK OWENS DRKSHDW", "SACAI", "STONE ISLAND", "TAION", "THUG CLUB", 
         "VOWELS", "WE11DONE", "WILLY CHAVARRIA", "WOOYOUNGMI", "UNDERCOVER", 
-        "VEJA", "WALES BONNER", "SONG FOR THE MUTE", "Y-3"
+        "VEJA", "WALES BONNER", "SONG FOR THE MUTE", "Y-3","WALD","HOUSE OF ERRORS","MM6"
     ]
     
     print("🏢 Validating Vendor names (Case-Sensitive)...")
@@ -91,11 +90,11 @@ def validate_size_scale(df):
     for idx, row in df.iterrows():
         actual_scale = str(row.get(col_name, "")).strip()
         if actual_scale not in approved_scales:
-            print(f"❌ INVALID SIZE SCALE - Row {get_excel_row(idx)}: '{actual_scale}' (Must be: {approved_scales})")
+            #print(f"❌ INVALID SIZE SCALE - Row {get_excel_row(idx)}: '{actual_scale}' (Must be: {approved_scales})")
             error_found = True
             
     if error_found:
-        st.error("\n🛑 Size Scale error detected. Process stopped.")
+        st.error(f"❌ INVALID SIZE SCALE - Row {get_excel_row(idx)}: '{actual_scale}' (Must be: {approved_scales})")
         st.stop()   
     print("✅ Size Scale validation passed.")
 # Check duplicate SKU's
@@ -318,11 +317,11 @@ def assign_size_scale(row):
 
             # WOMEN EU clothing
             if gender == "WOMEN" and 32 <= size_num <= 50:
-                return "WOMEN CLOTHING EUROPE"
+                return "CLOTHING WOMEN’S IT/FR"
 
             # MEN EU clothing
             if gender == "MEN" and 44 <= size_num <= 60:
-                return "MEN CLOTHING EUROPE"
+                return "CLOTHING MEN'S IT/FR"
 
             # Waist sizes (jeans-style numbers like 28–40)
             if 26 <= size_num <= 40:
