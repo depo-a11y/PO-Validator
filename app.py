@@ -456,8 +456,7 @@ if uploaded_file:
             "Metafield: custom.gender [single_line_text_field]", "Metafield: custom.category [single_line_text_field]", 
             "Metafield: custom.sub_category [single_line_text_field]", "Metafield: custom.size_scale [single_line_text_field]", 
             "Metafield: custom.local_market_price [single_line_text_field]", "Metafield: custom.made_in [single_line_text_field]", 
-            "Metafield: custom.new_sale [single_line_text_field]", "Variant Metafield: custom.new_sale [single_line_text_field]", 
-            "FULLCODE", "Wholesale Price", "Variant Metafield: Variant.cost_price [single_line_text_field]",
+            "Metafield: custom.new_sale [single_line_text_field]", "Variant Metafield: custom.new_sale [single_line_text_field]", "Variant Metafield: Variant.cost_price [single_line_text_field]",
             "Variant Metafield: Variant.gtin [single_line_text_field]", "Variant HS Code", "Metafield: title_tag [string]"
         ]
 
