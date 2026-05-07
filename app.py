@@ -202,7 +202,7 @@ def validate_data_and_log_errors(df):
             cost = float(str(row.get("Variant Cost", 0)).replace(',', '').replace('$', ''))
             vendor_lower = str(row.get("Vendor", "")).strip().lower()
             if cost > 0:
-                threshold = 2.2 if vendor_lower in ["veja", "taion","trudon","creed","dior"] else 2.5
+                threshold = 2.2 if vendor_lower in ["veja", "taion","trudon","creed","dior","represent"] else 2.5
                 if (price / cost) < threshold:
                     errors.append({"Row": get_excel_row(idx), "SKU": row.get("Variant SKU"), "Type": "LOW MARGIN", "Details": f"{round(price/cost, 2)}x"})
         except: pass
