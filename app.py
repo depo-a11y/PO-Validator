@@ -47,7 +47,7 @@ def validate_vendors(df):
         "MAISON MIHARA YASUHIRO", "PALM ANGELS", "POST ARCHIVE FACTION", 
         "REPRESENT", "REMAGINE", "RHUDE", "RICK OWENS", "RICK OWENS DRKSHDW", "SACAI", "STONE ISLAND", "TAION", "THUG CLUB", 
         "VOWELS", "WE11DONE", "WILLY CHAVARRIA", "WOOYOUNGMI", "UNDERCOVER", 
-        "VEJA", "WALES BONNER", "SONG FOR THE MUTE", "Y-3","WALD","HOUSE OF ERRORS","MM6"
+        "VEJA", "WALES BONNER", "SONG FOR THE MUTE", "Y-3","WALD","HOUSE OF ERRORS","MM6 Maison Margiela"
     ]
     
     print("🏢 Validating Vendor names (Case-Sensitive)...")
