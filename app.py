@@ -405,9 +405,11 @@ def run_transformations(df):
     if m_code in df.columns and "Option2 Value" in df.columns:
         df["FULLCODE"] = (df[m_code].astype(str) + df["Option2 Value"].astype(str)).str.replace(" ", "", regex=False)
 
-    # Local Price Calculation
-    prices = df["Variant Price"].astype(str).str.replace(r'[^\d.]', '', regex=True)
-    df["Metafield: custom.local_market_price [single_line_text_field]"] = (pd.to_numeric(prices, errors='coerce') * 1.15).round(2)
+    # Local Price Calculation — LMP standard = 1.35 × Compare At Price (fallback: Variant Price)
+    _lmp_price = pd.to_numeric(df["Variant Price"].astype(str).str.replace(r'[^\d.]', '', regex=True), errors='coerce')
+    _lmp_compare = pd.to_numeric(df.get("Variant Compare At Price", pd.Series(index=df.index, dtype="object")).astype(str).str.replace(r'[^\d.]', '', regex=True), errors='coerce')
+    _lmp_base = _lmp_compare.where(_lmp_compare.notna() & (_lmp_compare > 0), _lmp_price)
+    df["Metafield: custom.local_market_price [single_line_text_field]"] = (_lmp_base * 1.35).round(2)
 
     df.rename(columns={"HS Code": "Variant HS Code"}, inplace=True)
     return df
