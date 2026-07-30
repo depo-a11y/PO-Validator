@@ -156,8 +156,8 @@ def check_mandatory_empty_cells(df, columns_to_check):
         "Metafield: custom.made_in [single_line_text_field]",
         "Variant Metafield: Variant.gtin [single_line_text_field]",
         "Variant HS Code",
-        "Inventory Available: Defective", "Inventory Available: Marais Men Lux - Chadstone", 
-        "Inventory Available: Marais Men - Chadstone", "Inventory Available: Marais Men - QV", 
+        "Inventory Available: Defective",
+        "Inventory Available: Marais Men - Chadstone", "Inventory Available: Marais Men - QV",
         "Inventory Available: Marais Women - Bourke", "Inventory Available: Marais Women - QV", 
         "Inventory Available: Photoshoot", "Inventory Available: Warehouse", 
         "Variant Inventory Tracker", "Variant Metafield: Variant.cost_price [single_line_text_field]"
@@ -381,7 +381,7 @@ def run_transformations(df):
     df["Metafield: custom.size_scale [single_line_text_field]"] = df.apply(assign_size_scale, axis=1)
 
     # Auto-fill Inventory
-    inventory_cols = ["Inventory Available: Defective", "Inventory Available: Marais Men Lux - Chadstone", "Inventory Available: Marais Men - Chadstone", "Inventory Available: Marais Men - QV", "Inventory Available: Marais Women - Bourke", "Inventory Available: Marais Women - QV", "Inventory Available: Photoshoot", "Inventory Available: Warehouse"]
+    inventory_cols = ["Inventory Available: Defective", "Inventory Available: Marais Men - Chadstone", "Inventory Available: Marais Men - QV", "Inventory Available: Marais Women - Bourke", "Inventory Available: Marais Women - QV", "Inventory Available: Photoshoot", "Inventory Available: Warehouse"]
     for col in inventory_cols: df[col] = 0
     df["Variant Inventory Tracker"] = "shopify"
 
@@ -433,13 +433,6 @@ if uploaded_file:
 
     # ---------------- RUN PIPELINE ----------------
 
-    if "Inventory Available: Marais Women - Chadstone" in df.columns:
-        df.rename(
-            columns={"Inventory Available: Marais Women - Chadstone":
-                     "Inventory Available: Marais Men Lux - Chadstone"},
-            inplace=True
-        )
-
     with st.spinner("Running validations..."):
 
         validate_vendors(df)
@@ -454,8 +447,8 @@ if uploaded_file:
         columns_in_order = [
            "Command", "Title", "Vendor", "Type", "Tags", "Body HTML", "Status", "Published", "Option1 Name", "Option1 Value", 
             "Option2 Name", "Option2 Value", "Variant SKU", "Variant Barcode", "Variant Price", "Variant Compare At Price", "Variant Cost",
-            "Inventory Available: Defective", "Inventory Available: Marais Men Lux - Chadstone", "Inventory Available: Marais Men - Chadstone", 
-            "Inventory Available: Marais Men - QV", "Inventory Available: Marais Women - Bourke", "Inventory Available: Marais Women - QV", 
+            "Inventory Available: Defective", "Inventory Available: Marais Men - Chadstone",
+            "Inventory Available: Marais Men - QV", "Inventory Available: Marais Women - Bourke", "Inventory Available: Marais Women - QV",
             "Inventory Available: Photoshoot", "Inventory Available: Warehouse", "Variant Inventory Tracker", 
             "Metafield: my_fields.manufacture_code", "Metafield: my_fields.supplier_code [single_line_text_field]", 
             "Variant Metafield:custom.manufacture_code[single_line_text_field]", "Metafield: custom.brand_color_id [single_line_text_field]", 
