@@ -5,7 +5,29 @@ import re
 from pathlib import Path
 
 # Shared tag template lives at the po-validator repo root (this file sits in builders/)
-EXPECTED_TAGS = str(Path(__file__).resolve().parent.parent / "expected_tags.xlsx")
+REPO_ROOT = Path(__file__).resolve().parent.parent
+EXPECTED_TAGS = str(REPO_ROOT / "expected_tags.xlsx")
+
+sys.path.insert(0, str(REPO_ROOT))
+from typo_check import validate_typos
+
+
+def report_typos(df):
+    """Warns about likely typos in product copy. Never exits: advisory only."""
+    print("📝 Checking product copy for typos...")
+    try:
+        rows = validate_typos(df)
+    except FileNotFoundError as e:
+        print(f"⚠️ Typo check skipped: {e}")
+        return []
+    if not rows:
+        print("✅ No typos detected.")
+        return []
+    for r in rows:
+        print(f"📝 POSSIBLE TYPO - Row {r['Row']} | {r['Column']}: {r['Details']}")
+    print(f"⚠️ {len(rows)} possible typo(s). Fix the sheet, or add the word "
+          "to typo_allowlist.txt if it is correct.")
+    return rows
 
 def get_excel_row(index):
     """Converts pandas index to Excel row number (1-based, plus 1 for header)."""
@@ -346,6 +368,7 @@ for col in columns_in_order:
     if col not in df.columns: df[col] = ""
 
 check_mandatory_empty_cells(df, columns_in_order)
+report_typos(df)
 total_errs = validate_data_and_log_errors(df)
 
 output_name = f"{user_input}_ordered.xlsx"

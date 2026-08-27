@@ -4,6 +4,8 @@ import os
 import re
 import io
 
+from typo_check import validate_typos
+
 st.set_page_config(page_title="Excel Validator", layout="wide")
 st.title("📦 Excel Product Validator")
 
@@ -150,6 +152,37 @@ def validate_tags_and_type(df, template_file="expected_tags.xlsx"):
     except Exception as e:
         st.error(f"❌ Fatal error reading {template_file}: {e}")
         st.stop() 
+# Check product copy for misspellings (advisory: never stops the import)
+def report_typos(df):
+    """Surfaces likely typos in Title, Body HTML, colourway and SEO title.
+
+    Deliberately does not call st.stop(). A wrongly flagged colour name must
+    not block a PO import, so this warns and lets the buyer decide.
+    """
+    print("📝 Checking product copy for typos...")
+    try:
+        rows = validate_typos(df)
+    except FileNotFoundError as e:
+        st.warning(f"⚠️ Typo check skipped: {e}")
+        print(f"WARNING: typo check skipped: {e}")
+        return []
+
+    if not rows:
+        print("✅ No typos detected.")
+        st.success("✅ No typos detected in product copy.")
+        return []
+
+    for r in rows:
+        print(f"📝 POSSIBLE TYPO - Row {r['Row']} | {r['Column']}: {r['Details']}")
+    st.warning(
+        f"📝 {len(rows)} possible typo(s) in product copy. "
+        "Review these before importing, then either fix the sheet or add the "
+        "word to typo_allowlist.txt."
+    )
+    st.dataframe(pd.DataFrame(rows)[["Row", "Column", "Word", "Suggestion", "SKU"]],
+                 use_container_width=True)
+    return rows
+
 # Check critical cells are not empty
 def check_mandatory_empty_cells(df, columns_to_check):
     optional_cols = [
@@ -465,6 +498,7 @@ if uploaded_file:
                 df[col] = ""
 
         check_mandatory_empty_cells(df, columns_in_order)
+        report_typos(df)
         errors = validate_data_and_log_errors(df)
         if errors:
             output = io.BytesIO()
