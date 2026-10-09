@@ -49,7 +49,7 @@ def validate_vendors(df):
         "MAISON MIHARA YASUHIRO", "PALM ANGELS", "POST ARCHIVE FACTION", 
         "REPRESENT", "REMAGINE", "RHUDE", "RICK OWENS", "RICK OWENS DRKSHDW", "SACAI", "STONE ISLAND", "TAION", "THUG CLUB", 
         "VOWELS", "WE11DONE", "WILLY CHAVARRIA", "WOOYOUNGMI", "UNDERCOVER",
-        "VEJA", "WALES BONNER", "SONG FOR THE MUTE", "Y-3","WALD","HOUSE OF ERRORS","MM6 MAISON MARGIELA","UGG","HOKA"
+        "VEJA", "WALES BONNER", "SONG FOR THE MUTE", "Y-3","WALD","HOUSE OF ERRORS","MM6 MAISON MARGIELA","UGG","HOKA","PHANTACI"
     ]
     
     print("🏢 Validating Vendor names (Case-Sensitive)...")
@@ -335,7 +335,7 @@ def assign_size_scale(row):
                 return "WOMEN SHOES EUROPE"
 
             if 4 <= size_num <= 12:
-                return "SHOES US WOMEN"
+                return "WOMEN SHOES US"
 
         return "WOMEN SHOES EUROPE"
 
