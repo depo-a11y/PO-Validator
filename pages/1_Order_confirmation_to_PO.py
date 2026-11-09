@@ -27,6 +27,21 @@ XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 FILL = {"FAIL": "#FFC7CE", "WARN": "#FFEB9C", "PASS": "#C6EFCE"}
 ORDER = {"FAIL": 0, "WARN": 1, "PASS": 2, "INFO": 3}
 UPLOAD = "Upload a brand .yaml file"
+AI_BOX = "Read the OC with AI (for a layout the tool does not know)"
+AI_HELP = ("Tick this only when this brand's OC comes back with 'no order confirmations found' because its layout "
+           "changed. The PDF is sent to Anthropic's AI service, which reads it; the same checks then decide whether "
+           "the reading is used. It takes a minute or more and costs up to a few dollars for a long OC.")
+NOT_LISTED = """The tool needs a brand config before it can read that brand's order confirmations. Colwyn makes it \
+from example.yaml. Send him one of the brand's order confirmations and ask for one. It holds:
+
+- the vendor, exactly as on the approved vendor list
+- the season
+- the SKU prefix for new products
+- the cost multiplier and the cost currency
+- the margin floor
+- `adapter: ai`, so the brand's OCs are read by AI
+- `oc_supplier`: the company name printed on the brand's OCs
+- `join_key` and `colour_codes`: how the store's manufacture code is built from an OC line"""
 S = st.session_state
 
 
@@ -171,6 +186,8 @@ with col1:
         st.caption(f"Brands saved in the app are hidden: {hidden_why}. You can still upload a brand .yaml file.")
         if offer_login and st.button("Sign in to use the saved brands"):
             st.login()
+    with st.expander("My brand is not in the list"):
+        st.markdown(NOT_LISTED)
 with col2:
     up = st.file_uploader("Catalog export (Matrixify Products CSV)", type=["csv"], key="w_catalog",
                           help=f'Made in Matrixify with the export preset "{catm.EXPORT_PRESET}". '
@@ -197,13 +214,20 @@ if cfg:
         note = service.plan_history(cfg)[1]
         (st.warning if note["Result"] == "WARN" else st.caption)(f"Past season POs: {note['Detail'].rstrip('.')}.")
 
+use_ai = False
+if cfg and cfg["adapter"] == "ai":
+    st.caption("This brand's order confirmations are always read by AI. Check each line's sizes against the PDF.")
+elif cfg:
+    use_ai = st.checkbox(AI_BOX, value=False, key="w_ai", help=AI_HELP)
+
 need = [n for n, ok in (("a brand", cfg), ("the catalog export", S.get("catalog")), ("the order confirmation", oc_up))
         if not ok]
 if need:
     st.caption("To build the draft, add " + and_join(need) + ".")
 if st.button("Build draft PO", type="primary", disabled=bool(need)):
     S.pop("draft", None)
-    with st.spinner("Reading the order confirmation and building the draft. This can take a minute."):
+    slow = " An AI read can take a few minutes." if use_ai or cfg["adapter"] == "ai" else ""
+    with st.spinner("Reading the order confirmation and building the draft. This can take a minute." + slow):
         try:
             with tempfile.TemporaryDirectory(prefix="oc-page-") as tmp:
                 hist_paths = [save(os.path.join(tmp, "history"), safe_name(f.name), f.getvalue())
@@ -211,7 +235,7 @@ if st.button("Build draft PO", type="primary", disabled=bool(need)):
                 po, review, checks = service.draft(
                     save(tmp, "oc.pdf", oc_up.getvalue()), save(tmp, "catalog.csv", S["catalog"][1]), cfg,
                     cart_path=save(tmp, "cart.xlsx", cart_up.getvalue()) if cart_up else None,
-                    history_paths=hist_paths or None)
+                    history_paths=hist_paths or None, reader="ai" if use_ai else None)
             S["draft"] = dict(po=po, review=review, checks=checks, file=service.file_prefix(cfg) + "PO-draft.xlsx",
                               made_from=f"{oc_up.name} and {S['catalog'][0]}, brand config {cfg['_path']}")
         except Exception as e:
@@ -221,6 +245,9 @@ if st.button("Build draft PO", type="primary", disabled=bool(need)):
 if S.get("draft"):
     d = S["draft"]
     st.caption(f"Draft built from {d['made_from']}.")
+    rd = next((c for c in d["checks"] if c["Check"] == service.READER_CHECK), None)
+    if rd:
+        (st.warning if rd["Result"] == "WARN" else st.caption)(f"Order confirmation {rd['Detail']}")
     if d["po"] is None:
         st.error("No draft was made. These problems are in the inputs, not in the sheet, so editing a draft "
                  "would not fix them. Check you picked the right brand and files. If you did, send Colwyn "

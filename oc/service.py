@@ -1,6 +1,6 @@
 """The OC steps for a caller with no command line (the Streamlit page), UI-free.
 
-    draft(oc_path, catalog_path, brand_cfg, cart_path=None, history_paths=None)
+    draft(oc_path, catalog_path, brand_cfg, cart_path=None, history_paths=None, reader=None)
         -> (po_xlsx_bytes | None, review_df, checks)
     finalize(po_path, catalog_path, brand_cfg, when=None) -> (zip_bytes | None, checks, gate_errors_df)
 
@@ -23,6 +23,11 @@ Brands saved in the app's secrets are offered only to a signed-in viewer on the
 
 draft returns no workbook when a FAIL is one a reviewer cannot fix in the sheet
 (see FIXABLE_IN_SHEET). finalize is all or nothing: any FAIL, no zip.
+
+The OC reader is the brand config's `adapter` (otb or ai); `reader="ai"` forces the AI
+reader for an otb brand whose layout changed. Nothing falls back from one reader to the
+other on its own. Either way the Checks carry an "Order confirmation reader" row: INFO
+for otb, WARN for AI (model, time, cost, and the instruction to check sizes by eye).
 """
 import collections
 import csv
@@ -58,6 +63,11 @@ FIXABLE_IN_SHEET = (
 
 ZIP_MEMBERS = finalizem.OUTPUTS + ["finalize-checks.xlsx"]
 HISTORY_CHECK = "Past season POs (retail price history)"
+READER_CHECK = "Order confirmation reader"
+GATE_CHECK = "Order confirmation passes its gates (parsed = printed)"
+AI_HINT = "If this is the right brand and its layout changed, tick 'Read the OC with AI' and build again."
+OTB_READER = ("read by the built-in reader for the OTB layout (Maison Margiela, MM6), which reads the PDF's text "
+              "by position; no AI was used")
 RED_WARNING = "Retail prices for new styles will mostly come back red."
 
 SEASON_RE = re.compile(r"\b(S/S|F/W|A/W)\s*(\d{2})\b")
@@ -81,6 +91,30 @@ def adapter(brand_cfg):
         from .adapters import otb
         return otb
     raise brandm.BrandError(f"unknown adapter '{brand_cfg['adapter']}'")
+
+
+def read_oc(oc_path, brand_cfg, reader=None, ai_factory=None):
+    """The OC as docs, by the config's reader or `reader="ai"`. -> (docs | None, checks, info).
+
+    docs None means a FAIL among the checks. info is the AI reader's (model, tokens, seconds, cost and its raw
+    answer), None for otb. `ai_factory(key) -> client` replaces the Anthropic client (tests)."""
+    if (reader or brand_cfg["adapter"]) == "ai":
+        from .adapters import ai
+        try:
+            docs, warns, info = ai.read(oc_path, brand_cfg, factory=ai_factory)
+        except ai.ReadRefused as e:
+            return None, [ai.reader_check(e.info, refused=True)] + e.checks, e.info
+        return docs, [ai.reader_check(info)] + warns, info
+    row = _check(READER_CHECK, "INFO", OTB_READER)
+    try:
+        docs = adapter(brand_cfg).parse_checked(oc_path)
+    except brandm.BrandError as e:
+        return None, [_check("Brand config names a known OC layout", "FAIL", str(e))], None
+    except Exception as e:
+        problems = getattr(e, "problems", None) or [f"{type(e).__name__}: {e}"]
+        return None, [row] + [_check(GATE_CHECK, "FAIL", f"{p}. {AI_HINT}" if p == "no order confirmations found" else p)
+                              for p in problems], None
+    return docs, [row], None
 
 
 def cart_supported():
@@ -236,7 +270,7 @@ def secret_brands_for(table, viewers, email):
 
 
 # ---- step 1 --------------------------------------------------------------------
-def draft(oc_path, catalog_path, brand_cfg, cart_path=None, history_paths=None):
+def draft(oc_path, catalog_path, brand_cfg, cart_path=None, history_paths=None, reader=None, ai_factory=None):
     """OC + catalog (+ linesheet, + past POs) -> (draft PO xlsx bytes | None, Review DataFrame, checks)."""
     from . import draft as draftm
     empty = pd.DataFrame()
@@ -253,15 +287,14 @@ def draft(oc_path, catalog_path, brand_cfg, cart_path=None, history_paths=None):
         return None, empty, pre + [_check("Catalog export has the columns the tool needs", "FAIL", str(e))]
     except (UnicodeDecodeError, csv.Error) as e:
         return None, empty, pre + [_check("Catalog export is a Matrixify CSV", "FAIL", f"{type(e).__name__}: {e}")]
-    try:
-        ad = adapter(brand_cfg)
-        docs = ad.parse_checked(oc_path)
-    except brandm.BrandError as e:
-        return None, empty, pre + [_check("Brand config names a known OC layout", "FAIL", str(e))]
-    except Exception as e:
-        problems = getattr(e, "problems", None) or [f"{type(e).__name__}: {e}"]
-        return None, empty, pre + [_check("Order confirmation passes its gates (parsed = printed)", "FAIL", p)
-                                   for p in problems]
+    docs, rchecks, _ = read_oc(oc_path, brand_cfg, reader, ai_factory)
+    pre += rchecks
+    if docs is None:
+        return None, empty, pre
+    colours = brandm.unmapped_colours(brand_cfg, docs)
+    if colours:
+        return None, empty, pre + [_check("Every OC colour has a code in the brand config (colour_codes)", "FAIL",
+                                          str(brandm.ColourCodeError(colours)))]
     cart = None
     if cart_path:
         try:

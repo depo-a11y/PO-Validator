@@ -5,3 +5,4 @@ pytest
 streamlit
 Authlib>=1.3.2
 pyyaml
+anthropic>=2.6.0

@@ -2,7 +2,16 @@
 # *.local.yaml is gitignored: cost multipliers, history paths and price data are
 # commercial and must never be committed while this repo is public.
 vendor: EXAMPLE BRAND          # exactly as in validator_core.APPROVED_VENDORS
-adapter: otb                   # OC parser in oc/adapters/
+adapter: otb                   # OC reader: otb (built-in, Maison Margiela/MM6 layout) or ai (any layout, read
+                               # by Claude; needs oc_supplier and join_key below, and ANTHROPIC_API_KEY in the
+                               # app's secrets)
+# oc_supplier: Example Brand Ltd   # ai: the company printed as the issuer on the brand's OCs (a list if it varies);
+                               # a PDF from any other supplier is refused
+# join_key: "{style} {colour_code}"  # how the store's manufacture_code is built from an OC line, from {style},
+                               # {fabric}, {colour}, {colour_code}. Default (otb): "{style}{fabric} {colour}"
+# colour_codes:                # {colour_code}: OC colour (any case) -> store colour code; an OC colour
+#   GREY: GR                   # missing here stops the draft and is named
+#   BLACK: BK
 season: S/S 27                 # Marais season label (slash form)
 sku_prefix: EXSS27             # new SKUs continue after the highest existing one
 sku_digits: 3

@@ -31,7 +31,8 @@ Pure Python, files in and files out. Nothing here talks to Shopify, Matrixify or
 
 **Inputs**
 
-- OC PDF: one adapter per layout in `adapters/` (`otb`: Maison Margiela, MM6). Its three gates hard-fail.
+- OC PDF: read by the brand config's `adapter`. `otb` (Maison Margiela, MM6) reads the text layer by position;
+  its three gates hard-fail. `ai` reads any layout (see "AI reader" below) and is held to the same gates.
 - Catalog: a Matrixify Products export (CSV, UTF-8) for the brand's vendors, all statuses, with variants,
   `Variant Cost`, `Variant Inventory Qty`, `Variant Country of Origin` and metafields in `my_fields`, `custom` and
   `global`. Required columns are `catalog.REQUIRED`, including `custom.product_season` (the rollback restores it)
@@ -130,3 +131,44 @@ a season in its file name, and they are read newest first. When past POs are mis
 run, and the draft's first check says retail prices will mostly come back red.
 
 `.streamlit/secrets.toml` is gitignored. Never commit it.
+
+## AI reader
+
+    python -m oc read OC.pdf --brand-config brand.yaml [--reader ai] [--json read.json]
+    python -m oc draft ... --reader ai
+
+`oc/adapters/ai.py` sends the PDF to the Anthropic Messages API (`claude-opus-5-5`, effort high, streamed, with
+server-side refusal fallback) and gets JSON back under a strict schema. A brand with `adapter: ai` is always read
+this way; `--reader ai` (the page's "Read the OC with AI" box) forces it for an otb brand whose layout changed.
+Nothing falls back from one reader to the other on its own.
+
+The model transcribes and Python decides. Every number comes back as the printed text and is parsed here:
+money needs a 2-digit decimal part or is a bare integer (`€ 1,488.60`, `1.234,56`, `EUR 100,00`, `100`), and
+`1,488` or `12.5` is refused, never guessed. The docs have the otb shape and pass `otb.gate_problems` unchanged
+(sizes sum to the line, qty x price = line value, lines sum to the printed totals). On top of that, a read is
+refused when: a line has no sizes (a proforma prints none: upload the order confirmation), the currency is not the
+brand's `cost_currency`, the issuer is not one of the brand's `oc_supplier` names (case and punctuation ignored),
+a number does not parse, or (when the PDF has a text layer) a line's style, price or line value, or a document's
+number or totals, is not in the PDF text. Bold text drawn twice (`PPRROOFFOORRMMAA`) is matched too. A PDF with
+no text layer is a WARN: nothing could be cross-checked. A document the AI calls anything but an order
+confirmation is a WARN.
+
+What no gate catches: a quantity read under the wrong size. So every value from an AI read is source
+`OC (AI read)` in the Review sheet, shaded amber (never green), its Why reads "read by AI from <doc> line <n>",
+and the Checks carry an "Order confirmation reader" WARN with the model, seconds and cost, telling the reviewer to
+check each line's sizes against the PDF. The otb reader's row is an INFO.
+
+The key is `ANTHROPIC_API_KEY`: the environment first, else the app's Streamlit secrets (top level of
+`.streamlit/secrets.toml`, see `secrets.example.toml`). It is never logged or shown; with no key the read is a
+FAIL saying to ask Colwyn. SDK errors become plain FAILs (key refused / busy, try again / request rejected),
+as do a refusal, the 64,000-token output limit and an answer that is not JSON. A refused read still reports what
+it cost.
+
+An `ai` brand config needs `oc_supplier` and `join_key`; the config fails to load without them, saying what each
+is. `join_key` builds the store's manufacture_code from an OC line: a template over `{style}`, `{fabric}`,
+`{colour}` and `{colour_code}`. The default (otb) is `{style}{fabric} {colour}`, today's Margiela rule. A brand
+whose store code ends in a short colour code where its OC prints the colour name uses `{style} {colour_code}` with
+`colour_codes: {GREY: GR, ...}`; an OC colour missing from that table stops the draft, naming every one.
+
+Tests run offline against a fake client and a synthetic PDF (`tests/test_oc_ai.py`). `OC_AI_LIVE=1` runs the one
+real-API test, which costs money.

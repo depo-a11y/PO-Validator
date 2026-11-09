@@ -11,16 +11,21 @@ always the OC's; a cart wholesale that differs is reported, never used.
 """
 import collections
 
+from .brand import ColourCodeError, code_for, unmapped_colours
 from .poxlsx import PO_HEADER, CODE, MADE_IN, SEASON, NEW_SALE, COST_PRICE, TITLE_TAG, review_row
-from .resolve import Resolver, COLOUR, split_code, worse
-from .util import join_key, norm_size, sort_sizes, size_key, fmt_eur, slug
+from .resolve import Resolver, COLOUR, AI_OC, split_code, worse
+from .util import norm_size, sort_sizes, size_key, fmt_eur, slug
 
 
-def oc_lines(docs, gender_of=None):
+def oc_lines(docs, brand=None):
+    """One dict per OC line, keyed by `code`: the store's manufacture_code by the brand's join_key."""
+    missing = unmapped_colours(brand, docs)
+    if missing:
+        raise ColourCodeError(missing)
     out = []
     for d in docs:
         for l in d["lines"]:
-            code = join_key(l["style"], l["fabric"], l["colour"])
+            code = code_for(brand, l["style"], l["fabric"], l["colour"])
             sizes = {}
             for s, q in l["sizes"].items():
                 sizes[norm_size(s)] = sizes.get(norm_size(s), 0) + q
@@ -30,17 +35,22 @@ def oc_lines(docs, gender_of=None):
 
 
 def build(docs, brand, catalog, history, tag_lookup, cart=None):
-    lines = oc_lines(docs)
+    lines = oc_lines(docs, brand)
     dup = [c for c, n in collections.Counter(l["code"] for l in lines).items() if n > 1]
     R = Resolver(brand, catalog, history, tag_lookup, lines, cart)
     rows, cells, checks = [], [], []
+    cur = {}
 
     def cell(row, key, value, source, detail):
+        l = cur.get("line")
+        if source == "OC" and l is not None and l.get("reader") == "ai":
+            source, detail = AI_OC, f"read by AI from {l['doc']} line {l['line_no']}; {detail}"
         row[key] = value
         cells.append((len(rows), key, value, source, detail))
 
     pending = []
     for l in lines:
+        cur["line"] = l
         code, eur = l["code"], l["price"]
         product, note, cands = catalog.match(code)
         ambiguous = note.startswith("AMBIGUOUS")
@@ -111,6 +121,7 @@ def build(docs, brand, catalog, history, tag_lookup, cart=None):
     _dedupe_titles(pending, R, brand, checks)
     for n in pending:
         l, code, eur = n["l"], n["code"], n["eur"]
+        cur["line"] = l
         title, ti_src, ti_why = n["title"]
         ptype, t_src, t_why = n["ptype"]
         fam, f_src, f_why = n["fam"]

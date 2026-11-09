@@ -14,13 +14,14 @@ from openpyxl.utils import get_column_letter
 from .draft import oc_lines, cart_checks
 from .poxlsx import (FILLS, CODE, MADE_IN, COST_PRICE, TITLE_TAG, SEASON, NEW_SALE, PO_FORMULA,
                      resolve_formula, write_table, review_row, clean_text, as_text)
-from .resolve import Resolver, COLOUR
+from .resolve import Resolver, COLOUR, AI_OC
 from .util import blank, norm_code, norm_size, fmt_eur, money, slug
 
 
 def run(po_path, docs, brand, catalog, history, tag_lookup, out, price_overrides=None, cart=None):
     price_overrides = {norm_code(k): v for k, v in (price_overrides or {}).items()}
-    lines = oc_lines(docs)
+    lines = oc_lines(docs, brand)
+    by_code = {l["code"]: l for l in lines}
     R = Resolver(brand, catalog, history, tag_lookup, lines, cart)
     wb = openpyxl.load_workbook(po_path)
     ws = wb.worksheets[0]
@@ -64,10 +65,12 @@ def run(po_path, docs, brand, catalog, history, tag_lookup, out, price_overrides
                 raise SystemExit(f"--set-price {code}={eur:g} does not match the OC (EUR {oc_eur.get(code)})")
             qty = money(get(r, "Order Qty")) or 0
             why = f"OC confirms EUR {eur:g}; sheet had EUR {money(get(r, 'Wholesale Price')):g}"
-            put(r, "Wholesale Price", eur, "OC", why)
-            put(r, COST_PRICE, fmt_eur(eur), "OC", why)
-            put(r, "Variant Cost", R.cost(eur), "OC", f"EUR {eur:g} x {brand['cost_multiplier']}")
-            put(r, "Total Order", round(qty * eur, 2), "OC", f"{qty:g} x EUR {eur:g}")
+            l = by_code[code]
+            src, ai = (AI_OC, f"read by AI from {l['doc']} line {l['line_no']}; ") if l.get("reader") == "ai" else ("OC", "")
+            put(r, "Wholesale Price", eur, src, ai + why)
+            put(r, COST_PRICE, fmt_eur(eur), src, ai + why)
+            put(r, "Variant Cost", R.cost(eur), src, ai + f"EUR {eur:g} x {brand['cost_multiplier']}")
+            put(r, "Total Order", round(qty * eur, 2), src, ai + f"{qty:g} x EUR {eur:g}")
 
     # 2. SKUs: NEW rows first, then new sizes on MERGE rows
     for command in ("NEW", "MERGE"):

@@ -10,8 +10,8 @@ def _norm(v):
     return " ".join(str(v or "").split()).casefold()
 
 
-def compare(draft_rows, hand_rows, docs, allow_price=()):
-    lines = oc_lines(docs)
+def compare(draft_rows, hand_rows, docs, allow_price=(), brand=None):
+    lines = oc_lines(docs, brand)
     oc_q, oc_eur = collections.Counter(), {}
     for l in lines:
         oc_eur[l["code"]] = l["price"]
@@ -123,10 +123,10 @@ def by_colour(draft_path, res):
     return out
 
 
-def run(draft_path, hand_path, docs, out, allow_price=()):
+def run(draft_path, hand_path, docs, out, allow_price=(), brand=None):
     _, d = read_po(draft_path)
     _, h = read_po(hand_path)
-    r = compare(d, h, docs, set(allow_price))
+    r = compare(d, h, docs, set(allow_price), brand)
     r["by_colour"] = by_colour(draft_path, r)
     ok = not r["draft_qty_mismatch"] and not r["hand_qty_mismatch"] and not r["unexpected_price"]
     write_md(r, out, draft_path, hand_path)
