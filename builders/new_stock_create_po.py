@@ -195,6 +195,10 @@ def validate_cost_currency_format(df):
         sys.exit("\n🛑 Cost currency format error. Please fix before proceeding.")
     print("✅ Cost currency format passed.")
 
+def split_t(val):
+    p = str(val).split()
+    return pd.Series([p[0], p[1], " ".join(p[2:])]) if len(p) >= 3 else pd.Series(["", "", ""])
+
 def run_transformations(df):
     """Handles formatting, SKU/Season/Sale syncs, and Inventory auto-fill."""
     
@@ -230,9 +234,6 @@ def run_transformations(df):
 
     # ... (keep your existing sync codes and price logic) ...
     
-    def split_t(val):
-        p = str(val).split()
-        return pd.Series([p[0], p[1], " ".join(p[2:4])]) if len(p) >= 3 else pd.Series(["", "", ""])
     df[["Metafield: custom.gender [single_line_text_field]", "Metafield: custom.category [single_line_text_field]", "Metafield: custom.sub_category [single_line_text_field]"]] = df["Type"].apply(split_t)
 
     # Auto-fill Inventory
