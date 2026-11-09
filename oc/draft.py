@@ -124,7 +124,7 @@ def build(docs, brand, catalog, history, tag_lookup, cart=None):
             cell(row, "Title", title, ti_src, ti_why)
             cell(row, "Vendor", brand["vendor"], "rule", "brand config")
             cell(row, "Type", ptype, t_src, t_why)
-            cell(row, "Body HTML", R.body_html(code, comp, made), "guess" if "guess" in (comp_src, made_src)
+            cell(row, "Body HTML", R.body_html(code, comp, made, comp_src == "catalog"), "guess" if "guess" in (comp_src, made_src)
                  else "cart" if "cart" in (comp_src, made_src) else "catalog",
                  f"template; composition: {comp_why}; made in: {made_why}")
             cell(row, "Status", brand["status"], "rule", "brand config")

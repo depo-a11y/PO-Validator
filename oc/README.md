@@ -61,6 +61,12 @@ Never from the cart: quantities, wholesale and retail. Its Sugg. Retail is ignor
 that differs from the OC is an INFO check. Coverage checks: OC codes not in the cart and cart codes not on the OC
 (INFO, with counts), and a cart sharing no code with the OC is a FAIL (wrong cart).
 
+Cart text is data, never markup or a formula. A Materials or Made In value holding `<` or `>` is not used
+(red, with the reason); other text is HTML-escaped into the Body HTML, while a composition read out of a
+live product's Body HTML is already HTML and is left alone. Every sheet written through `oc/poxlsx.py`
+(`write_po`, `write_table`, `write_frame`) saves a string starting `=`, `+`, `-`, `@`, tab or CR as text
+with its visible value unchanged (no leading apostrophe), and `read_po` resolves only real formula cells.
+
 Brand config keys the cart uses: `colour_families`, `subcategory_types` (cart Subcategory to Type without gender),
 `title_prefixes` (which gender's product gets a prefix when two NEW titles collide; default `{WOMEN: "Womens "}`).
 A `product_class_types` or `subcategory_types` value may be a list (first valid Type for the gender wins) or a

@@ -59,7 +59,7 @@ def write_cart(path, rows=CART_ROWS, preamble=True, header=CART_HEADER):
             ws.append(r)
     ws.append(header)
     for r in rows:
-        ws.append(r)
+        poxlsx.append_text(ws, r)            # a supplier's text cell, even one starting '='
     ws.append([None, None, None, None, None, None, None, None, None, None, None, None, None, None, 5, 5])  # totals
     wb.save(path)
     return str(path)
@@ -68,8 +68,7 @@ def write_cart(path, rows=CART_ROWS, preamble=True, header=CART_HEADER):
 CAT_COLS = list(catm.REQUIRED) + ["Body HTML", "Variant Country of Origin", catm.MADE_IN, "Created At"]
 
 
-@pytest.fixture
-def catalog(tmp_path):
+def _catalog(tmp_path, body="<p>Composition: 100% Calf Leather</p>"):
     rows = []
     for i, size in enumerate(["40", "41", "42"]):
         r = {c: "" for c in CAT_COLS}
@@ -80,7 +79,7 @@ def catalog(tmp_path):
         if i == 0:
             r.update({"Handle": "replica-sneaker-in-white", "Title": "Replica Sneaker in White",
                       "Vendor": "MAISON MARGIELA", "Type": "MEN SHOES SNEAKERS", "Tags": "MEN", "Status": "Active",
-                      catm.MCODE: "S99WS0001P0001 101", "Body HTML": "<p>Composition: 100% Calf Leather</p>",
+                      catm.MCODE: "S99WS0001P0001 101", "Body HTML": body,
                       "Created At": "2025-01-01 10:00:00 +1100"})
         rows.append(r)
     p = tmp_path / "catalog.csv"
@@ -89,6 +88,11 @@ def catalog(tmp_path):
         w.writeheader()
         w.writerows(rows)
     return catm.load(str(p))
+
+
+@pytest.fixture
+def catalog(tmp_path):
+    return _catalog(tmp_path)
 
 
 def _line(no, code, cls, sizes, price):
@@ -298,3 +302,108 @@ def test_cart_value_is_green_only_where_the_live_style_agrees(tmp_path, catalog)
                  cart=cartm.load(write_cart(tmp_path / "agree.xlsx", rows=rows)))
     v, src, why = R.composition(SNEAKER)
     assert (v, src) == ("100% Calf Leather", "catalog") and "Materials agrees" in why
+
+
+# ---- cart text is data: never markup, never a formula ------------------------------
+
+def test_cart_markup_is_not_used_and_cart_text_is_escaped(tmp_path, catalog):
+    rows = [list(r) for r in CART_ROWS]
+    rows[0][10] = "<script>alert(1)</script>"
+    rows[0][11] = "Made in <b>Italy</b>"
+    rows[1][10] = "Primary Fabric: Cotton & Silk"
+    rows[1][11] = "Made In Italy & France"
+    drows, review, _, _ = _draft(catalog, cartm.load(write_cart(tmp_path / "c.xlsx", rows=rows)))
+    shoe = _first(drows, SNEAKER)
+    assert "<script" not in shoe["Body HTML"] and "<b>" not in shoe["Body HTML"]
+    assert shoe["Body HTML"].startswith("<p>Composition: -</p> <p>Made in -</p>")
+    assert shoe[poxlsx.MADE_IN] == "-"
+    for col in ("Body HTML", poxlsx.MADE_IN):
+        x = _review(review, SNEAKER, col)
+        assert x["Colour"] == "red" and "holds '<' or '>'" in x["Why"], (col, x)
+    jacket = _first(drows, JACKET_A)
+    assert jacket["Body HTML"].startswith("<p>Composition: Primary Fabric: Cotton &amp; Silk</p> "
+                                          "<p>Made in Italy &amp; France</p>")
+    assert jacket[poxlsx.MADE_IN] == "Italy & France"                  # the metafield is text, not HTML
+
+
+def test_a_composition_read_from_live_html_is_not_escaped_twice(tmp_path):
+    cat = _catalog(tmp_path, body="<p>Composition: 100% Calf &amp; Lamb Leather</p>")
+    rows, _, _, _ = _draft(cat, None)
+    assert _first(rows, SNEAKER)["Body HTML"].startswith("<p>Composition: 100% Calf &amp; Lamb Leather</p>")
+    crows = [list(r) for r in CART_ROWS]
+    crows[0][10] = "100% Calf & Lamb Leather"                        # the same words as plain text: agrees, green
+    rows, review, _, _ = _draft(cat, cartm.load(write_cart(tmp_path / "c.xlsx", rows=crows)))
+    assert _first(rows, SNEAKER)["Body HTML"].startswith("<p>Composition: 100% Calf &amp; Lamb Leather</p>")
+    assert "Materials agrees" in _review(review, SNEAKER, "Body HTML")["Why"]
+
+
+FORMULA_LIKE = ['=HYPERLINK("http://x","y")', "+61 3", "- Lining: 100% Viscose", "@home", "\tTabbed"]
+
+
+def _read_back(path, sheet=None):
+    wb = openpyxl.load_workbook(path)
+    ws = wb[sheet] if sheet else wb.worksheets[0]
+    return {c.value: c.data_type for row in ws.iter_rows() for c in row if isinstance(c.value, str)}
+
+
+def test_formula_like_text_is_written_and_read_back_as_the_same_text(tmp_path):
+    assert [v[0] for v in FORMULA_LIKE] == ["\u003d", "\u002b", "\u002d", "\u0040", "\t"]  # ASCII triggers only
+    hdr = ["Title", "Body HTML", "Variant SKU", "Option1 Value", "Variant Compare At Price"]
+    rows = [dict(zip(hdr, [v, "<p>x</p>", f"SKU{i}", "BLACK", "=E2"])) for i, v in enumerate(FORMULA_LIKE)]
+    review = [{"Code": "X 1", "Value": v, "Why": v} for v in FORMULA_LIKE]
+    out = tmp_path / "po.xlsx"
+    poxlsx.write_po(str(out), hdr, rows, review, [{"Check": "c", "Result": "INFO", "Detail": FORMULA_LIKE[0]}])
+    for sheet in ("Sheet1", "Review", "Checks"):
+        got = _read_back(out, sheet)
+        for v in FORMULA_LIKE if sheet != "Checks" else FORMULA_LIKE[:1]:
+            assert got.get(v) == "s", (sheet, v, got)                 # same text, saved as text
+            assert "'" + v not in got
+    assert _read_back(out)["=E2"] == "s"                               # not raw: even a ref is text
+    _, back = poxlsx.read_po(str(out))
+    assert [r["Title"] for r in back] == FORMULA_LIKE
+    poxlsx.write_po(str(out), hdr, [dict(rows[0], Title="Bad\x01Title")])  # a control character is dropped, not fatal
+    assert poxlsx.read_po(str(out))[1][0]["Title"] == "BadTitle"
+    poxlsx.write_po(str(out), hdr, [dict(r, _raw=dict(r)) for r in rows], raw=True)
+    wb = openpyxl.load_workbook(out)
+    assert wb.active["E2"].data_type == "f" and wb.active["A2"].data_type == "s"   # raw keeps only a PO ref formula
+
+
+def test_a_formula_in_the_cart_reaches_the_draft_and_complete_as_text(tmp_path, catalog):
+    rows = [list(r) for r in CART_ROWS]
+    rows[3][11] = '=HYPERLINK("http://x","Italy")'
+    cart = cartm.load(write_cart(tmp_path / "c.xlsx", rows=rows))
+    drows, review, checks, fills = _draft(catalog, cart)
+    made = _first(drows, RING)[poxlsx.MADE_IN]
+    assert made.startswith("=")
+    out = tmp_path / "draft.xlsx"
+    poxlsx.write_po(str(out), poxlsx.PO_HEADER, drows, review, checks, fills)
+    assert _read_back(out)[made] == "s"
+    assert _read_back(out, "Review")[made] == "s"
+    base = {"Vendor": "MAISON MARGIELA", "Status": "Active", "Option1 Name": "Colour", "Option2 Name": "Size",
+            poxlsx.SEASON: "S/S 27", poxlsx.NEW_SALE: "NEW", "Command": "NEW", "Title": "Logo Ring in Silver",
+            "Type": "WOMEN ACCS JEWELRY RINGS", "Published": False, "Option1 Value": "SILVER",
+            poxlsx.CODE: RING, poxlsx.MADE_IN: None, "Body HTML": "<p>x</p>", "Wholesale Price": 80.0,
+            "Variant Cost": 120.0, poxlsx.COST_PRICE: "EUR 80", "Variant Price": 400.0,
+            "Option2 Value": "OS", "Order Qty": 2, "Total Order": 160.0}
+    wb = openpyxl.Workbook()
+    wb.active.append(poxlsx.PO_HEADER)
+    wb.active.append([base.get(h) if h else None for h in poxlsx.PO_HEADER])
+    wb.save(tmp_path / "hand.xlsx")
+    docs = [dict(doc="SS - 2", collection="TEST RTW AVP", gender=None, total_qty=2, net=160.0,
+                 lines=[_line(1, RING, "Minimal Logo 8mm", {"OS": 2}, 80.0)])]
+    complete_run(str(tmp_path / "hand.xlsx"), docs, BRAND, catalog, _hist(), core.load_tag_lookup(),
+                 str(tmp_path / "po.xlsx"), cart=cart)
+    assert _read_back(tmp_path / "po.xlsx")[made] == "s"
+
+
+def test_write_frame_is_to_excel_without_formulas(tmp_path):
+    import pandas as pd
+    frame = pd.DataFrame({"Title": FORMULA_LIKE, "Variant Price": [1.5, 2, None, 4, 5],
+                          "Order Qty": [1, 2, 3, 4, 5]})
+    out = tmp_path / "pu.xlsx"
+    poxlsx.write_frame(str(out), frame, "Products")
+    assert {v: t for v, t in _read_back(out).items() if v in FORMULA_LIKE} == {v: "s" for v in FORMULA_LIKE}
+    back = pd.read_excel(out, sheet_name="Products")
+    assert list(back["Title"]) == FORMULA_LIKE and list(back.columns) == list(frame.columns)
+    assert back["Variant Price"].isna().tolist() == [False, False, True, False, False]
+    assert list(back["Order Qty"]) == [1, 2, 3, 4, 5]

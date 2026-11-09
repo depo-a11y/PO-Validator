@@ -63,6 +63,18 @@ MUTANTS = [
     ("oc/resolve.py", '        if row and row["subcategory"]:', "        if False:", "cart subcategory Type removed"),
     ("oc/resolve.py", '        if sib and " ".join(sib[0].split()).casefold() == " ".join(value.split()).casefold():',
      "        if sib:", "cart value green although the live style disagrees"),
+    # ---- cart text is data ----
+    ("oc/resolve.py", '        if "<" in value or ">" in value:', "        if False:", "cart markup used in Body HTML"),
+    ("oc/resolve.py", "        comp = composition if composition_is_html else html.escape(str(composition), quote=False)",
+     "        comp = composition", "cart composition not escaped"),
+    ("oc/resolve.py", "made_in=html.escape(str(made_in), quote=False))", "made_in=made_in)", "made in not escaped"),
+    ("oc/draft.py", 'R.body_html(code, comp, made, comp_src == "catalog")', "R.body_html(code, comp, made, False)",
+     "live Body HTML composition escaped twice"),
+    ("oc/poxlsx.py", '        cell.data_type = "s"', "        pass", "formula-like text saved as a formula"),
+    ("oc/poxlsx.py", '    return ILLEGAL_CHARACTERS_RE.sub("", v) if isinstance(v, str) else v', "    return v",
+     "control characters not stripped"),
+    ("oc/poxlsx.py", "resolve_formula(v, raw, r) if f else v", "resolve_formula(v, raw, r)", "read_po reads text as a formula"),
+    ("oc/complete.py", "            as_text(c)", "            pass", "complete writes cart text as a formula"),
 ]
 
 

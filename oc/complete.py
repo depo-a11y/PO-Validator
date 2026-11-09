@@ -12,8 +12,8 @@ import openpyxl
 from openpyxl.utils import get_column_letter
 
 from .draft import oc_lines, cart_checks
-from .poxlsx import (FILLS, CODE, MADE_IN, COST_PRICE, TITLE_TAG, SEASON, NEW_SALE,
-                     resolve_formula, write_table, review_row)
+from .poxlsx import (FILLS, CODE, MADE_IN, COST_PRICE, TITLE_TAG, SEASON, NEW_SALE, PO_FORMULA,
+                     resolve_formula, write_table, review_row, clean_text, as_text)
 from .resolve import Resolver, COLOUR
 from .util import blank, norm_code, norm_size, fmt_eur, money, slug
 
@@ -32,7 +32,8 @@ def run(po_path, docs, brand, catalog, history, tag_lookup, out, price_overrides
     raw = {r: [ws.cell(r, c).value for c in range(1, len(header) + 1)] for r in range(1, last + 1)}
 
     def get(r, name):
-        return resolve_formula(ws.cell(r, col[name]).value, raw, r)
+        c = ws.cell(r, col[name])
+        return resolve_formula(c.value, raw, r) if c.data_type == "f" else c.value
 
     review = []
 
@@ -41,7 +42,10 @@ def run(po_path, docs, brand, catalog, history, tag_lookup, out, price_overrides
         old = c.value
         if old == value:
             return
+        value = clean_text(value)
         c.value = value
+        if not (isinstance(value, str) and PO_FORMULA.fullmatch(value)):   # only the compare-at '=P5' is a formula
+            as_text(c)
         c.fill = FILLS["changed"] if source == "OC" else FILLS[COLOUR.get(source, "red")]
         raw[r][col[name] - 1] = value
         review.append(review_row(r, get(r, CODE), get(r, "Option2 Value"), name, value, source, why,

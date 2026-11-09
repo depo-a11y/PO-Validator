@@ -2,6 +2,7 @@
 import re
 
 import openpyxl
+from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
 from openpyxl.styles import PatternFill, Font
 from openpyxl.utils import get_column_letter
 
@@ -41,6 +42,50 @@ COST_PRICE = "Variant Metafield: Variant.cost_price [single_line_text_field]"
 TITLE_TAG = "Metafield: title_tag [string]"
 
 
+# openpyxl saves any string starting '=' as a formula, and Excel treats these leads as one.
+FORMULA_LEAD = ("=", "+", "-", "@", "\t", "\r")
+PO_FORMULA = re.compile(r"=\$?[A-Z]{1,3}\$?\d+")   # the one formula shape a PO carries (resolve_formula)
+
+
+def clean_text(v):
+    """A string minus the control characters openpyxl refuses; anything else unchanged."""
+    return ILLEGAL_CHARACTERS_RE.sub("", v) if isinstance(v, str) else v
+
+
+def as_text(cell):
+    """Save a string that starts like a formula as text. Not with a leading
+    apostrophe: openpyxl keeps it in the value, Excel shows it and Matrixify would
+    import it. data_type 's' keeps the visible text exactly as it was."""
+    if isinstance(cell.value, str) and cell.value.startswith(FORMULA_LEAD):
+        cell.data_type = "s"
+    return cell
+
+
+def append_text(ws, values, keep_formula=None):
+    """ws.append for data: every string is written as text, except a value
+    keep_formula(value) accepts (a formula the sheet means to carry)."""
+    ws.append([clean_text(v) for v in values])
+    for c in ws[ws.max_row]:
+        if not (keep_formula and isinstance(c.value, str) and keep_formula(c.value)):
+            as_text(c)
+
+
+def write_frame(path, frame, sheet_name="Sheet1"):
+    """DataFrame.to_excel(path, index=False, sheet_name=...) without the formula
+    hole: pandas hands strings to openpyxl, which saves '=...' as a formula.
+    Blank (NaN/None/NA) cells stay empty, as with to_excel."""
+    import pandas as pd
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = sheet_name
+    append_text(ws, [str(c) for c in frame.columns])
+    for c in ws[1]:
+        c.font = Font(bold=True)
+    for row in frame.itertuples(index=False, name=None):
+        append_text(ws, [None if (not isinstance(v, str) and pd.isna(v)) else v for v in row])
+    wb.save(path)
+
+
 def col_letter(header, name):
     return get_column_letter(header.index(name) + 1)
 
@@ -69,14 +114,17 @@ def read_po(path, sheet=None):
     while header and header[-1] is None:
         header.pop()
     keys = [h if h is not None else f"_col{i + 1}" for i, h in enumerate(header)]
-    raw = {}
+    raw, formula = {}, {}
     for r in range(2, ws.max_row + 1):
-        raw[r] = [ws.cell(r, c).value for c in range(1, len(header) + 1)]
+        cells = [ws.cell(r, c) for c in range(1, len(header) + 1)]
+        raw[r] = [c.value for c in cells]
+        formula[r] = [c.data_type == "f" for c in cells]
     rows = []
     for r, vals in raw.items():
         if all(v is None for v in vals):
             continue
-        d = {k: resolve_formula(v, raw, r) for k, v in zip(keys, vals)}
+        # only a formula cell is resolved: text that merely starts with '=' stays text
+        d = {k: resolve_formula(v, raw, r) if f else v for k, v, f in zip(keys, vals, formula[r])}
         d["_row"], d["_raw"] = r, dict(zip(keys, vals))
         rows.append(d)
     return header, rows
@@ -88,12 +136,12 @@ def write_po(path, header, rows, review=None, checks=None, fills=None, title="Sh
     ws = wb.active
     ws.title = title
     keys = [h if h is not None else f"_col{i + 1}" for i, h in enumerate(header)]
-    ws.append(header)
+    append_text(ws, header)
     for c in ws[1]:
         c.font = Font(bold=True)
     for i, r in enumerate(rows):
         src = r.get("_raw") if raw else r
-        ws.append([(src.get(k) if src else None) for k in keys])
+        append_text(ws, [(src.get(k) if src else None) for k in keys], PO_FORMULA.fullmatch if raw else None)
         excel_row = i + 2
         for j, h in enumerate(header):
             cell = ws.cell(excel_row, j + 1)
@@ -118,12 +166,12 @@ def write_table(wb, name, rows, colour_key=None):
         ws.append(["(none)"])
         return ws
     cols = list(rows[0].keys())
-    ws.append(cols)
+    append_text(ws, cols)
     for c in ws[1]:
         c.font = Font(bold=True)
     result_colour = {"PASS": "green", "WARN": "amber", "FAIL": "red", "INFO": None}
     for r in rows:
-        ws.append([r.get(c) for c in cols])
+        append_text(ws, [r.get(c) for c in cols])
         if colour_key and colour_key in cols:
             v = r.get(colour_key)
             colour = v if v in FILLS else result_colour.get(v)

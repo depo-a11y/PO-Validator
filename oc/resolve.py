@@ -8,6 +8,7 @@ Every resolver returns (value, source, detail). Sources, in trust order:
   thin, fit, guess -> red (one past row, a fitted ratio, or nothing to go on)
 """
 import collections
+import html
 import math
 import re
 
@@ -341,8 +342,13 @@ class Resolver:
         return self.b["unknown"], "guess", "no composition source (no linesheet supplied)"
 
     def _cart_or_agreed(self, row, value, what, sib):
-        """The cart's value; green only when the live same style+fabric says the same."""
-        if sib and " ".join(sib[0].split()).casefold() == " ".join(value.split()).casefold():
+        """The cart's value; green only when the live same style+fabric says the same.
+        Cart text is supplier text bound for Body HTML: a value holding '<' or '>' is
+        markup, so it is not used and the cell is red."""
+        if "<" in value or ">" in value:
+            return self.b["unknown"], "guess", self.cart_why(row, f"{what} '{value}' holds '<' or '>' "
+                                                                  "(markup, not text); not used, retype it")
+        if sib and " ".join(html.unescape(sib[0]).split()).casefold() == " ".join(value.split()).casefold():
             return sib[0], "catalog", f"{sib[1]}; " + self.cart_why(row, f"{what} agrees")
         return value, "cart", self.cart_why(row, what) + (f"; {sib[1]} says '{sib[0]}'" if sib else "")
 
@@ -362,8 +368,12 @@ class Resolver:
     def title_tag(self, title):
         return self.b["title_tag"].format(vendor=self.b["vendor"], title=title)
 
-    def body_html(self, code, composition, made_in):
-        return self.b["body_html"].format(code=code, composition=composition, made_in=made_in)
+    def body_html(self, code, composition, made_in, composition_is_html=False):
+        """Fill the brand's Body HTML template. Text is escaped; a composition read out
+        of a live product's Body HTML (source catalog) is already HTML and is not."""
+        comp = composition if composition_is_html else html.escape(str(composition), quote=False)
+        return self.b["body_html"].format(code=html.escape(str(code), quote=False), composition=comp,
+                                          made_in=html.escape(str(made_in), quote=False))
 
     def handle_taken(self, title):
         return slug(title) in self.cat.handles
