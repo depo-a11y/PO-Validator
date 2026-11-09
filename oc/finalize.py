@@ -26,9 +26,11 @@ PU-merge carryover, keyed on known product and variant IDs, so Command = UPDATE 
          Command MERGE) at the same OC cost. A rollback file restores the previous
          season, removes the tag where this run added it, and puts back each
          touched variant's prior Variant Cost from the catalog export.
-         A product with no season in the export gets [IGNORE] in the rollback's
-         season cell, not an empty one: Matrixify deletes a metafield on an empty
-         cell and leaves it unchanged on [IGNORE] (WARN names those products).
+         A product with no season in the export (custom.product_season is a
+         required catalog column, so an empty cell means no metafield) gets an
+         empty rollback season cell: Matrixify deletes a metafield on an empty
+         cell, which is the exact undo of PU-merge setting the season (INFO names
+         those products).
          The rollback undoes only the PU-merge of its own run: use the ROLLBACK
          from the same zip as the PU-merge you import, made before importing. Every
          file of a run carries one run id (its file-name prefix, also the workbook
@@ -65,7 +67,6 @@ DELIVERY_HEADER = [
 ]
 
 ID_COMMAND = "UPDATE"
-IGNORE = "[IGNORE]"  # Matrixify: this cell's metafield is left unchanged, as if the column were absent
 VARIANT_COMMAND = "UPDATE"
 MERGE_PRODUCT_COLS = ["ID", "Command", "Tags Command", "Tags", SEASON]
 ROLLBACK_COLS = ["ID", "Command", "Tags Command", "Tags", SEASON]
@@ -342,7 +343,7 @@ def _pu_merge(merge, brand, catalog, core, out_prefix):
             if i == 0:
                 row.update({"Tags Command": "MERGE", "Tags": season, SEASON: season})
                 back.update({"Tags Command": "MERGE" if tagged else "DELETE", "Tags": "" if tagged else season,
-                             SEASON: p["season"] or IGNORE})
+                             SEASON: p["season"]})
             row["Variant Cost"] = new_cost.get(pid)
             back["Variant Cost"] = v["cost"]
             rows.append(row)
@@ -386,16 +387,16 @@ def _pu_merge(merge, brand, catalog, core, out_prefix):
     rb_frame = pd.DataFrame(rb, columns=ROLLBACK_COLS + VARIANT_COST_COLS)
     unseasoned = [p["title"] for p, _ in products.values() if not p["season"]]
     if unseasoned:
-        out.append(dict(Check="Re-bought products with no season in the catalog export (a rollback keeps the new season "
-                              "on them)", Result="WARN",
-                        Detail=f"{len(unseasoned)}: {'; '.join(unseasoned)}. Their rollback season cell is {IGNORE}, which "
-                               f"Matrixify reads as 'leave custom.product_season as it is'. An empty cell would delete "
-                               f"it. So after a rollback they keep {season}: remove it in Shopify by hand if it should go."))
+        out.append(dict(Check="Re-bought products with no season in the catalog export", Result="INFO",
+                        Detail=f"{len(unseasoned)}: {'; '.join(unseasoned)}. The rollback removes the season metafield, "
+                               f"as before PU-merge: their rollback season cell is empty, and Matrixify deletes a "
+                               f"metafield on an empty cell. PU-merge sets {season} on them."))
     out.append(_post_import_check(products, season, new_cost))
     out.append(dict(Check="Rollback for PU-merge", Result="INFO",
                     Detail=f"restores each product's previous custom.product_season from the catalog export "
                            f"({collections.Counter(p['season'] for p, _ in products.values() if p['season']).most_common()}"
-                           + (f"; {len(unseasoned)} with none keep {season}, cell {IGNORE}" if unseasoned else "")
+                           + (f"; {len(unseasoned)} with none, cell empty: the metafield is removed" if unseasoned
+                              else "")
                            + "), deletes the "
                            f"'{season}' tag on {len(blocks) - len(tagged)} products (already carried it before this run: "
                            + (", ".join(p["title"] for p in tagged) or "none")

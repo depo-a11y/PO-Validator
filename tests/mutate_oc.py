@@ -84,9 +84,14 @@ MUTANTS = [
     ("oc/catalog.py", '"Variant Compare At Price", AVAILABLE], "Inventory / Variants")',
      '"Variant Compare At Price"], "Inventory / Variants")', "Variant Inventory Qty not required"),
     ("oc/catalog.py", "available=money(r[AVAILABLE]) or 0", "available=0", "restatement ignores available stock"),
-    ("oc/finalize.py", 'SEASON: p["season"] or IGNORE})', 'SEASON: p["season"]})',
-     "no live season written as an empty rollback cell (deletes the metafield)"),
-    ("oc/finalize.py", "    if unseasoned:\n        out.append(", "    if False:\n        out.append(", "no-season WARN removed"),
+    # ---- no season in the export: an empty rollback cell deletes the metafield (case 2026-11-09-buyer-9 N2) ----
+    ("oc/finalize.py", 'SEASON: p["season"]})', 'SEASON: p["season"] or "[IGNORE]"})',
+     "no-season rollback cell [IGNORE] again (keeps the new season)"),
+    ("oc/finalize.py", 'SEASON: p["season"]})', 'SEASON: p["season"] or season})',
+     "no-season rollback cell writes this season"),
+    ("oc/finalize.py", "    if unseasoned:\n        out.append(", "    if False:\n        out.append(", "no-season INFO removed"),
+    ("oc/finalize.py", 'Check="Re-bought products with no season in the catalog export", Result="INFO"',
+     'Check="Re-bought products with no season in the catalog export", Result="WARN"', "no-season note back to a WARN"),
     # ---- rollback built from a catalog exported after the import (F8) ----
     ("oc/finalize.py", "        if signs:\n            hits.append", "        if False:\n            hits.append",
      "post-import WARN removed"),

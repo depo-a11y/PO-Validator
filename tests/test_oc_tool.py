@@ -456,20 +456,33 @@ def _by(checks, prefix):
     return next(c for c in checks if c["Check"].startswith(prefix))
 
 
-def test_a_product_with_no_season_gets_ignore_in_the_rollback_never_an_empty_cell(tmp_path):
+def test_a_product_with_no_season_gets_an_empty_rollback_cell_which_removes_the_metafield(tmp_path):
+    """custom.product_season is a required catalog column, so an empty export cell means the product had no
+    season metafield; an empty rollback cell deletes the one PU-merge sets, which is the exact undo."""
     rows = _split_rows()
     rows[0][catm.SEASON] = ""
     prefix = str(tmp_path / "x-")
     checks = finalize.run(_merge_po(tmp_path), BRAND, catm.load(_write_catalog(tmp_path / "c.csv", rows)), prefix)
-    assert not [c for c in checks if c["Result"] == "FAIL"], checks
+    assert not [c for c in checks if c["Result"] in ("FAIL", "WARN")], checks
     rb = openpyxl.load_workbook(prefix + "PU-merge-ROLLBACK.xlsx")["Products"]
-    assert _cells(rb, poxlsx.SEASON)[0] == ("[IGNORE]", "s")  # an empty cell would delete the metafield
+    assert _cells(rb, poxlsx.SEASON) == [(None, "n")] * 3
+    assert "[IGNORE]" not in [c.value for row in rb.iter_rows() for c in row]
     m = openpyxl.load_workbook(prefix + "PU-merge.xlsx")["Products"]
     assert _cells(m, poxlsx.SEASON)[0] == ("S/S 27", "s")
-    warn = _by(checks, "Re-bought products with no season in the catalog export")
-    assert warn["Result"] == "WARN" and warn["Detail"].startswith("1: Replica Sneaker in White. ")
+    note = _by(checks, "Re-bought products with no season in the catalog export")
+    assert note["Result"] == "INFO"
+    assert note["Detail"].startswith("1: Replica Sneaker in White. The rollback removes the season metafield, as "
+                                     "before PU-merge: their rollback season cell is empty")
     info = _by(checks, "Rollback for PU-merge")["Detail"]
-    assert "('', " not in info and "[]; 1 with none keep S/S 27, cell [IGNORE])" in info
+    assert "('', " not in info and "[]; 1 with none, cell empty: the metafield is removed)" in info
+
+
+def test_a_product_with_a_season_gets_it_back_and_no_no_season_note(split_catalog_path, tmp_path):
+    prefix = str(tmp_path / "x-")
+    checks = finalize.run(_merge_po(tmp_path), BRAND, catm.load(split_catalog_path), prefix)
+    rb = openpyxl.load_workbook(prefix + "PU-merge-ROLLBACK.xlsx")["Products"]
+    assert _cells(rb, poxlsx.SEASON)[0] == ("F/W 26", "s")
+    assert not [c for c in checks if c["Check"].startswith("Re-bought products with no season")]
 
 
 def test_restatement_counts_available_units(split_catalog_path, tmp_path):

@@ -18,8 +18,9 @@ Pure Python, files in and files out. Nothing here talks to Shopify, Matrixify or
   ID with Command and Variant Command UPDATE. It does not rewrite the `Variant.cost_price` metafield on existing
   sizes. New sizes take the same cost. The rollback puts back each product's previous season, removes the season
   tag where this run added it, and puts back each size's previous cost. A product with no season in the catalog
-  gets `[IGNORE]` in the rollback's season cell (Matrixify leaves the metafield alone; an empty cell would delete
-  it), and a WARN names it. The rollback undoes only the PU-merge of its own run: use the ROLLBACK from the same
+  had no season metafield (the column is required, so an empty cell means none), so its rollback season cell is
+  empty: Matrixify deletes a metafield on an empty cell, which puts it back as it was before PU-merge, and an INFO
+  names it. The rollback undoes only the PU-merge of its own run: use the ROLLBACK from the same
   zip (or `--out-prefix`) as the PU-merge you import, made before importing. If the PO is changed and finalize run
   again before the import, import the new run's PU-merge and keep the new run's ROLLBACK; an older ROLLBACK misses
   whatever the change added, such as a re-bought product. Every file of a run carries one run id: its file-name
