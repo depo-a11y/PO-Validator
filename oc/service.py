@@ -2,7 +2,7 @@
 
     draft(oc_path, catalog_path, brand_cfg, cart_path=None, history_paths=None)
         -> (po_xlsx_bytes | None, review_df, checks)
-    finalize(po_path, catalog_path, brand_cfg) -> (zip_bytes | None, checks, gate_errors_df)
+    finalize(po_path, catalog_path, brand_cfg, when=None) -> (zip_bytes | None, checks, gate_errors_df)
 
 Same steps as `python -m oc draft` and `python -m oc finalize`. Inputs are paths;
 everything written goes to a temporary folder and comes back as bytes, so
@@ -99,19 +99,26 @@ def _core():
 
 
 # ---- naming --------------------------------------------------------------------
-def today():
+def now():
     try:
         from zoneinfo import ZoneInfo
-        return datetime.datetime.now(ZoneInfo("Australia/Melbourne")).date()
+        return datetime.datetime.now(ZoneInfo("Australia/Melbourne"))
     except Exception:
-        return datetime.date.today()
+        return datetime.datetime.now()
 
 
-def file_prefix(brand_cfg, day=None):
-    """'2026-11-09-margiela-ss27-': date, brand, season, the house naming for outputs."""
-    day = day or today()
+def file_prefix(brand_cfg, when=None):
+    """'2026-11-09-1432-margiela-ss27-': Melbourne date and time, brand, season.
+
+    The time keeps two runs on one day from sharing file names. The prefix without its
+    trailing '-' is the run id (finalize.run_id) that every file of one run carries."""
+    when = when or now()
     season = re.sub(r"[^a-z0-9]", "", str(brand_cfg["season"]).lower())
-    return f"{day:%Y-%m-%d}-{slug(brand_cfg.get('_name') or brand_cfg['vendor'])}-{season}-"
+    return f"{when:%Y-%m-%d-%H%M}-{slug(brand_cfg.get('_name') or brand_cfg['vendor'])}-{season}-"
+
+
+def zip_name(prefix):
+    return prefix + "uploads.zip"
 
 
 # ---- past season POs -----------------------------------------------------------
@@ -278,11 +285,12 @@ def draft(oc_path, catalog_path, brand_cfg, cart_path=None, history_paths=None):
 
 
 # ---- step 2 --------------------------------------------------------------------
-def finalize(po_path, catalog_path, brand_cfg, day=None):
+def finalize(po_path, catalog_path, brand_cfg, when=None):
     """Checked PO -> (zip of the upload and delivery files | None, checks, PU-new gate errors).
 
-    All or nothing: if any check FAILs there is no zip at all."""
-    prefix = file_prefix(brand_cfg, day)
+    All or nothing: if any check FAILs there is no zip at all. `when` names the run: pass the
+    same value to zip_name(file_prefix(brand_cfg, when)) so the zip carries the run id too."""
+    prefix = file_prefix(brand_cfg, when)
     with tempfile.TemporaryDirectory(prefix="oc-finalize-") as tmp:
         try:
             cat = catm.load(catalog_path)
@@ -297,10 +305,7 @@ def finalize(po_path, catalog_path, brand_cfg, day=None):
         errors = pd.read_excel(report) if os.path.exists(report) else pd.DataFrame()
         if fails(checks):
             return None, checks, errors
-        wb = openpyxl.Workbook()
-        wb.remove(wb.active)
-        poxlsx.write_table(wb, "Checks", checks, colour_key="Result")
-        wb.save(os.path.join(tmp, prefix + "finalize-checks.xlsx"))
+        finalizem.save_checks(os.path.join(tmp, prefix + "finalize-checks.xlsx"), checks, prefix)
         buf = io.BytesIO()
         with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
             for name in ZIP_MEMBERS:

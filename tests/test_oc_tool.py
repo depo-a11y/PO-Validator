@@ -523,9 +523,51 @@ def test_a_catalog_exported_after_the_import_warns_and_its_rollback_undoes_nothi
     assert warn["Result"] == "WARN"
     assert warn["Detail"].startswith(f"1 of 1 re-bought products already look imported: Replica Sneaker in White "
                                      f"({', '.join(SIGNS.values())}). ")
-    assert "Keep and use the first PU-merge-ROLLBACK" in warn["Detail"]
+    assert ("Undo an imported PU-merge with the PU-merge-ROLLBACK from the same zip as that PU-merge (the same run "
+            "id), made before it was imported, and do not use this one.") in warn["Detail"]
+    assert "first" not in warn["Detail"]
     rb = _rollback(late)  # why: built from the imported state, it puts back the OC cost and keeps the tag
     assert list(rb["Variant Cost"]) == [300.0] * 3 and rb["Tags Command"][0] == "MERGE" and rb[poxlsx.SEASON][0] == "S/S 27"
+
+
+def _edited_merge_po(tmp_path):
+    """_merge_po after the PO was edited, before any import, to re-buy product 3 as well."""
+    _, rows = poxlsx.read_po(_merge_po(tmp_path))
+    rows = [{k: v for k, v in r.items() if not k.startswith("_")} for r in rows]
+    tee = dict(rows[0], **{"Title": "Logo Tee in Black", "Type": "MEN CLOTHING T-SHIRTS SHORT SLEEVE",
+                           "Option1 Value": "BLACK", poxlsx.CODE: "S98GC0003S00003 900", "Option2 Value": "M",
+                           "Variant SKU": "MMFW26201", "Variant Price": 560.0, "Variant Compare At Price": 800.0,
+                           "Wholesale Price": 150.0, "Variant Cost": 225.0, "Total Order": 150.0})
+    po = tmp_path / "edited-po.xlsx"
+    _hand_po(po, rows + [tee])
+    return str(po)
+
+
+def test_only_the_rollback_of_the_same_run_undoes_its_pu_merge(tmp_path):
+    """Why "keep the first rollback" was wrong: the PO is edited and finalized again before the import."""
+    cat = catm.load(_write_catalog(tmp_path / "c.csv", _split_rows()))
+    first, second = str(tmp_path / "2026-11-09-1432-mm-ss27-"), str(tmp_path / "2026-11-09-1517-mm-ss27-")
+    assert not [c for c in finalize.run(_merge_po(tmp_path), BRAND, cat, first) if c["Result"] == "FAIL"]
+    checks = finalize.run(_edited_merge_po(tmp_path), BRAND, cat, second)
+    assert not [c for c in checks if c["Result"] in ("FAIL", "WARN")], checks
+
+    def variants(prefix, name):
+        return set(pd.read_excel(prefix + name, dtype=str)["Variant ID"])
+
+    assert variants(second, "PU-merge.xlsx") == {"140", "141", "142", "3S", "3M"}
+    assert variants(second, "PU-merge-ROLLBACK.xlsx") == variants(second, "PU-merge.xlsx")
+    assert variants(first, "PU-merge-ROLLBACK.xlsx") == {"140", "141", "142"}  # misses the tee the edit added
+    rb = pd.read_excel(second + "PU-merge-ROLLBACK.xlsx").fillna("")
+    assert list(rb["Variant Cost"]) == [310.0, 305.5, 312.25, 250.0, 250.0]
+
+    run = _by(checks, finalize.RUN_CHECK)
+    assert run["Result"] == "INFO" and run["Detail"].startswith("2026-11-09-1517-mm-ss27. ")
+    assert ("2026-11-09-1517-mm-ss27-PU-merge.xlsx goes with 2026-11-09-1517-mm-ss27-PU-merge-ROLLBACK.xlsx"
+            in run["Detail"])
+    for prefix, rid in ((first, "2026-11-09-1432-mm-ss27"), (second, "2026-11-09-1517-mm-ss27")):
+        for name in ("PU-merge.xlsx", "PU-merge-new-sizes.xlsx", "PU-merge-ROLLBACK.xlsx", "Delivery.xlsx",
+                     "finalize-checks.xlsx"):
+            assert openpyxl.load_workbook(prefix + name).properties.title == rid, (prefix, name)
 
 
 @pytest.mark.parametrize("sign", SIGNS)

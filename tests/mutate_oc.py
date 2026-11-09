@@ -99,9 +99,22 @@ MUTANTS = [
      "any(c is not None and abs(c - new_cost[pid]) <= 0.005 for c in costs)", "post-import cost sign on any size, not every"),
     ("oc/finalize.py", '    return dict(Check=check, Result="WARN",', '    return dict(Check=check, Result="INFO",',
      "post-import signs reported as INFO"),
+    # ---- one run id ties a PU-merge to its own rollback (case 2026-11-09-buyer-9 N1) ----
     ("pages/1_Order_confirmation_to_PO.py",
-     '"costs back. Keep the first PU-merge-ROLLBACK you make and never use one made after importing "\n', '"costs back. "\n',
-     "page drops the keep-the-first-rollback line"),
+     '                "Use the PU-merge-ROLLBACK from the same zip as the PU-merge you import, made before importing. "\n',
+     "", "page drops the same-zip rollback line"),
+    ("oc/finalize.py", '"undo a PU-merge that was already imported. Undo an imported PU-merge with the "',
+     '"undo a PU-merge that was already imported. "', "post-import WARN drops the same-zip rollback rule"),
+    ("oc/service.py", '{when:%Y-%m-%d-%H%M}', '{when:%Y-%m-%d}', "file prefix without the time"),
+    ("oc/service.py", 'datetime.datetime.now(ZoneInfo("Australia/Melbourne"))', "datetime.datetime.now()",
+     "run time not Melbourne's"),
+    ("oc/finalize.py", "    checks, writers = [run_check(out_prefix)], []", "    checks, writers = [], []",
+     "run id row left out of the checks"),
+    ("oc/finalize.py", 'lambda p: write_frame(p, rb_frame, "Products", run_id(out_prefix)),',
+     'lambda p: write_frame(p, rb_frame, "Products"),', "ROLLBACK not stamped with the run id"),
+    ("oc/finalize.py", 'lambda p: write_frame(p, frame, "Products", run_id(out_prefix)), note))',
+     'lambda p: write_frame(p, frame, "Products"), note))', "PU-merge not stamped with the run id"),
+    ("oc/poxlsx.py", "        wb.properties.title = title\n", "        pass\n", "write_frame drops the Title stamp"),
 ]
 
 

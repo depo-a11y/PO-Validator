@@ -19,8 +19,12 @@ Pure Python, files in and files out. Nothing here talks to Shopify, Matrixify or
   sizes. New sizes take the same cost. The rollback puts back each product's previous season, removes the season
   tag where this run added it, and puts back each size's previous cost. A product with no season in the catalog
   gets `[IGNORE]` in the rollback's season cell (Matrixify leaves the metafield alone; an empty cell would delete
-  it), and a WARN names it. The rollback undoes PU-merge only if the catalog was exported before PU-merge was
-  imported: keep the first one, and a catalog that already carries the season, its tag or the OC cost is a WARN.
+  it), and a WARN names it. The rollback undoes only the PU-merge of its own run: use the ROLLBACK from the same
+  zip (or `--out-prefix`) as the PU-merge you import, made before importing. If the PO is changed and finalize run
+  again before the import, import the new run's PU-merge and keep the new run's ROLLBACK; an older ROLLBACK misses
+  whatever the change added, such as a re-bought product. Every file of a run carries one run id: its file-name
+  prefix, which is also each workbook's Title and the first row of finalize-checks. A catalog that already carries
+  the season, its tag or the OC cost is a WARN (its ROLLBACK would put nothing back).
   It is all or nothing: if any check fails (the gate, a title still holding a raw code such as "in T2180", a
   blank colour family) no upload or delivery file is written, and exit code is 1.
 
@@ -96,7 +100,10 @@ nothing is written into the repo and nothing talks to Shopify.
    no draft.
 2. **Make upload files** from the checked PO. All or nothing, like `finalize`: either one zip holding PU-new,
    PU-merge, PU-merge-new-sizes, PU-merge-ROLLBACK, Delivery and finalize-checks, named
-   `YYYY-MM-DD-<brand>-<season>-PU-new.xlsx` and so on (Melbourne date), or no zip and the failing checks first.
+   `YYYY-MM-DD-HHMM-<brand>-<season>-PU-new.xlsx` and so on, or no zip and the failing checks first. The date and
+   time are Melbourne's, so runs on one day get their own names unless made in the same minute.
+   `YYYY-MM-DD-HHMM-<brand>-<season>` is the run id: the zip is `<run id>-uploads.zip`, and the page says which
+   ROLLBACK goes with which PU-merge.
 
 **Brand config**, in the order the picker lists them:
 

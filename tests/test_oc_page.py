@@ -24,15 +24,18 @@ def test_requirements_install_the_authlib_that_st_login_needs():
     assert need and set(need) <= have, (need, sorted(have))
 
 
-def test_step_2_tells_the_buyer_to_keep_the_first_rollback():
+def test_step_2_says_to_use_the_rollback_from_the_same_zip_and_names_its_run_id():
+    run = "2026-11-09-1432-mm-ss27"
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w") as z:
-        z.writestr("x-PU-merge-ROLLBACK.xlsx", b"x")
+        z.writestr(f"{run}-PU-merge-ROLLBACK.xlsx", b"x")
     at = AppTest.from_file(str(PAGE), default_timeout=60)
-    at.session_state["final"] = dict(zip=buf.getvalue(), checks=[], errors=pd.DataFrame(), file="x-uploads.zip",
-                                     made_from="po.xlsx and catalog.csv, brand config test")
+    at.session_state["final"] = dict(zip=buf.getvalue(), checks=[], errors=pd.DataFrame(), file=f"{run}-uploads.zip",
+                                     run=run, made_from="po.xlsx and catalog.csv, brand config test")
     at.run()
     assert not at.exception
     info = [i.value for i in at.info if "PU-merge-ROLLBACK" in i.value]
-    assert len(info) == 1 and ("Keep the first PU-merge-ROLLBACK you make and never use one made after importing "
-                               "PU-merge") in info[0]
+    assert len(info) == 1
+    assert ("Use the PU-merge-ROLLBACK from the same zip as the PU-merge you import, made before importing. "
+            f"Every file in this zip carries run id {run}.") in info[0]
+    assert "the first PU-merge-ROLLBACK" not in info[0] and "Keep the first" not in info[0]

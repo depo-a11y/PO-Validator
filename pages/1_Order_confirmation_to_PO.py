@@ -267,10 +267,14 @@ if st.button("Make upload files", type="primary", disabled=bool(need2)):
     S.pop("final", None)
     with st.spinner("Checking the PO and making the files."):
         try:
+            when = service.now()
             with tempfile.TemporaryDirectory(prefix="oc-page-") as tmp:
                 zbytes, checks, errors = service.finalize(
-                    save(tmp, safe_name(po_up.name), po_up.getvalue()), save(tmp, "catalog.csv", S["catalog"][1]), cfg)
-            S["final"] = dict(zip=zbytes, checks=checks, errors=errors, file=service.file_prefix(cfg) + "uploads.zip",
+                    save(tmp, safe_name(po_up.name), po_up.getvalue()), save(tmp, "catalog.csv", S["catalog"][1]), cfg,
+                    when=when)
+            prefix = service.file_prefix(cfg, when)
+            S["final"] = dict(zip=zbytes, checks=checks, errors=errors, file=service.zip_name(prefix),
+                              run=prefix.rstrip("-"),
                               made_from=f"{po_up.name} and {S['catalog'][0]}, brand config {cfg['_path']}")
         except Exception as e:
             st.error("Something went wrong making the files. Send Colwyn the message below.")
@@ -298,7 +302,11 @@ if S.get("final"):
                 "re-bought product: its season, its season tag and the cost of every size (to this order's cost). "
                 "PU-merge-new-sizes adds the ordered sizes a product lacks, at that cost. The order is PU-new, then "
                 "PU-merge, then PU-merge-new-sizes. Keep PU-merge-ROLLBACK: it puts the season, the tag and the old "
-                "costs back. Keep the first PU-merge-ROLLBACK you make and never use one made after importing "
-                "PU-merge: it is built from a catalog that already holds the new values, so it puts nothing back. "
-                "Read the amber checks below first.")
+                "costs back. "
+                "Use the PU-merge-ROLLBACK from the same zip as the PU-merge you import, made before importing. "
+                f"Every file in this zip carries run id {f['run']}. If you "
+                "change the PO and make the files again, import the new zip's PU-merge and keep the new zip's "
+                "ROLLBACK, because an older ROLLBACK misses whatever the change added. Never use a ROLLBACK made "
+                "after importing PU-merge: it is built from a catalog that already holds the new values, so it puts "
+                "nothing back. Read the amber checks below first.")
     checks_table(f["checks"])

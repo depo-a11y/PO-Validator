@@ -29,8 +29,11 @@ PU-merge carryover, keyed on known product and variant IDs, so Command = UPDATE 
          A product with no season in the export gets [IGNORE] in the rollback's
          season cell, not an empty one: Matrixify deletes a metafield on an empty
          cell and leaves it unchanged on [IGNORE] (WARN names those products).
-         The rollback is only an undo when the catalog was exported before
-         PU-merge was imported, so a catalog that already looks imported is a WARN.
+         The rollback undoes only the PU-merge of its own run: use the ROLLBACK
+         from the same zip as the PU-merge you import, made before importing. Every
+         file of a run carries one run id (its file-name prefix, also the workbook
+         Title and the first finalize-checks row), so the two can be matched. A
+         catalog that already looks imported is a WARN.
 Delivery the brand delivery workbook shape, with a Total Delivered roll-up that
          absorbs future tranche columns and Remaining = Order Qty - Total Delivered.
 """
@@ -75,6 +78,29 @@ NEW_SIZE_COLS = ["ID", "Command", "Variant Command", "Option1 Name", "Option1 Va
                  "Variant Metafield: custom.new_sale [single_line_text_field]", COST_PRICE]
 
 OUTPUTS = ["PU-new.xlsx", "PU-merge.xlsx", "PU-merge-new-sizes.xlsx", "PU-merge-ROLLBACK.xlsx", "Delivery.xlsx"]
+RUN_CHECK = "Run id (in every file name of this run and in each workbook's Title)"
+
+
+def run_id(out_prefix):
+    """The run id: the file-name prefix without its trailing '-' ('2026-11-09-1432-margiela-ss27')."""
+    return os.path.basename(str(out_prefix)).rstrip("-")
+
+
+def run_check(out_prefix):
+    rid = run_id(out_prefix)
+    return dict(Check=RUN_CHECK, Result="INFO",
+                Detail=f"{rid}. Import PU-merge only with the PU-merge-ROLLBACK of this same run id, kept from before "
+                       f"the import: {rid}-PU-merge.xlsx goes with {rid}-PU-merge-ROLLBACK.xlsx. A ROLLBACK from "
+                       "another run is built from that run's PO and catalog, so it can miss products or costs this "
+                       "PU-merge changes.")
+
+
+def save_checks(path, checks, out_prefix):
+    wb = openpyxl.Workbook()
+    wb.remove(wb.active)
+    wb.properties.title = run_id(out_prefix)
+    write_table(wb, "Checks", checks, colour_key="Result")
+    wb.save(path)
 
 
 def _s(v):
@@ -95,7 +121,7 @@ def run(po_path, brand, catalog, out_prefix):
     import validator_core as core
 
     _, rows = read_po(po_path)
-    checks, writers = [], []
+    checks, writers = [run_check(out_prefix)], []
     new = [r for r in rows if _cmd(r) == "NEW"]
     merge = [r for r in rows if _cmd(r) == "MERGE"]
     other = [r for r in rows if _cmd(r) not in ("NEW", "MERGE")]
@@ -125,10 +151,7 @@ def run(po_path, brand, catalog, out_prefix):
         for path, write, note in writers:
             write(path)
             checks.append(dict(Check="Written", Result="INFO", Detail=f"{path}: {note}"))
-    wb = openpyxl.Workbook()
-    wb.remove(wb.active)
-    write_table(wb, "Checks", checks, colour_key="Result")
-    wb.save(f"{out_prefix}finalize-checks.xlsx")
+    save_checks(f"{out_prefix}finalize-checks.xlsx", checks, out_prefix)
     return checks
 
 
@@ -238,7 +261,7 @@ def _pu_new(new, brand, catalog, core, out_prefix):
     final = df[core.COLUMNS_IN_ORDER]
     note = (f"{len(df)} rows, {df['Title'].nunique()} products, columns = app.py columns_in_order "
             f"({len(core.COLUMNS_IN_ORDER)})")
-    return out, [(f"{out_prefix}PU-new.xlsx", lambda p: write_frame(p, final, "Products"), note)]
+    return out, [(f"{out_prefix}PU-new.xlsx", lambda p: write_frame(p, final, "Products", run_id(out_prefix)), note)]
 
 
 # ---- PU-merge ------------------------------------------------------------------
@@ -358,7 +381,7 @@ def _pu_merge(merge, brand, catalog, core, out_prefix):
             f"on each product's first row, and Variant Cost = the OC cost on every variant. No Title, Handle, Body HTML, "
             f"price or variant metafield column.")
     frame = pd.DataFrame(rows, columns=MERGE_PRODUCT_COLS + VARIANT_COST_COLS)
-    writers.append((f"{out_prefix}PU-merge.xlsx", lambda p: write_frame(p, frame, "Products"), note))
+    writers.append((f"{out_prefix}PU-merge.xlsx", lambda p: write_frame(p, frame, "Products", run_id(out_prefix)), note))
 
     rb_frame = pd.DataFrame(rb, columns=ROLLBACK_COLS + VARIANT_COST_COLS)
     unseasoned = [p["title"] for p, _ in products.values() if not p["season"]]
@@ -381,7 +404,7 @@ def _pu_merge(merge, brand, catalog, core, out_prefix):
                               f"cell clears the cost): " + ", ".join(f"{t} {vid}" for t, vid in nocost) if nocost else "")
                            + ". It does not remove the variants PU-merge-new-sizes adds."))
     writers.append((f"{out_prefix}PU-merge-ROLLBACK.xlsx",
-                    lambda p: write_frame(p, rb_frame, "Products"),
+                    lambda p: write_frame(p, rb_frame, "Products", run_id(out_prefix)),
                     f"{len(rb)} variant rows on {len(blocks)} products, Command UPDATE, Variant Command UPDATE"))
 
     if new_sizes:
@@ -393,7 +416,7 @@ def _pu_merge(merge, brand, catalog, core, out_prefix):
                                + (f"; SKU problem: {clash}" if clash else "")))
         ns_frame = pd.DataFrame(new_sizes, columns=NEW_SIZE_COLS)
         writers.append((f"{out_prefix}PU-merge-new-sizes.xlsx",
-                        lambda p: write_frame(p, ns_frame, "Products"),
+                        lambda p: write_frame(p, ns_frame, "Products", run_id(out_prefix)),
                         f"{len(new_sizes)} variants, Command UPDATE, Variant Command MERGE"))
     return out, writers
 
@@ -423,8 +446,9 @@ def _post_import_check(products, season, new_cost):
     return dict(Check=check, Result="WARN",
                 Detail=f"{len(hits)} of {len(products)} re-bought products already look imported: " + "; ".join(hits)
                        + ". This run's PU-merge-ROLLBACK puts back what this catalog holds, so on them it would not "
-                         "undo a PU-merge that was already imported. Keep and use the first PU-merge-ROLLBACK, made "
-                         "before the import, and do not use this one. If PU-merge has not been imported yet (a product "
+                         "undo a PU-merge that was already imported. Undo an imported PU-merge with the "
+                         "PU-merge-ROLLBACK from the same zip as that PU-merge (the same run id), made before it was "
+                         "imported, and do not use this one. If PU-merge has not been imported yet (a product "
                          "already bought this season, or a cost that has not changed), this is expected.")
 
 
@@ -508,6 +532,7 @@ def _delivery(rows, out_prefix):
         for h in ("Wholesale Price", "Total Order"):
             ws.cell(n, col[h]).number_format = EUR_FMT
     ws.freeze_panes = "A2"
+    wb.properties.title = run_id(out_prefix)
     note = (f"{len(rows)} rows, {units} units, EUR {value:,.2f}; Total Delivered = SUMIF over {first_tranche}:AZ "
             "excluding 'Value' columns, so new tranche columns roll up without a formula edit")
     return [], [(f"{out_prefix}Delivery.xlsx", lambda p: wb.save(p), note)]

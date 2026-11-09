@@ -14,8 +14,9 @@ import test_oc_tool as base
 from oc import brand as brandm, catalog as catm, finalize as finalizem, poxlsx, service
 from oc.adapters import otb
 
-DAY = datetime.date(2026, 11, 9)
-PREFIX = "2026-11-09-mm-ss27-"
+WHEN = datetime.datetime(2026, 11, 9, 14, 32)
+PREFIX = "2026-11-09-1432-mm-ss27-"
+RUN = PREFIX.rstrip("-")
 
 
 def _cfg(**kw):
@@ -167,7 +168,7 @@ def _full_po(tmp_path, new_title="Replica Sneaker in Black"):
 
 
 def test_finalize_zips_every_file_with_dated_names(tmp_path):
-    z, checks, errors = service.finalize(_full_po(tmp_path), _catalog(tmp_path), _cfg(), day=DAY)
+    z, checks, errors = service.finalize(_full_po(tmp_path), _catalog(tmp_path), _cfg(), when=WHEN)
     assert not service.fails(checks) and errors.empty
     zf = zipfile.ZipFile(io.BytesIO(z))
     assert zf.namelist() == [PREFIX + n for n in ("PU-new.xlsx", "PU-merge.xlsx", "PU-merge-new-sizes.xlsx",
@@ -184,7 +185,7 @@ def test_finalize_zips_every_file_with_dated_names(tmp_path):
 
 
 def test_finalize_gives_no_zip_and_the_fails_when_a_gate_fails(tmp_path):
-    z, checks, _ = service.finalize(_full_po(tmp_path, "Replica Sneaker in 900"), _catalog(tmp_path), _cfg(), day=DAY)
+    z, checks, _ = service.finalize(_full_po(tmp_path, "Replica Sneaker in 900"), _catalog(tmp_path), _cfg(), when=WHEN)
     assert z is None
     names = [c["Check"] for c in service.fails(checks)]
     assert "No NEW Title still holds a raw style/fabric/colour code" in names
@@ -198,7 +199,7 @@ def test_finalize_refuses_even_if_files_were_left_behind(tmp_path, monkeypatch):
         return [dict(Check="A gate", Result="FAIL", Detail="broken")]
 
     monkeypatch.setattr(finalizem, "run", leaky_run)
-    z, checks, _ = service.finalize(_full_po(tmp_path), _catalog(tmp_path), _cfg(), day=DAY)
+    z, checks, _ = service.finalize(_full_po(tmp_path), _catalog(tmp_path), _cfg(), when=WHEN)
     assert z is None and service.fails(checks) == [dict(Check="A gate", Result="FAIL", Detail="broken")]
 
 
@@ -206,7 +207,7 @@ def test_finalize_refuses_even_if_files_were_left_behind(tmp_path, monkeypatch):
 def test_finalize_gives_no_zip_for_a_catalog_without_the_season_or_available_column(tmp_path, col):
     rows = list(csv.DictReader(open(_catalog(tmp_path), encoding="utf-8-sig")))
     short = base._write_catalog(tmp_path / "short.csv", rows, [c for c in base.CAT_COLS if c != col])
-    z, checks, _ = service.finalize(_full_po(tmp_path), short, _cfg(), day=DAY)
+    z, checks, _ = service.finalize(_full_po(tmp_path), short, _cfg(), when=WHEN)
     assert z is None and [c["Check"] for c in checks] == ["Catalog export has the columns the tool needs"]
     assert f"'{col}' (Matrixify Products export" in checks[0]["Detail"]
 
@@ -214,13 +215,39 @@ def test_finalize_gives_no_zip_for_a_catalog_without_the_season_or_available_col
 def test_finalize_reports_an_unreadable_po_as_a_fail(tmp_path):
     bad = tmp_path / "po.xlsx"
     bad.write_bytes(b"not a workbook")
-    z, checks, _ = service.finalize(str(bad), _catalog(tmp_path), _cfg(), day=DAY)
+    z, checks, _ = service.finalize(str(bad), _catalog(tmp_path), _cfg(), when=WHEN)
     assert z is None and service.fails(checks)[0]["Check"] == "The PO can be read"
 
 
 def test_file_prefix():
-    assert service.file_prefix(_cfg(), DAY) == PREFIX
-    assert service.file_prefix(dict(base.BRAND), DAY) == "2026-11-09-maison-margiela-ss27-"
+    assert service.file_prefix(_cfg(), WHEN) == PREFIX
+    assert service.file_prefix(dict(base.BRAND), WHEN) == "2026-11-09-1432-maison-margiela-ss27-"
+    assert service.zip_name(PREFIX) == RUN + "-uploads.zip"
+
+
+def test_now_is_melbourne_time():
+    assert str(service.now().tzinfo) == "Australia/Melbourne"
+
+
+def test_two_runs_on_one_day_never_share_a_file_name(tmp_path):
+    a, _, _ = service.finalize(_full_po(tmp_path), _catalog(tmp_path), _cfg(), when=WHEN)
+    b, _, _ = service.finalize(_full_po(tmp_path), _catalog(tmp_path), _cfg(), when=WHEN + datetime.timedelta(minutes=1))
+    na, nb = (zipfile.ZipFile(io.BytesIO(z)).namelist() for z in (a, b))
+    assert len(na) == len(nb) == 6 and not set(na) & set(nb)
+    assert all(n.startswith("2026-11-09-1433-mm-ss27-") for n in nb)
+
+
+def test_one_run_id_on_every_file_of_the_zip_and_first_in_the_checks(tmp_path):
+    z, checks, _ = service.finalize(_full_po(tmp_path), _catalog(tmp_path), _cfg(), when=WHEN)
+    zf = zipfile.ZipFile(io.BytesIO(z))
+    for name in zf.namelist():
+        assert name.startswith(RUN + "-")
+        assert openpyxl.load_workbook(io.BytesIO(zf.read(name))).properties.title == RUN, name
+    ck = openpyxl.load_workbook(io.BytesIO(zf.read(PREFIX + "finalize-checks.xlsx")))["Checks"]
+    first = [c.value for c in ck[2]]
+    assert first[:2] == [finalizem.RUN_CHECK, "INFO"] and first[2].startswith(RUN + ". ")
+    assert f"{RUN}-PU-merge.xlsx goes with {RUN}-PU-merge-ROLLBACK.xlsx" in first[2]
+    assert checks[0] == dict(Check=finalizem.RUN_CHECK, Result="INFO", Detail=first[2])
 
 
 # ---- brand config without a file -----------------------------------------------

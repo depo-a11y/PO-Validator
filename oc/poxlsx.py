@@ -70,12 +70,15 @@ def append_text(ws, values, keep_formula=None):
             as_text(c)
 
 
-def write_frame(path, frame, sheet_name="Sheet1"):
+def write_frame(path, frame, sheet_name="Sheet1", title=None):
     """DataFrame.to_excel(path, index=False, sheet_name=...) without the formula
     hole: pandas hands strings to openpyxl, which saves '=...' as a formula.
-    Blank cells ("", NaN, None, NA) are not written at all, as with to_excel."""
+    Blank cells ("", NaN, None, NA) are not written at all, as with to_excel.
+    `title` goes in the workbook's Title property (File > Info), not in a cell."""
     import pandas as pd
     wb = openpyxl.Workbook()
+    if title:
+        wb.properties.title = title
     ws = wb.active
     ws.title = sheet_name
     append_text(ws, [str(c) for c in frame.columns])
