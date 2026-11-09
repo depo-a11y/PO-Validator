@@ -12,8 +12,12 @@ Pure Python, files in and files out. Nothing here talks to Shopify, Matrixify or
 - `complete` fills the blanks of a PO someone started by hand and never changes a typed cell, except a
   wholesale price named with `--set-price`, which must equal the OC's.
 - `finalize` turns a reviewed PO into `PU-new.xlsx` (through `validator_core.run_gate`, the same gate as
-  `app.py`), `PU-merge.xlsx` (season + season tag on carryover, nothing else, Command UPDATE),
-  `PU-merge-new-sizes.xlsx`, `PU-merge-ROLLBACK.xlsx` and `Delivery.xlsx`. It is all or nothing: if any check
+  `app.py`), `PU-merge.xlsx`, `PU-merge-new-sizes.xlsx`, `PU-merge-ROLLBACK.xlsx` and `Delivery.xlsx`. PU-merge
+  changes three things on each re-bought product: the season, the season tag, and `Variant Cost` on every live
+  size (the OC's wholesale x the brand's cost multiplier, sizes not on the OC included), keyed on ID and Variant
+  ID with Command and Variant Command UPDATE. It does not rewrite the `Variant.cost_price` metafield on existing
+  sizes. New sizes take the same cost. The rollback puts back each product's previous season, removes the season
+  tag where this run added it, and puts back each size's previous cost. It is all or nothing: if any check
   fails (the gate, a title still holding a raw code such as "in T2180", a blank colour family) no upload or
   delivery file is written, and exit code is 1.
 
@@ -71,3 +75,44 @@ Brand config keys the cart uses: `colour_families`, `subcategory_types` (cart Su
 `title_prefixes` (which gender's product gets a prefix when two NEW titles collide; default `{WOMEN: "Womens "}`).
 A `product_class_types` or `subcategory_types` value may be a list (first valid Type for the gender wins) or a
 full Type starting MEN, WOMEN or UNISEX.
+
+## Web page
+
+`pages/1_Order_confirmation_to_PO.py` runs `draft` and `finalize` for someone with no command line, inside the
+po-validator Streamlit app (`streamlit run app.py`, then "Order confirmation to PO" in the sidebar). The work is
+in `service.py`, which takes paths and returns bytes. Uploads sit in a temporary folder only while a step runs;
+nothing is written into the repo and nothing talks to Shopify.
+
+1. **Build draft PO** from the OC PDF, the catalog export, a brand, and optionally the linesheet/cart export and
+   past season POs. It shows the checks, the red and amber cells grouped by code and column, and the draft to
+   download with its shading. A FAIL a reviewer fixes in the sheet (a title already a live handle, two codes on
+   one title, a Type not in `expected_tags.xlsx`, a NEW row under the margin floor) still gives the draft, and
+   finalize checks each again. Any other FAIL (OC totals, a code on two live products, an unreadable file) gives
+   no draft.
+2. **Make upload files** from the checked PO. All or nothing, like `finalize`: either one zip holding PU-new,
+   PU-merge, PU-merge-new-sizes, PU-merge-ROLLBACK, Delivery and finalize-checks, named
+   `YYYY-MM-DD-<brand>-<season>-PU-new.xlsx` and so on (Melbourne date), or no zip and the failing checks first.
+
+**Brand config**, in the order the picker lists them:
+
+- Saved in the app: `[oc_brands]` in Streamlit secrets, one entry per brand, the value being the brand's .yaml
+  pasted whole as a TOML multi-line string (a TOML table with the same keys also works). Shape:
+  `.streamlit/secrets.example.toml`. They are listed only to a viewer whose sign-in email is in `oc_viewers`
+  (whole addresses, any case). Streamlit knows that email only when the app signs viewers in itself with
+  `st.login`, which needs an `[auth]` section in secrets and the Authlib package: since Streamlit 1.42, Community
+  Cloud does not pass a Community Cloud viewer's email to the app. With no `oc_viewers` or no sign-in, saved
+  brands stay hidden and the page says why. This is a second layer: keep the hosted app private, with its viewer
+  list limited to staff.
+- On this computer: `$OC_BRAND_DIR`, then the gitignored `oc/brands/`, the same lookup as the CLI.
+- Uploaded: a brand .yaml file.
+
+The page names the config it uses (source, vendor, season), never its contents.
+
+**Past season POs** set most retail prices for new styles. Only a config file on the computer running the app may
+name them by path. A config from secrets or an upload never has its paths opened, because an upload could
+otherwise make the app read any file on its server; upload the past POs on the page instead. Uploads replace the
+config's list. Each is labelled with the config's label for a file of the same name, else its season column, else
+a season in its file name, and they are read newest first. When past POs are missing the page warns before the
+run, and the draft's first check says retail prices will mostly come back red.
+
+`.streamlit/secrets.toml` is gitignored. Never commit it.

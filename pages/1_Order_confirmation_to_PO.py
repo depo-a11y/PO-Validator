@@ -105,16 +105,31 @@ def rows_label(rows):
     return ", ".join(out)
 
 
+def _text(v):
+    return "" if v is None or (isinstance(v, float) and pd.isna(v)) else str(v)
+
+
 def review_groups(review):
-    """Red and amber cells of the Review sheet, one line per code, column and reason."""
+    """The Review sheet in three tables: red cells and amber cells that rest on evidence, one line per
+    product, column and reason; and amber cells a house rule or the brand config filled, one line per
+    column and reason (thousands of cells such as Vendor or Status on every row)."""
     df = review[review["Colour"].isin(["red", "amber"])].copy()
-    if df.empty:
-        return df
-    df["Value"] = df["Value"].map(lambda v: "" if v is None or (isinstance(v, float) and pd.isna(v)) else str(v))
-    df["Code"] = df["Code"].fillna("").astype(str)
-    keys = ["Colour", "Code", "Column", "Value", "Source", "Why"]
-    g = df.groupby(keys, sort=False, dropna=False)["Row"].agg(rows_label).reset_index()
-    return g.rename(columns={"Row": "PO rows"})[["PO rows", "Code", "Column", "Value", "Why", "Colour"]]
+    df["Value"] = df["Value"].map(_text)
+    df["Code"] = df["Code"].map(_text)
+    rule = (df["Colour"] == "amber") & (df["Source"] == "rule")
+    keys = ["Colour", "Code", "Column", "Value", "Why"]
+    g = df[~rule].groupby(keys, sort=False)["Row"].agg(rows_label).reset_index().rename(columns={"Row": "PO rows"})
+    g = g[["PO rows", "Code", "Column", "Value", "Why", "Colour"]]
+    r = df[rule].groupby(["Column", "Why"], sort=False).agg(
+        Rows=("Row", "size"), Values=("Value", lambda v: ", ".join(dict.fromkeys(v))[:120])).reset_index()
+    return g[g["Colour"] == "red"].drop(columns="Colour"), g[g["Colour"] == "amber"].drop(columns="Colour"), r
+
+
+def and_join(items):
+    return items[0] if len(items) == 1 else ", ".join(items[:-1]) + " and " + items[-1]
+
+
+GROUP_COLS = {"Why": st.column_config.TextColumn(width="large"), "Value": st.column_config.TextColumn(width="medium")}
 
 
 # ---- page ----------------------------------------------------------------------
@@ -184,7 +199,7 @@ if cfg:
 need = [n for n, ok in (("a brand", cfg), ("the catalog export", S.get("catalog")), ("the order confirmation", oc_up))
         if not ok]
 if need:
-    st.caption("To build the draft, add " + ", ".join(need) + ".")
+    st.caption("To build the draft, add " + and_join(need) + ".")
 if st.button("Build draft PO", type="primary", disabled=bool(need)):
     S.pop("draft", None)
     with st.spinner("Reading the order confirmation and building the draft. This can take a minute."):
@@ -211,23 +226,29 @@ if S.get("draft"):
                  "the checks below.")
         show_fails(d["checks"])
     else:
-        review = review_groups(d["review"])
-        n_red = int((d["review"]["Colour"] == "red").sum())
-        n_amber = int((d["review"]["Colour"] == "amber").sum())
+        red_df, amber_df, rule_df = review_groups(d["review"])
+        n_red, n_amber = len(red_df), len(amber_df)
         st.download_button("Download the draft PO (.xlsx)", d["po"], file_name=d["file"], mime=XLSX,
                            type="primary", on_click="ignore")
-        st.info(f"Next: open the draft in Excel, fix every red cell ({n_red}), check every amber cell ({n_amber}), "
-                "save it, then upload it in Step 2. The Review sheet in the file says where each value came from.")
+        st.info(f"Next: open the draft in Excel, fix every red cell ({n_red} values, listed below), check every "
+                f"amber cell ({n_amber} values below, plus the house rules), save it, then upload it in Step 2. "
+                "The Review sheet in the file says where each value came from.")
         fixable = service.fails(d["checks"])
         if fixable:
             st.warning("Step 2 will refuse the PO until these are also fixed in the sheet:")
             show_fails(d["checks"])
-        red, amber, everything = st.tabs([f"Red: a guess, fix it ({n_red} cells)",
-                                          f"Amber: check it ({n_amber} cells)", "All checks"])
+        red, amber, rules, everything = st.tabs([
+            f"Red: a guess, fix it ({n_red})", f"Amber: check it ({n_amber})",
+            f"Amber: filled by a house rule ({int(rule_df['Rows'].sum()) if len(rule_df) else 0} cells)",
+            "All checks"])
         with red:
-            st.dataframe(review[review["Colour"] == "red"].drop(columns="Colour"), hide_index=True, width="stretch")
+            st.dataframe(red_df, hide_index=True, width="stretch", column_config=GROUP_COLS)
         with amber:
-            st.dataframe(review[review["Colour"] == "amber"].drop(columns="Colour"), hide_index=True, width="stretch")
+            st.dataframe(amber_df, hide_index=True, width="stretch", column_config=GROUP_COLS)
+        with rules:
+            st.caption("Values the brand config or a house convention sets, such as Vendor, Status and cost. "
+                       "Glance down the list once rather than cell by cell.")
+            st.dataframe(rule_df, hide_index=True, width="stretch", column_config=GROUP_COLS)
         with everything:
             checks_table(d["checks"])
     if d["po"] is None:
@@ -241,7 +262,7 @@ po_up = st.file_uploader("Checked PO (.xlsx)", type=["xlsx"], key="w_po")
 need2 = [n for n, ok in (("a brand", cfg), ("the catalog export", S.get("catalog")), ("the checked PO", po_up))
          if not ok]
 if need2:
-    st.caption("To make the files, add " + ", ".join(need2) + ".")
+    st.caption("To make the files, add " + and_join(need2) + ".")
 if st.button("Make upload files", type="primary", disabled=bool(need2)):
     S.pop("final", None)
     with st.spinner("Checking the PO and making the files."):
@@ -273,6 +294,9 @@ if S.get("final"):
                            mime="application/zip", type="primary", on_click="ignore")
         st.write("Inside: " + ", ".join(names) + ".")
         st.info("Nothing has been imported. Importing creates and changes products in the store, so check with "
-                "Colwyn before you import. The order is PU-new, then PU-merge, then PU-merge-new-sizes. Keep "
-                "PU-merge-ROLLBACK: it undoes PU-merge. Read the amber checks below first.")
+                "Colwyn before you import. PU-new creates the new products. PU-merge changes three things on each "
+                "re-bought product: its season, its season tag and the cost of every size (to this order's cost). "
+                "PU-merge-new-sizes adds the ordered sizes a product lacks, at that cost. The order is PU-new, then "
+                "PU-merge, then PU-merge-new-sizes. Keep PU-merge-ROLLBACK: it puts the season, the tag and the old "
+                "costs back. Read the amber checks below first.")
     checks_table(f["checks"])
