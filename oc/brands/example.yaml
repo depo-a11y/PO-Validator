@@ -1,0 +1,22 @@
+# Shape of a brand config. Copy to <brand>.local.yaml and fill in real values.
+# *.local.yaml is gitignored: cost multipliers, history paths and price data are
+# commercial and must never be committed while this repo is public.
+vendor: EXAMPLE BRAND          # exactly as in validator_core.APPROVED_VENDORS
+adapter: otb                   # OC parser in oc/adapters/
+season: S/S 27                 # Marais season label (slash form)
+sku_prefix: EXSS27             # new SKUs continue after the highest existing one
+sku_digits: 3
+cost_currency: EUR             # Variant.cost_price is written as "EUR 123"
+cost_multiplier: 1.0           # AUD Variant Cost = wholesale x this (season convention)
+margin_floor: 2.5              # must match validator_core.margin_threshold for the vendor
+price_round: 50                # retail rounded to this step when fitted from a ratio
+default_gender: MEN            # for collections that carry no gender (e.g. jewellery)
+history:                       # past season POs, newest first
+  - {label: F/W 26, path: ~/path/to/Brand_FW26_PO.xlsx}
+product_class_types:           # OC product class -> Type without gender (fallback only)
+  SNEAKERS: SHOES SNEAKERS
+  T-SHIRT: CLOTHING T-SHIRTS SHORT SLEEVE
+colour_families:               # colour-name keyword -> Option1 Value (fallback only)
+  BLACK: [black]
+  WHITE: [white, off white, ivory]
+country_names: {IT: Italy}

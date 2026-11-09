@@ -1,2 +1,9 @@
 __pycache__/
 *.pyc
+
+# OC tool: brand configs and catalog/PO data are commercial and this repo is public
+oc/brands/*.local.yaml
+*.local.yaml
+*.local.yml
+oc_runs/
+*catalog*.csv
