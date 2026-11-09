@@ -34,6 +34,10 @@ MUTANTS = [
     ("oc/finalize.py", "    if failed:\n        removed = []", "    if False:\n        removed = []", "all-or-nothing removed"),
     ("oc/finalize.py", 'ID_COMMAND = "UPDATE"', 'ID_COMMAND = "MERGE"', "ID-keyed sheets back to Command MERGE"),
     ("validator_core.py", '" ".join(p[2:])', '" ".join(p[2:4])', "sub_category truncated again"),
+    ("app.py", "columns_in_order = core.COLUMNS_IN_ORDER\n",
+     "columns_in_order = core.COLUMNS_IN_ORDER\n"
+     "split_t = lambda val: core.split_t(\" \".join(str(val).split()[:4]))\n",
+     "app.split_t a truncating copy, not the gate's (rebase onto b2a7c9e)"),
     ("oc/resolve.py", '                src, detail = "similar", (', '                src, detail = "catalog", (',
      "other-style same-EUR price shaded green"),
     ("oc/resolve.py", '            src = ("history" if n >= 2 else "thin") if price else None',

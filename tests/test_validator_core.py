@@ -67,6 +67,7 @@ def test_app_still_imports(monkeypatch):
     app = importlib.import_module("app")
     assert app.columns_in_order == core.COLUMNS_IN_ORDER
     assert app.assign_size_scale is core.assign_size_scale
+    assert app.split_t is core.split_t  # test_sub_category.py (from main) tests app.split_t: it must be the gate's
 
 
 @pytest.mark.parametrize("ptype,sub", [
