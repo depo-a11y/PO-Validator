@@ -40,8 +40,9 @@ MUTANTS = [
      '            src = "history" if price else None', "one-row history price shaded amber"),
     ("oc/resolve.py", '                src, detail = "fit", f"EUR', '                src, detail = "history", f"EUR',
      "ratio-fit price shaded amber"),
-    ("oc/finalize.py", '            costs = collections.Counter(round(x["cost"], 2) for x in sib if x["cost"] is not None)',
-     '            costs = collections.Counter([_r2(r["Variant Cost"])])', "new sizes take the PO cost"),
+    ("oc/finalize.py", '        n["Variant Cost"] = new_cost.get(n["ID"])',
+     '        n["Variant Cost"] = next(round(x["cost"], 2) for x in catalog.products[n["ID"]]["variants"] if x["cost"] is not None)',
+     "new sizes take the live cost, not the OC's (rule since f2ce816)"),
     ("oc/complete.py", "        if old == value:\n            return\n", "", "no-op fills logged (harmless: expect SURVIVED)"),
     # ---- cart ----
     ("oc/draft.py", 'Result="PASS" if hit else "FAIL"', 'Result="PASS" if hit else "INFO"', "wrong cart is not a FAIL"),
