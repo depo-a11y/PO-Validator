@@ -1,0 +1,270 @@
+"""The OC steps for a caller with no command line (the Streamlit page), UI-free.
+
+    draft(oc_path, catalog_path, brand_cfg, cart_path=None, history_paths=None)
+        -> (po_xlsx_bytes | None, review_df, checks)
+    finalize(po_path, catalog_path, brand_cfg) -> (zip_bytes | None, checks, gate_errors_df)
+
+Same steps as `python -m oc draft` and `python -m oc finalize`. Inputs are paths;
+everything written goes to a temporary folder and comes back as bytes, so
+nothing lands in the repo.
+
+Two differences from the CLI, both for a hosted app:
+- Past season POs. The brand config lists them as paths on one laptop. Here
+  `history_paths` (uploaded files) replaces the config's list, and config paths
+  that do not exist are skipped with a WARN check instead of a crash. Either way
+  a "Past season POs" check says what the retail prices were built from.
+- Bad inputs (an OC that fails its gates, a catalog missing columns, an
+  unreadable linesheet) come back as FAIL checks rather than exceptions.
+
+draft returns no workbook when a FAIL is one a reviewer cannot fix in the sheet
+(see FIXABLE_IN_SHEET). finalize is all or nothing: any FAIL, no zip.
+"""
+import collections
+import csv
+import datetime
+import io
+import os
+import re
+import sys
+import tempfile
+import zipfile
+from pathlib import Path
+
+import openpyxl
+import pandas as pd
+
+from . import brand as brandm
+from . import catalog as catm
+from . import finalize as finalizem
+from . import history as histm
+from . import poxlsx
+from .util import slug
+
+REPO = Path(__file__).resolve().parent.parent
+
+# Draft FAILs that a reviewer clears by editing the PO (finalize checks each again).
+# Matched as prefixes. Any other FAIL, including a check renamed later, stops the draft.
+FIXABLE_IN_SHEET = (
+    "NEW title does not collide with a live handle",
+    "One manufacture code per NEW title",
+    "Every NEW Type is in expected_tags.xlsx",
+    "NEW rows clear the ",
+)
+
+ZIP_MEMBERS = finalizem.OUTPUTS + ["finalize-checks.xlsx"]
+HISTORY_CHECK = "Past season POs (retail price history)"
+RED_WARNING = "Retail prices for new styles will mostly come back red."
+
+SEASON_RE = re.compile(r"\b(S/S|F/W|A/W)\s*(\d{2})\b")
+FILE_SEASON_RE = re.compile(r"(?<![A-Z])(SS|FW|AW)[\s_-]?(\d{2})(?!\d)", re.I)
+
+
+def fails(checks):
+    return [c for c in checks if c["Result"] == "FAIL"]
+
+
+def blocking(checks):
+    return [c for c in fails(checks) if not str(c["Check"]).startswith(FIXABLE_IN_SHEET)]
+
+
+def _check(name, result, detail):
+    return dict(Check=name, Result=result, Detail=detail)
+
+
+def adapter(brand_cfg):
+    if brand_cfg["adapter"] == "otb":
+        from .adapters import otb
+        return otb
+    raise brandm.BrandError(f"unknown adapter '{brand_cfg['adapter']}'")
+
+
+def cart_supported():
+    try:
+        from . import cart
+    except ImportError:
+        return False
+    return hasattr(cart, "load") and hasattr(cart, "CartError")
+
+
+def _core():
+    if str(REPO) not in sys.path:
+        sys.path.insert(0, str(REPO))
+    import validator_core
+    return validator_core
+
+
+# ---- naming --------------------------------------------------------------------
+def today():
+    try:
+        from zoneinfo import ZoneInfo
+        return datetime.datetime.now(ZoneInfo("Australia/Melbourne")).date()
+    except Exception:
+        return datetime.date.today()
+
+
+def file_prefix(brand_cfg, day=None):
+    """'2026-11-09-margiela-ss27-': date, brand, season, the house naming for outputs."""
+    day = day or today()
+    season = re.sub(r"[^a-z0-9]", "", str(brand_cfg["season"]).lower())
+    return f"{day:%Y-%m-%d}-{slug(brand_cfg.get('_name') or brand_cfg['vendor'])}-{season}-"
+
+
+# ---- past season POs -----------------------------------------------------------
+def season_key(label):
+    m = SEASON_RE.search(str(label or "").upper())
+    return (int(m.group(2)), 0 if m.group(1) == "S/S" else 1) if m else None
+
+
+def history_status(brand_cfg):
+    """(present, missing): the config's history entries split by whether the file exists here."""
+    hist = brand_cfg.get("history") or []
+    return ([h for h in hist if os.path.exists(h["path"])],
+            [h for h in hist if not os.path.exists(h["path"])])
+
+
+def label_upload(path, brand_cfg):
+    """Season label for an uploaded past PO: the config's label for a file of the same name,
+    else the most common value of its season column, else a season in its file name."""
+    base = os.path.basename(path)
+    for h in brand_cfg.get("history") or []:
+        if os.path.basename(h["path"]) == base:
+            return h["label"], "brand config"
+    seasons = collections.Counter()
+    wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+    try:
+        it = wb.worksheets[0].iter_rows(values_only=True)
+        hdr = [str(h).strip() if h is not None else None for h in next(it, ())]
+        if poxlsx.SEASON in hdr:
+            i = hdr.index(poxlsx.SEASON)
+            for r in it:
+                v = r[i] if i < len(r) else None
+                if season_key(v):
+                    seasons[str(v).strip()] += 1
+    finally:
+        wb.close()
+    if seasons:
+        return seasons.most_common(1)[0][0], "season column"
+    m = FILE_SEASON_RE.search(base)
+    if m:
+        return f"{dict(SS='S/S', FW='F/W', AW='A/W')[m.group(1).upper()]} {m.group(2)}", "file name"
+    return None, None
+
+
+def plan_history(brand_cfg, history_paths=None):
+    """The {label, path} list the draft uses, newest first, and the check row that says so."""
+    if history_paths:
+        items, unlabelled = [], []
+        for p in history_paths:
+            label, how = label_upload(p, brand_cfg)
+            if label is None:
+                unlabelled.append(os.path.basename(p))
+                label = Path(p).stem
+            items.append(dict(label=label, path=p))
+        items.sort(key=lambda h: season_key(h["label"]) or (-1, -1), reverse=True)
+        detail = f"{len(items)} uploaded, used instead of the brand config's list"
+        if unlabelled:
+            return items, _check(HISTORY_CHECK, "WARN", detail + f"; no season found in {', '.join(unlabelled)}, "
+                                                            "so they are read last")
+        return items, _check(HISTORY_CHECK, "INFO", detail)
+    present, missing = history_status(brand_cfg)
+    if missing:
+        return present, _check(HISTORY_CHECK, "WARN",
+                               f"{len(missing)} of {len(missing) + len(present)} in the brand config are not on this "
+                               f"computer ({', '.join(h['label'] for h in missing)}). {RED_WARNING} "
+                               "Upload them as past season POs to fix this.")
+    if not present:
+        return [], _check(HISTORY_CHECK, "WARN", f"none in the brand config and none uploaded. {RED_WARNING}")
+    return present, _check(HISTORY_CHECK, "INFO", f"{len(present)} from the brand config")
+
+
+def _history_detail(check, hist):
+    seasons = [(label, len(rows)) for label, rows in hist.seasons]
+    empty = [label for label, n in seasons if not n]
+    check = dict(check, Detail=check["Detail"] + ": " + ", ".join(f"{label} ({n} rows)" for label, n in seasons)
+                 if seasons else check["Detail"])
+    if empty:
+        check.update(Result="WARN", Detail=check["Detail"] + f". No manufacture codes in {', '.join(empty)}: "
+                                                             "is that a PO buy sheet?")
+    return check
+
+
+# ---- step 1 --------------------------------------------------------------------
+def draft(oc_path, catalog_path, brand_cfg, cart_path=None, history_paths=None):
+    """OC + catalog (+ linesheet, + past POs) -> (draft PO xlsx bytes | None, Review DataFrame, checks)."""
+    from . import draft as draftm
+    empty = pd.DataFrame()
+    core = _core()
+    try:
+        items, hcheck = plan_history(brand_cfg, history_paths)
+        hist = histm.load(items)
+    except Exception as e:
+        return None, empty, [_check(HISTORY_CHECK, "FAIL", f"could not read a past PO: {type(e).__name__}: {e}")]
+    pre = [_history_detail(hcheck, hist)]
+    try:
+        cat = catm.load(catalog_path)
+    except catm.CatalogError as e:
+        return None, empty, pre + [_check("Catalog export has the columns the tool needs", "FAIL", str(e))]
+    except (UnicodeDecodeError, csv.Error) as e:
+        return None, empty, pre + [_check("Catalog export is a Matrixify CSV", "FAIL", f"{type(e).__name__}: {e}")]
+    try:
+        ad = adapter(brand_cfg)
+        docs = ad.parse_checked(oc_path)
+    except brandm.BrandError as e:
+        return None, empty, pre + [_check("Brand config names a known OC layout", "FAIL", str(e))]
+    except Exception as e:
+        problems = getattr(e, "problems", None) or [f"{type(e).__name__}: {e}"]
+        return None, empty, pre + [_check("Order confirmation passes its gates (parsed = printed)", "FAIL", p)
+                                   for p in problems]
+    cart = None
+    if cart_path:
+        try:
+            from . import cart as cartm
+        except ImportError:
+            return None, empty, pre + [_check("Linesheet/cart export can be read", "FAIL",
+                                              "this version of the tool cannot read a linesheet yet; "
+                                              "build the draft without one")]
+        try:
+            cart = cartm.load(cart_path)
+        except cartm.CartError as e:
+            return None, empty, pre + [_check("Linesheet/cart export can be read", "FAIL", str(e))]
+    tags = core.load_tag_lookup(str(REPO / "expected_tags.xlsx"))
+    rows, review, checks, fills = draftm.build(docs, brand_cfg, cat, hist, tags, cart=cart)
+    checks = pre + checks
+    with tempfile.TemporaryDirectory(prefix="oc-draft-") as tmp:
+        out = os.path.join(tmp, "PO-draft.xlsx")
+        poxlsx.write_po(out, poxlsx.PO_HEADER, rows, review, checks, fills)
+        data = Path(out).read_bytes()
+    return (None if blocking(checks) else data), pd.DataFrame(review), checks
+
+
+# ---- step 2 --------------------------------------------------------------------
+def finalize(po_path, catalog_path, brand_cfg, day=None):
+    """Checked PO -> (zip of the upload and delivery files | None, checks, PU-new gate errors).
+
+    All or nothing: if any check FAILs there is no zip at all."""
+    prefix = file_prefix(brand_cfg, day)
+    with tempfile.TemporaryDirectory(prefix="oc-finalize-") as tmp:
+        try:
+            cat = catm.load(catalog_path)
+        except catm.CatalogError as e:
+            return None, [_check("Catalog export has the columns the tool needs", "FAIL", str(e))], pd.DataFrame()
+        try:
+            checks = finalizem.run(po_path, brand_cfg, cat, os.path.join(tmp, prefix))
+        except Exception as e:
+            return None, [_check("The PO can be read", "FAIL", f"{type(e).__name__}: {e}")], pd.DataFrame()
+        checks = [dict(c, Detail=str(c["Detail"]).replace(tmp + os.sep, "")) for c in checks]
+        report = os.path.join(tmp, prefix + "PU-new-VALIDATION_ERRORS_REPORT.xlsx")
+        errors = pd.read_excel(report) if os.path.exists(report) else pd.DataFrame()
+        if fails(checks):
+            return None, checks, errors
+        wb = openpyxl.Workbook()
+        wb.remove(wb.active)
+        poxlsx.write_table(wb, "Checks", checks, colour_key="Result")
+        wb.save(os.path.join(tmp, prefix + "finalize-checks.xlsx"))
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+            for name in ZIP_MEMBERS:
+                p = os.path.join(tmp, prefix + name)
+                if os.path.exists(p):
+                    z.write(p, prefix + name)
+        return buf.getvalue(), checks, errors

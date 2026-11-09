@@ -7,3 +7,6 @@ oc/brands/*.local.yaml
 *.local.yml
 oc_runs/
 *catalog*.csv
+
+# Streamlit secrets: the hosted app's brand configs ([oc_brands]) live here. Never commit.
+.streamlit/secrets.toml
