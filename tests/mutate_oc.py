@@ -61,7 +61,7 @@ MUTANTS = [
     ("oc/draft.py", '    prefixes = brand.get("title_prefixes") or {"WOMEN": brand["womens_prefix"]}',
      '    prefixes = {"WOMEN": brand["womens_prefix"]}', "brand title_prefixes ignored"),
     ("oc/resolve.py", '        if row and row["subcategory"]:', "        if False:", "cart subcategory Type removed"),
-    ("oc/resolve.py", '        if sib and " ".join(sib[0].split()).casefold() == " ".join(value.split()).casefold():',
+    ("oc/resolve.py", '        if sib and " ".join(html.unescape(sib[0]).split()).casefold() == " ".join(value.split()).casefold():',
      "        if sib:", "cart value green although the live style disagrees"),
     # ---- cart text is data ----
     ("oc/resolve.py", '        if "<" in value or ">" in value:', "        if False:", "cart markup used in Body HTML"),
