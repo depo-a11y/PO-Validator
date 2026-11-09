@@ -254,7 +254,10 @@ def _pu_new(new, brand, catalog, core, out_prefix):
                     Result="WARN" if long_tags else "PASS", Detail=f"{len(long_tags)} over 60"))
     if (df["Published"].astype(str).str.upper() == "FALSE").any():
         out.append(dict(Check="Published = FALSE has no Published Scope", Result="WARN",
-                        Detail="Matrixify defaults the scope to global, so check POS visibility after import"))
+                        Detail="Published = FALSE keeps them off the Online Store only. Matrixify defaults the scope "
+                               "to global, so after import they may be on Point of Sale, Shop, Microsoft Copilot and "
+                               "Meta AI and Muse. No sheet column sets Copilot or Meta AI, so check each product's "
+                               "sales channels in Shopify after import, before stock lands."))
     blanked = int(((df_in[MADE_IN] == "") & (pd.Series([_s(r.get(MADE_IN)) for r in new]) == brand["unknown"])).sum())
     if blanked:
         out.append(dict(Check="made_in '-' placeholder not written to the store", Result="INFO",

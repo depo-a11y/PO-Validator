@@ -127,6 +127,8 @@ def test_draft_merge_and_new(catalog_path):
     assert not [c for c in checks if c["Result"] == "FAIL"]
     sources = {(x["Column"], x["Source"]) for x in review if x["Code"] == "S99WS0001P0001 900"}
     assert ("Title", "guess") in sources and ("Variant SKU", "rule") in sources  # stem is live, colour name is not
+    why = {x["Why"] for x in review if x["Column"] == "Published" and x["Code"] == "S99WS0001P0001 900"}
+    assert why == {"created Active and off the Online Store; it can still show in POS and other sales channels"}
 
 
 def test_sku_allocation_skips_catalog(catalog_path):

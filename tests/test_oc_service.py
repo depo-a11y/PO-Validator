@@ -182,6 +182,10 @@ def test_finalize_zips_every_file_with_dated_names(tmp_path):
     details = [str(r[2].value) for r in ck.iter_rows(min_row=2)]
     assert any(d.startswith(PREFIX + "PU-new.xlsx: ") for d in details)
     assert not any("oc-finalize-" in d for d in details)  # no temporary folder leaks into the file
+    scope = next(c for c in checks if c["Check"] == "Published = FALSE has no Published Scope")
+    assert scope["Result"] == "WARN"
+    assert ("after import they may be on Point of Sale, Shop, Microsoft Copilot and Meta AI and Muse. No sheet column "
+            "sets Copilot or Meta AI") in scope["Detail"]
 
 
 def test_finalize_gives_no_zip_and_the_fails_when_a_gate_fails(tmp_path):

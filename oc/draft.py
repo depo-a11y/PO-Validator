@@ -128,7 +128,8 @@ def build(docs, brand, catalog, history, tag_lookup, cart=None):
                  else "cart" if "cart" in (comp_src, made_src) else "catalog",
                  f"template; composition: {comp_why}; made in: {made_why}")
             cell(row, "Status", brand["status"], "rule", "brand config")
-            cell(row, "Published", brand["published_new"], "rule", "new stock is created unpublished")
+            cell(row, "Published", brand["published_new"], "rule",
+                 "created Active and off the Online Store; it can still show in POS and other sales channels")
             cell(row, "Option1 Name", brand["option1_name"], "rule", "house option order")
             cell(row, "Option1 Value", fam, f_src, f_why)
             cell(row, "Option2 Name", brand["option2_name"], "rule", "house option order")

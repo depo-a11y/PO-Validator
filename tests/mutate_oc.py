@@ -109,6 +109,11 @@ MUTANTS = [
     ("oc/finalize.py", '    return dict(Check=check, Result="WARN",', '    return dict(Check=check, Result="INFO",',
      "post-import signs reported as INFO"),
     # ---- one run id ties a PU-merge to its own rollback (case 2026-11-09-buyer-9 N1) ----
+    # ---- F4: say where unpublished new stock still lands (case 2026-11-09-buyer-9) ----
+    ("oc/draft.py", '"created Active and off the Online Store; it can still show in POS and other sales channels"',
+     '"new stock is created unpublished"', "Review says new stock is created unpublished"),
+    ("oc/finalize.py", '"to global, so after import they may be on Point of Sale, Shop, Microsoft Copilot and "',
+     '"to global, so check POS visibility after import"', "Published Scope WARN names only POS"),
     ("pages/1_Order_confirmation_to_PO.py",
      '                "Use the PU-merge-ROLLBACK from the same zip as the PU-merge you import, made before importing. "\n',
      "", "page drops the same-zip rollback line"),
