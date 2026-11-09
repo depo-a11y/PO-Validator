@@ -73,7 +73,7 @@ def append_text(ws, values, keep_formula=None):
 def write_frame(path, frame, sheet_name="Sheet1"):
     """DataFrame.to_excel(path, index=False, sheet_name=...) without the formula
     hole: pandas hands strings to openpyxl, which saves '=...' as a formula.
-    Blank (NaN/None/NA) cells stay empty, as with to_excel."""
+    Blank cells ("", NaN, None, NA) are not written at all, as with to_excel."""
     import pandas as pd
     wb = openpyxl.Workbook()
     ws = wb.active
@@ -81,8 +81,11 @@ def write_frame(path, frame, sheet_name="Sheet1"):
     append_text(ws, [str(c) for c in frame.columns])
     for c in ws[1]:
         c.font = Font(bold=True)
+    def blank(v):
+        return v == "" if isinstance(v, str) else bool(pd.isna(v))
+
     for row in frame.itertuples(index=False, name=None):
-        append_text(ws, [None if (not isinstance(v, str) and pd.isna(v)) else v for v in row])
+        append_text(ws, [None if blank(v) else v for v in row])
     wb.save(path)
 
 

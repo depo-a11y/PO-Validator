@@ -77,6 +77,8 @@ MUTANTS = [
      "control characters not stripped"),
     ("oc/poxlsx.py", "resolve_formula(v, raw, r) if f else v", "resolve_formula(v, raw, r)", "read_po reads text as a formula"),
     ("oc/complete.py", "            as_text(c)", "            pass", "complete writes cart text as a formula"),
+    ("oc/poxlsx.py", '        return v == "" if isinstance(v, str) else bool(pd.isna(v))',
+     '        return False if isinstance(v, str) else bool(pd.isna(v))', "write_frame writes '' as an empty text cell"),
 ]
 
 

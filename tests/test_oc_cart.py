@@ -429,3 +429,26 @@ def test_cart_family_agreeing_with_the_catalog_colour_code_stays_green(tmp_path)
     a, b = _review(review, JACKET_A, "Option1 Value"), _review(review, JACKET_B, "Option1 Value")
     assert (a["Value"], a["Colour"]) == ("BEIGE", "green") and "agrees" in a["Why"]     # cart Beige = catalog BEIGE
     assert (b["Value"], b["Colour"]) == ("WHITE", "amber") and "961 is BEIGE" in b["Why"]  # cart wins, says so
+
+
+def test_write_frame_matches_to_excel_cell_for_cell(tmp_path):
+    import pandas as pd
+    frame = pd.DataFrame({
+        "ID": ["8123456789012", "8123456789013", "8123456789014", "8123456789015"],
+        "Blank": ["", "", None, float("nan")],
+        "Mixed": ["", "x", None, "- Lining: 100% Viscose"],
+        "Price": [1.5, None, 3.0, float("nan")],
+        "Qty": [1, 2, 3, 4],
+        "Int64": pd.array([1, None, 3, pd.NA], dtype="Int64"),
+        "Flag": [True, False, True, False],
+        "Code": ["S52AH0089M36273 115", "+61 3", "@home", "OS"],
+    })
+    ours, theirs = tmp_path / "ours.xlsx", tmp_path / "theirs.xlsx"
+    poxlsx.write_frame(str(ours), frame, "Products")
+    frame.to_excel(theirs, index=False, sheet_name="Products")
+
+    def cells(path):
+        ws = openpyxl.load_workbook(path)["Products"]
+        return {(c.row, c.column): (c.value, c.data_type) for row in ws.iter_rows() for c in row
+                if c.value is not None or c.data_type != "n"}
+    assert cells(ours) == cells(theirs)
