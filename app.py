@@ -369,6 +369,11 @@ def assign_size_scale(row):
 
     # 8. FINAL FALLBACK
     return "ONE_SIZE"
+
+def split_t(val):
+    p = str(val).split()
+    return pd.Series([p[0], p[1], " ".join(p[2:])]) if len(p) >= 3 else pd.Series(["", "", ""])
+
 # Generate tags, gender, category, sub-category, size scale, brand colour id, autofills inventory, syncs manufacture codes across metafields, variant metafields; season, barcode and sale/new, generate local market price
 def run_transformations(df):
 
@@ -405,9 +410,6 @@ def run_transformations(df):
     df["Tags"] = df.apply(generate_all_tags, axis=1)
 
     # Split Type into FF categories
-    def split_t(val):
-        p = str(val).split()
-        return pd.Series([p[0], p[1], " ".join(p[2:4])]) if len(p) >= 3 else pd.Series(["", "", ""])
     df[["Metafield: custom.gender [single_line_text_field]", "Metafield: custom.category [single_line_text_field]", "Metafield: custom.sub_category [single_line_text_field]"]] = df["Type"].apply(split_t)
 
     # Assign Size scale
