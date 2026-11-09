@@ -179,7 +179,7 @@ def _hand_po(path, cat_rows):
     ws = wb.active
     ws.append(header)
     for r in cat_rows:
-        ws.append([r.get(h) if h else None for h in header])
+        poxlsx.append_text(ws, [r.get(h) if h else None for h in header])  # as the tool writes a PO: text stays text
     wb.save(path)
 
 
@@ -252,12 +252,12 @@ def test_complete_rejects_a_price_override_the_oc_does_not_confirm(catalog_path,
                      price_overrides={"S99WS0001P0001 101": 999.0})
 
 
-def _finalize_po(tmp_path, title="Replica Sneaker in Black", option1="BLACK"):
+def _finalize_po(tmp_path, title="Replica Sneaker in Black", option1="BLACK", body="<p>x</p>"):
     base = {"Vendor": "MAISON MARGIELA", "Status": "Active", "Option1 Name": "Colour", "Option2 Name": "Size",
             poxlsx.SEASON: "S/S 27", poxlsx.NEW_SALE: "NEW", "Wholesale Price": 200.0, "Variant Cost": 300.0,
             poxlsx.COST_PRICE: "EUR 200", "Command": "NEW", "Title": title, "Type": "MEN SHOES SNEAKERS",
             "Published": False, "Option1 Value": option1, poxlsx.CODE: "S99WS0001P0001 900", poxlsx.MADE_IN: "Italy",
-            "Body HTML": "<p>x</p>", "Variant Price": 800.0, "Variant Compare At Price": 800.0,
+            "Body HTML": body, "Variant Price": 800.0, "Variant Compare At Price": 800.0,
             poxlsx.TITLE_TAG: f"MAISON MARGIELA - {title} |MARAIS"}
     rows = [dict(base, **{"Option2 Value": s, "Variant SKU": f"MMSS2709{s}", "Order Qty": 2, "Total Order": 400.0})
             for s in ("41", "42")]
@@ -331,12 +331,12 @@ def split_catalog_path(tmp_path):
     return str(p)
 
 
-def _merge_po(tmp_path, po_cost=300.0):
+def _merge_po(tmp_path, po_cost=300.0, cost_price="EUR 200"):
     base = {"Command": "MERGE", "Vendor": "MAISON MARGIELA", "Status": "Active", "Title": "Replica Sneaker in White",
             "Type": "MEN SHOES SNEAKERS", "Published": True, "Option1 Name": "Colour", "Option1 Value": "WHITE",
             "Option2 Name": "Size", poxlsx.CODE: "S99WS0001P0001 101", poxlsx.SEASON: "S/S 27", poxlsx.NEW_SALE: "CORE",
             poxlsx.MADE_IN: "Italy", "Variant Price": 800.0, "Variant Compare At Price": 800.0,
-            "Wholesale Price": 200.0, "Variant Cost": po_cost, poxlsx.COST_PRICE: "EUR 200", "Order Qty": 1,
+            "Wholesale Price": 200.0, "Variant Cost": po_cost, poxlsx.COST_PRICE: cost_price, "Order Qty": 1,
             "Total Order": 200.0}
     rows = [dict(base, **{"Option2 Value": s, "Variant SKU": sku}) for s, sku in (("41", "MMFW26101"), ("43", "MMSS27001"))]
     po = tmp_path / "merge-po.xlsx"
@@ -405,3 +405,32 @@ def test_cost_overwrite_check_names_each_failure(split_catalog_path):
     assert "not a variant of product 1" in result(rows([300.0] * 3) + rows([300.0], ("3S",)))["Detail"]
     assert "not re-bought are touched: ['3']" in result(rows([300.0] * 3) + rows([300.0], ("3S",), "3"))["Detail"]
     assert "new size MMSS27001" in result(rows([300.0] * 3), [{"ID": "1", "Variant SKU": "MMSS27001", "Variant Cost": 310.0}])["Detail"]
+
+
+def _cells(ws, col):
+    hdr = [c.value for c in ws[1]]
+    return [(ws.cell(r, hdr.index(col) + 1).value, ws.cell(r, hdr.index(col) + 1).data_type) for r in range(2, ws.max_row + 1)]
+
+
+def test_text_that_starts_like_a_formula_is_written_as_text(catalog_path, split_catalog_path, tmp_path):
+    title, body = '=HYPERLINK("http://x.test","Replica Sneaker in Black")', "=1+2"
+    prefix = str(tmp_path / "n-")
+    checks = finalize.run(_finalize_po(tmp_path, title=title, body=body), BRAND, catm.load(catalog_path), prefix)
+    assert not [c for c in checks if c["Result"] == "FAIL"], checks
+    new = openpyxl.load_workbook(prefix + "PU-new.xlsx")["Products"]
+    assert _cells(new, "Title") == [(title, "s")] * 2 and _cells(new, "Body HTML") == [(body, "s")] * 2
+    d = openpyxl.load_workbook(prefix + "Delivery.xlsx")["Sheet 1"]
+    assert _cells(d, "Title") == [(title, "s")] * 2
+    assert [t for _, t in _cells(d, "Total Delivered") + _cells(d, "Remaining")] == ["f"] * 4  # the sheet's own formulas
+
+    cat = catm.load(split_catalog_path)
+    cat.products["1"]["season"] = "=F/W 26"
+    prefix = str(tmp_path / "m-")
+    checks = finalize.run(_merge_po(tmp_path, cost_price="=EUR 200"), dict(BRAND, season="=S/S 27"), cat, prefix)
+    assert not [c for c in checks if c["Result"] == "FAIL"], checks
+    m = openpyxl.load_workbook(prefix + "PU-merge.xlsx")["Products"]
+    assert _cells(m, "Tags")[0] == ("=S/S 27", "s") and _cells(m, poxlsx.SEASON)[0] == ("=S/S 27", "s")
+    rb = openpyxl.load_workbook(prefix + "PU-merge-ROLLBACK.xlsx")["Products"]
+    assert _cells(rb, poxlsx.SEASON)[0] == ("=F/W 26", "s")
+    ns = openpyxl.load_workbook(prefix + "PU-merge-new-sizes.xlsx")["Products"]
+    assert _cells(ns, poxlsx.COST_PRICE) == [("=EUR 200", "s")]

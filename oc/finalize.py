@@ -41,7 +41,8 @@ import pandas as pd
 from openpyxl.styles import Font
 from openpyxl.utils import get_column_letter
 
-from .poxlsx import read_po, CODE, MADE_IN, SEASON, NEW_SALE, COST_PRICE, TITLE_TAG, AUD_FMT, EUR_FMT, write_table
+from .poxlsx import (read_po, CODE, MADE_IN, SEASON, NEW_SALE, COST_PRICE, TITLE_TAG, AUD_FMT, EUR_FMT, write_table,
+                     write_frame, append_text)
 from .util import blank, norm_code, norm_size, money, slug
 
 REPO = Path(__file__).resolve().parent.parent
@@ -231,7 +232,7 @@ def _pu_new(new, brand, catalog, core, out_prefix):
     final = df[core.COLUMNS_IN_ORDER]
     note = (f"{len(df)} rows, {df['Title'].nunique()} products, columns = app.py columns_in_order "
             f"({len(core.COLUMNS_IN_ORDER)})")
-    return out, [(f"{out_prefix}PU-new.xlsx", lambda p: final.to_excel(p, index=False, sheet_name="Products"), note)]
+    return out, [(f"{out_prefix}PU-new.xlsx", lambda p: write_frame(p, final, "Products"), note)]
 
 
 # ---- PU-merge ------------------------------------------------------------------
@@ -350,7 +351,7 @@ def _pu_merge(merge, brand, catalog, core, out_prefix):
             f"on each product's first row, and Variant Cost = the OC cost on every variant. No Title, Handle, Body HTML, "
             f"price or variant metafield column.")
     frame = pd.DataFrame(rows, columns=MERGE_PRODUCT_COLS + VARIANT_COST_COLS)
-    writers.append((f"{out_prefix}PU-merge.xlsx", lambda p: frame.to_excel(p, index=False, sheet_name="Products"), note))
+    writers.append((f"{out_prefix}PU-merge.xlsx", lambda p: write_frame(p, frame, "Products"), note))
 
     rb_frame = pd.DataFrame(rb, columns=ROLLBACK_COLS + VARIANT_COST_COLS)
     out.append(dict(Check="Rollback for PU-merge", Result="INFO",
@@ -363,7 +364,7 @@ def _pu_merge(merge, brand, catalog, core, out_prefix):
                               f"cell clears the cost): " + ", ".join(f"{t} {vid}" for t, vid in nocost) if nocost else "")
                            + ". It does not remove the variants PU-merge-new-sizes adds."))
     writers.append((f"{out_prefix}PU-merge-ROLLBACK.xlsx",
-                    lambda p: rb_frame.to_excel(p, index=False, sheet_name="Products"),
+                    lambda p: write_frame(p, rb_frame, "Products"),
                     f"{len(rb)} variant rows on {len(blocks)} products, Command UPDATE, Variant Command UPDATE"))
 
     if new_sizes:
@@ -375,7 +376,7 @@ def _pu_merge(merge, brand, catalog, core, out_prefix):
                                + (f"; SKU problem: {clash}" if clash else "")))
         ns_frame = pd.DataFrame(new_sizes, columns=NEW_SIZE_COLS)
         writers.append((f"{out_prefix}PU-merge-new-sizes.xlsx",
-                        lambda p: ns_frame.to_excel(p, index=False, sheet_name="Products"),
+                        lambda p: write_frame(p, ns_frame, "Products"),
                         f"{len(new_sizes)} variants, Command UPDATE, Variant Command MERGE"))
     return out, writers
 
@@ -428,7 +429,7 @@ def _delivery(rows, out_prefix):
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "Sheet 1"
-    ws.append(DELIVERY_HEADER)
+    append_text(ws, DELIVERY_HEADER)
     for c in ws[1]:
         c.font = Font(bold=True)
     col = {h: i + 1 for i, h in enumerate(DELIVERY_HEADER) if h not in ("Value",)}
@@ -443,14 +444,18 @@ def _delivery(rows, out_prefix):
         tot = _r2(r.get("Total Order")) or 0
         units += qty
         value += tot
-        ws.append([
+        append_text(ws, [
             _s(r["Title"]), _s(r["Vendor"]), _s(r["Type"]), _s(r["Option1 Value"]), size, _s(r["Variant SKU"]),
             _r2(r["Variant Price"]), _r2(r["Variant Compare At Price"]), _r2(r["Variant Cost"]),
             code, nospace, nospace + size, _s(r.get(SEASON)), _s(r.get(MADE_IN)), _s(r.get(NEW_SALE)),
             _s(r.get(COST_PRICE)), _r2(r["Wholesale Price"]), tot, qty,
+        ])
+        formulas = (
             f'=SUMIF(${first_tranche}$1:$AZ$1,"<>Value",{first_tranche}{n}:AZ{n})',
             f"={get_column_letter(col['Order Qty'])}{n}-{get_column_letter(col['Total Delivered'])}{n}",
-        ])
+        )
+        for h, f in zip(("Total Delivered", "Remaining"), formulas):
+            ws.cell(n, col[h]).value = f
         for h in ("Variant Price", "Variant Compare At Price", "Variant Cost"):
             ws.cell(n, col[h]).number_format = AUD_FMT
         for h in ("Wholesale Price", "Total Order"):
