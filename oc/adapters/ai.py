@@ -475,11 +475,17 @@ def _money_shape(raw):
 
 
 def unclaimed_problems(data, pages):
-    """Each page the AI declared to have no order lines, checked on its own against the PDF text: it must not
-    print a confirmation number (shaped like a returned one, after the same words) that was not returned, nor a
-    style-shaped code with two or more amounts in the confirmation's money format."""
+    """Every page checked on its own against the PDF text, so a confirmation cannot vanish by having its pages
+    declared empty or handed to a neighbour:
+    - no page may print a confirmation number (shaped like a returned one, after the same words) that was not
+      returned;
+    - a page that prints order lines (a style-shaped code with two or more amounts in the confirmation's money
+      format) may not be declared empty, nor given to a confirmation none of whose lines were read on it. A totals
+      or terms page, with no style-shaped code, may go either way."""
     raw, out = data["documents"], []
     returned = {_flat(d["number"]) for d in raw}
+    empty = set(data.get("pages_without_lines") or [])
+    owner = {p: d["number"] for d in raw for p in d["pages"]}
     numbers = set()
     for d in raw:
         exact = r"\s*".join(re.escape(c) for c in _flat(d["number"]))
@@ -491,21 +497,35 @@ def unclaimed_problems(data, pages):
                 break
     styles = {_shape(l["style"], exact_digits=True) for d in raw for l in d["lines"] if l["style"]}
     money = _money_shape(raw)
-    for p in sorted(set(data.get("pages_without_lines") or [])):
-        if not 1 <= p <= len(pages):
-            continue
-        text = pages[p - 1]
-        for pat in numbers:
-            for m in re.finditer(pat, text, re.I):
-                if _flat(m.group("num")) not in returned:
-                    out.append(f"page {p} prints confirmation number '{m.group('num')}', which was not returned "
-                               "(it was listed as a page with no order lines)")
+
+    def order_lines(text):
         words = text.split()
         code = next((w for w in words if any(re.fullmatch(s, w) for s in styles)), None)
         amounts = [w for w in words if money and money.fullmatch(_bare(w))]
-        if code and len(amounts) >= 2:
-            out.append(f"page {p} prints order lines (code '{code}' and {len(amounts)} amounts) but was listed as "
+        return (code, len(amounts)) if code and len(amounts) >= 2 else None
+
+    for p in range(1, len(pages) + 1):
+        seen = set()
+        for pat in numbers:
+            for m in re.finditer(pat, pages[p - 1], re.I):
+                num = m.group("num")
+                if _flat(num) not in returned and _flat(num) not in seen:
+                    seen.add(_flat(num))
+                    where = (" (it was listed as a page with no order lines)" if p in empty else
+                             f" (it was given to {owner[p]})" if p in owner else "")
+                    out.append(f"page {p} prints confirmation number '{num}', which was not returned{where}")
+    for p in sorted(empty):
+        found = order_lines(pages[p - 1]) if 1 <= p <= len(pages) else None
+        if found:
+            out.append(f"page {p} prints order lines (code '{found[0]}' and {found[1]} amounts) but was listed as "
                        "having none")
+    for d in raw:
+        read_on = {l["page"] for l in d["lines"]}
+        for p in sorted(set(d["pages"]) - read_on):
+            found = order_lines(pages[p - 1]) if 1 <= p <= len(pages) else None
+            if found:
+                out.append(f"page {p} prints order lines (code '{found[0]}' and {found[1]} amounts) but none of "
+                           f"{d['number']}'s lines were read on it")
     return out
 
 

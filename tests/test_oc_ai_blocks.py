@@ -534,3 +534,45 @@ def test_words_run_together_by_the_default_extraction_are_read_from_the_tight_on
               "4", "120.00", cur="USD")
     assert ai.interpret(copy.deepcopy(raw), _layout_cfg(raw), [loose])[1] != []
     assert ai.interpret(copy.deepcopy(raw), _layout_cfg(raw), [loose], [tight])[1] == []
+
+
+# ---- a confirmation dropped, its pages given to a neighbouring confirmation --------------------------------
+def test_a_dropped_confirmation_is_refused_when_its_pages_go_to_a_neighbour(two_confirmations, key):
+    one = copy.deepcopy(RESPONSE)
+    one["documents"][0]["pages"] = [1, 2]
+    one["pages_without_lines"] = [3]
+    got = _fails(_refused(two_confirmations, one), ai.PAGES_CHECK)[0]
+    assert "page 2 prints confirmation number 'SO-90002', which was not returned (it was given to SO-90001)" in got
+    assert "page 2 prints order lines (code 'EXJK11' and 7 amounts) but none of SO-90001's lines were read on it" in got
+
+
+def test_a_page_of_lines_given_to_a_confirmation_with_none_of_them_is_refused(tmp_path, key):
+    rest = [l for l in SECOND if "SO-90002" not in l and "ORDER CONFIRMATION" not in l]
+    pdf = make_pages_pdf(tmp_path / "cont.pdf", [PDF_LINES, rest, TERMS])
+    one = copy.deepcopy(RESPONSE)
+    one["documents"][0]["pages"] = [1, 2]
+    one["pages_without_lines"] = [3]
+    got = _fails(_refused(pdf, one), ai.PAGES_CHECK)[0]
+    assert "page 2 prints order lines (code 'EXJK11'" in got and "none of SO-90001's lines were read on it" in got
+    assert "confirmation number" not in got
+
+
+def test_an_unreturned_confirmation_number_is_refused_on_any_page(tmp_path, key):
+    header = ["Document Number: SO-90002", "GENERAL TERMS AND CONDITIONS OF SALE"]
+    pdf = make_pages_pdf(tmp_path / "hdr.pdf", [PDF_LINES, header])
+    one = copy.deepcopy(RESPONSE)
+    one["documents"][0]["pages"] = [1, 2]
+    got = _fails(_refused(pdf, one), ai.PAGES_CHECK)[0]
+    assert got == "page 2 prints confirmation number 'SO-90002', which was not returned (it was given to SO-90001)"
+
+
+@pytest.mark.parametrize("extra", [
+    TERMS,
+    ["Document Number: SO-90001 terms continued", "Penalty EUR 1.000,00 and EUR 2.000,00"],
+    ["Total Qty 9 Net Value EUR 2.716,50", "Goods EUR 2.716,50 Freight EUR 0,00"],
+])
+def test_a_terms_or_totals_page_given_to_its_confirmation_passes(tmp_path, key, extra):
+    pdf = make_pages_pdf(tmp_path / "own.pdf", [PDF_LINES, extra])
+    one = copy.deepcopy(RESPONSE)
+    one["documents"][0]["pages"] = [1, 2]
+    assert ai.read(pdf, _cfg(), factory=FakeClient(message(one)).factory)[0]

@@ -176,16 +176,18 @@ line's style), matched with spaces removed; its fabric and colour must be whole 
 ('101' is not in '510 15/10/2026'), or for a value of five or more letters whole words in order that spell it (a
 cell wrapped over lines, even mid-word); and each size name must be a word or the head of a size cell ('S/3') near
 the line: in that part, in the gap before it, or in the page's table header. Every PDF page must belong to exactly
-one confirmation or be listed as a page with no order lines, and each page so listed is checked on its own: it must
-not print a number shaped like a returned confirmation number, after the same words, that was not returned, nor a
-style-shaped code with two or more amounts in the confirmation's money format. A confirmation returned twice, a line
+one confirmation or be listed as a page with no order lines, and every page is then checked on its own, so a
+confirmation cannot vanish by having its pages declared empty or given to a neighbour: no page may print a number
+shaped like a returned confirmation number, after the same words, that was not returned; and a page printing order
+lines (a style-shaped code with two or more amounts in the confirmation's money format) may be neither declared empty
+nor given to a confirmation none of whose lines were read on it. A totals or terms page may go either way. A confirmation returned twice, a line
 returned more often than its style is printed, or a line on a page outside its confirmation is refused. Quantities
 and totals are too short to look up in the text: only the gates' arithmetic checks them. Checked against the fixed readers on the real
 PDFs, style -> price -> value -> next style holds on every line of otb (88), admilano (54), adidas (119) and fog
 (52); fog prints 3 lines' size header before the style, hence the size-name region. True transcriptions of all 25
 real files (those plus 3 FCW sales orders) raise no FAIL, whether pages without lines are given to their
-confirmation or declared empty; dropping any of the Margiela OC's 7 confirmations, or any page with lines, is
-refused.
+confirmation or declared empty; dropping any of the Margiela OC's 7 confirmations (its pages declared empty or given
+to a neighbour), or any page with lines, is refused.
 
 What no gate catches: a quantity read under the wrong size. So every value from an AI read is source
 `OC (AI read)` in the Review sheet, shaded amber (never green), its Why reads "read by AI from <doc> line <n>";
