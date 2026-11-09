@@ -32,16 +32,19 @@ S = st.session_state
 
 # ---- helpers -------------------------------------------------------------------
 def secret_brands():
+    """(brands this viewer may use, why the saved brands are hidden, whether sign-in is set up)."""
     try:
-        table = st.secrets.get("oc_brands")
+        table, viewers, can_login = st.secrets.get("oc_brands"), st.secrets.get("oc_viewers"), "auth" in st.secrets
     except Exception:
-        return {}
-    return dict(table or {})
+        return {}, None, False
+    email = st.user.get("email")
+    brands, why = service.secret_brands_for(table, viewers, email)
+    return brands, why, can_login and not email
 
 
-def brand_options():
+def brand_options(saved):
     opts = {}
-    for name, value in secret_brands().items():
+    for name, value in saved.items():
         opts[f"{name} (saved in the app)"] = ("secret", name, value)
     for name, path in brandm.local_configs().items():
         opts[f"{name} (on this computer)"] = ("file", name, path)
@@ -126,7 +129,8 @@ st.header("Brand and catalog")
 col1, col2 = st.columns(2)
 cfg = None
 with col1:
-    opts = brand_options()
+    saved, hidden_why, offer_login = secret_brands()
+    opts = brand_options(saved)
     labels = list(opts)
     choice = st.selectbox("Brand", labels, index=labels.index(S["brand_choice"]) if S.get("brand_choice") in labels else 0,
                           help="The brand config holds the season, SKU prefix, cost rule and past POs.")
@@ -148,6 +152,10 @@ with col1:
             st.error("This brand config is not a text (.yaml) file.")
     if cfg:
         st.caption(f"Brand config: {cfg['_path']}. {cfg['vendor']}, season {cfg['season']}.")
+    if hidden_why:
+        st.caption(f"Brands saved in the app are hidden: {hidden_why}. You can still upload a brand .yaml file.")
+        if offer_login and st.button("Sign in to use the saved brands"):
+            st.login()
 with col2:
     up = st.file_uploader("Catalog export (Matrixify Products CSV)", type=["csv"], key="w_catalog",
                           help="The brand's products from Matrixify: all statuses, with variants and metafields.")
@@ -167,17 +175,11 @@ hist_ups = st.file_uploader(
     "Past season POs (optional, used for retail prices)", type=["xlsx"], accept_multiple_files=True, key="w_hist",
     help="The brand's PO buy sheets from past seasons. If you add any, they replace the list in the brand config.")
 if cfg:
-    present, missing = service.history_status(cfg)
     if hist_ups:
         st.caption(f"{len(hist_ups)} past season PO(s) uploaded. They replace the brand config's list.")
-    elif missing:
-        st.warning(f"The brand config lists {len(present) + len(missing)} past season POs and {len(missing)} of them "
-                   f"are not on this computer ({', '.join(h['label'] for h in missing)}). {service.RED_WARNING} "
-                   "Upload them above to fix this.")
-    elif not present:
-        st.warning(f"No past season POs: the brand config lists none and none are uploaded. {service.RED_WARNING}")
     else:
-        st.caption(f"Using the {len(present)} past season POs listed in the brand config.")
+        note = service.plan_history(cfg)[1]
+        (st.warning if note["Result"] == "WARN" else st.caption)(f"Past season POs: {note['Detail'].rstrip('.')}.")
 
 need = [n for n, ok in (("a brand", cfg), ("the catalog export", S.get("catalog")), ("the order confirmation", oc_up))
         if not ok]

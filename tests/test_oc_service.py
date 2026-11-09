@@ -8,6 +8,7 @@ import zipfile
 
 import openpyxl
 import pytest
+import yaml
 
 import test_oc_tool as base
 from oc import brand as brandm, finalize as finalizem, poxlsx, service
@@ -231,7 +232,7 @@ def test_brand_from_text_rejects_a_missing_required_key(key):
 def test_brand_from_text_applies_defaults_and_names_its_source():
     cfg = brandm.from_text(_yaml(REQ) + "\nhistory:\n  - {label: F/W 26, path: ~/po.xlsx}", "app secrets", "x")
     assert cfg["status"] == "Active" and cfg["option1_name"] == "Colour" and cfg["_path"] == "app secrets"
-    assert cfg["history"] == [{"label": "F/W 26", "path": os.path.expanduser("~/po.xlsx")}]
+    assert cfg["history"] == [] and cfg["history_files"] == [{"label": "F/W 26", "file": "po.xlsx"}]
     hist = brandm.from_text(_yaml(REQ), "s")["history"]
     assert hist == [] and hist is not brandm.DEFAULTS["history"]
 
@@ -259,3 +260,56 @@ def test_local_configs_lists_the_brand_dir_and_skips_the_example(tmp_path, monke
     assert found["aa"] == tmp_path / "aa.local.yaml" and found["bb"] == tmp_path / "bb.yaml"
     assert "example" not in found
     assert brandm.load(str(found["aa"]))["_name"] == "aa"
+
+
+# ---- history paths in a config from text are never opened -----------------------
+def test_a_config_from_text_never_opens_its_history_paths(tmp_path, oc_stub, monkeypatch):
+    server_file = _past_po(tmp_path / "server_file.xlsx", "F/W 26")  # stands in for any file on the host
+    text = yaml.safe_dump(dict(base.BRAND, history=[{"label": "F/W 26", "path": server_file}]))
+    cfg = brandm.from_text(text, "uploaded file x.yaml", "mm")
+    assert cfg["history"] == [] and cfg["history_files"] == [{"label": "F/W 26", "file": "server_file.xlsx"}]
+    touched = []
+    real_open, real_exists = openpyxl.load_workbook, os.path.exists
+    monkeypatch.setattr(openpyxl, "load_workbook", lambda p, *a, **k: (touched.append(str(p)), real_open(p, *a, **k))[1])
+    monkeypatch.setattr(os.path, "exists", lambda p: (touched.append(str(p)), real_exists(p))[1])
+    po, _, checks = service.draft("oc.pdf", _catalog(tmp_path), cfg)
+    assert server_file not in touched and po is not None
+    assert checks[0]["Result"] == "WARN" and "never opens files" in checks[0]["Detail"]
+    upload = tmp_path / "up"
+    upload.mkdir()
+    same_name = _past_po(upload / "server_file.xlsx", None)  # uploaded on the page: labelled from the config
+    assert service.plan_history(cfg, [same_name])[0] == [{"label": "F/W 26", "path": same_name}]
+
+
+def test_a_config_file_still_reads_its_history_paths(tmp_path):
+    past = _past_po(tmp_path / "past.xlsx", "F/W 26")
+    f = tmp_path / "mm.local.yaml"
+    f.write_text(yaml.safe_dump(dict(REQ, history=[{"label": "F/W 26", "path": past}])))
+    cfg = brandm.load(str(f))
+    assert cfg["history"] == [{"label": "F/W 26", "path": past}] and service.history_status(cfg) == (cfg["history"], [])
+
+
+# ---- who sees the brands saved in the app --------------------------------------------
+SAVED = {"mm": "vendor: X"}
+
+
+def test_saved_brands_are_offered_to_a_viewer_on_the_allowlist():
+    assert service.secret_brands_for(SAVED, [" Buyer@Example.com "], "buyer@example.COM") == (SAVED, None)
+    assert service.secret_brands_for(SAVED, "buyer@example.com", "buyer@example.com") == (SAVED, None)
+
+
+@pytest.mark.parametrize("viewers,email,why", [
+    (["buyer@example.com"], "someone@example.com", "someone@example.com is not on the viewer allowlist"),
+    (["buyer@example.com"], None, "you are not signed in"),
+    (["buyer@example.com"], "", "you are not signed in"),
+    ("buyer@example.com", "b", "b is not on the viewer allowlist"),  # a bare string is one address, not letters
+    (None, "buyer@example.com", "no viewer allowlist (oc_viewers) is set in the app's secrets"),
+    ([], "buyer@example.com", "no viewer allowlist (oc_viewers) is set in the app's secrets"),
+    (["  "], "buyer@example.com", "no viewer allowlist (oc_viewers) is set in the app's secrets"),
+])
+def test_saved_brands_are_hidden_otherwise(viewers, email, why):
+    assert service.secret_brands_for(SAVED, viewers, email) == ({}, why)
+
+
+def test_no_saved_brands_needs_no_reason():
+    assert service.secret_brands_for(None, None, None) == ({}, None)

@@ -11,10 +11,15 @@ nothing lands in the repo.
 Two differences from the CLI, both for a hosted app:
 - Past season POs. The brand config lists them as paths on one laptop. Here
   `history_paths` (uploaded files) replaces the config's list, and config paths
-  that do not exist are skipped with a WARN check instead of a crash. Either way
-  a "Past season POs" check says what the retail prices were built from.
+  that do not exist are skipped with a WARN check instead of a crash. A config
+  from text (an upload or the app's secrets) never has its paths opened at all
+  (see oc/brand.py). Either way a "Past season POs" check says what the retail
+  prices were built from.
 - Bad inputs (an OC that fails its gates, a catalog missing columns, an
   unreadable linesheet) come back as FAIL checks rather than exceptions.
+
+Brands saved in the app's secrets are offered only to a signed-in viewer on the
+`oc_viewers` allowlist (secret_brands_for).
 
 draft returns no workbook when a FAIL is one a reviewer cannot fix in the sheet
 (see FIXABLE_IN_SHEET). finalize is all or nothing: any FAIL, no zip.
@@ -115,8 +120,16 @@ def season_key(label):
     return (int(m.group(2)), 0 if m.group(1) == "S/S" else 1) if m else None
 
 
+def paths_ignored(brand_cfg):
+    """True for a config from text: it names past POs, but their paths are never opened."""
+    return bool(brand_cfg.get("history_files")) and not brand_cfg.get("history")
+
+
 def history_status(brand_cfg):
-    """(present, missing): the config's history entries split by whether the file exists here."""
+    """(present, missing): the config's past POs found on this computer and not found.
+    Every past PO of a config from text counts as missing."""
+    if paths_ignored(brand_cfg):
+        return [], list(brand_cfg["history_files"])
     hist = brand_cfg.get("history") or []
     return ([h for h in hist if os.path.exists(h["path"])],
             [h for h in hist if not os.path.exists(h["path"])])
@@ -126,8 +139,10 @@ def label_upload(path, brand_cfg):
     """Season label for an uploaded past PO: the config's label for a file of the same name,
     else the most common value of its season column, else a season in its file name."""
     base = os.path.basename(path)
-    for h in brand_cfg.get("history") or []:
-        if os.path.basename(h["path"]) == base:
+    named = brand_cfg.get("history_files") or [dict(label=h["label"], file=os.path.basename(h["path"]))
+                                               for h in brand_cfg.get("history") or []]
+    for h in named:
+        if h["file"] == base:
             return h["label"], "brand config"
     seasons = collections.Counter()
     wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
@@ -167,6 +182,11 @@ def plan_history(brand_cfg, history_paths=None):
                                                             "so they are read last")
         return items, _check(HISTORY_CHECK, "INFO", detail)
     present, missing = history_status(brand_cfg)
+    if paths_ignored(brand_cfg):
+        return [], _check(HISTORY_CHECK, "WARN",
+                          f"the brand config names {len(missing)} ({', '.join(h['label'] for h in missing)}), but a "
+                          "config from an upload or the app's secrets never opens files on the server. "
+                          f"{RED_WARNING} Upload them as past season POs to fix this.")
     if missing:
         return present, _check(HISTORY_CHECK, "WARN",
                                f"{len(missing)} of {len(missing) + len(present)} in the brand config are not on this "
@@ -186,6 +206,26 @@ def _history_detail(check, hist):
         check.update(Result="WARN", Detail=check["Detail"] + f". No manufacture codes in {', '.join(empty)}: "
                                                              "is that a PO buy sheet?")
     return check
+
+
+# ---- who may use the brands saved in the app ---------------------------------------
+def secret_brands_for(table, viewers, email):
+    """({name: config}, reason): the brands saved in the app's secrets that this viewer may use.
+
+    Offered only when an `oc_viewers` allowlist exists and the viewer's sign-in email is on
+    it (case-insensitive, whole addresses). Otherwise no brands, and `reason` says why."""
+    if not table:
+        return {}, None
+    if isinstance(viewers, str):
+        viewers = [viewers]
+    allowed = {str(v).strip().lower() for v in viewers or [] if str(v).strip()}
+    if not allowed:
+        return {}, "no viewer allowlist (oc_viewers) is set in the app's secrets"
+    if not email or not str(email).strip():
+        return {}, "you are not signed in"
+    if str(email).strip().lower() not in allowed:
+        return {}, f"{email} is not on the viewer allowlist"
+    return dict(table), None
 
 
 # ---- step 1 --------------------------------------------------------------------

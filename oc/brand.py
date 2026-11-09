@@ -11,6 +11,12 @@ Marais keeps the real ones in ~/Code/marais/_work/oc-brands/ (set OC_BRAND_DIR).
 A config can also come without a file (the web page): `from_text` takes the
 YAML itself, from an uploaded .yaml or a Streamlit secret, and `from_mapping`
 takes a TOML table. All three paths apply the same DEFAULTS and REQUIRED keys.
+
+Only a config read from a file (`load`) may name past POs by path. In a config
+from text the history paths are never opened: anyone who can upload a config
+could otherwise make the hosted app read any file on its server. `history` comes
+back empty and `history_files` keeps each entry's label and bare file name, so
+past POs uploaded on the page can still be matched to their season labels.
 """
 import copy
 import os
@@ -76,7 +82,7 @@ def load(name_or_path, config_path=None):
     p = Path(name_or_path)
     if config_path or not p.suffix:
         p = find(name_or_path, config_path)
-    return _finish(yaml.safe_load(p.read_text()), str(p), p.name.split(".")[0])
+    return _finish(yaml.safe_load(p.read_text()), str(p), p.name.split(".")[0], paths=True)
 
 
 def from_text(text, source, name=None):
@@ -101,7 +107,7 @@ def _plain(v):
     return v
 
 
-def _finish(data, source, name):
+def _finish(data, source, name, paths=False):
     if data is None:
         data = {}
     if not isinstance(data, Mapping):
@@ -115,6 +121,9 @@ def _finish(data, source, name):
         if not isinstance(h, Mapping) or not h.get("path") or not h.get("label"):
             raise BrandError(f"{source}: each history entry needs a label and a path, got {h!r}")
         h["path"] = os.path.expanduser(h["path"])
+    cfg["history_files"] = [dict(label=h["label"], file=os.path.basename(h["path"])) for h in cfg["history"]]
+    if not paths:
+        cfg["history"] = []
     cfg["_path"] = str(source)
     cfg["_name"] = name or "brand"
     return cfg
