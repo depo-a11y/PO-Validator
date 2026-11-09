@@ -165,6 +165,7 @@ def parse(pdf_path):
     out = list(docs.values())
     for d in out:
         d["gender"] = collection_gender(d["collection"])
+        d["label"] = (d["collection"] or "").split()[0] if d["collection"] else None   # "MM" (an oc_label check)
     return out, problems + gate_problems(out)
 
 

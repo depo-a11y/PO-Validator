@@ -11,13 +11,20 @@ SCHEMA (structured outputs). The model transcribes, Python decides:
   unchanged: one gate for both readers.
 - On top of the gates, an AI read must: print a quantity under a size on every
   line; be in the brand's cost currency; come from the brand's `oc_supplier`; give
-  numbers that parse; and, when the PDF has a text layer, have every line's style,
-  price and line value and every document's number and totals in that text
-  (grounding). A PDF with no text layer is a WARN, never a pass.
+  numbers that parse; and pass block grounding. Each line's style must be on the
+  page the model names, after the previous line's, and its price, line value,
+  fabric and colour must be in that line's part of the text (from its style to
+  the next line's style); its size names in that part, the gap before it or the
+  page's table header. Every page must belong to exactly one confirmation or be
+  listed as a page with no order lines; no confirmation or line may be returned
+  twice unless the PDF prints it twice. A PDF with no text layer is refused
+  before anything is sent. Quantities and totals are too short to look up in the
+  text: the gates check them by arithmetic.
 
 What no gate catches: a quantity read under the wrong size. Sizes sum to the line,
 lines to the document, and the codes are in the text either way. The Review sheet
-marks every value from an AI read amber and the page says to check sizes by eye.
+marks every value from an AI read amber (an ordered size the live product does
+not have red) and the page says to check every line against the PDF.
 
 The API key comes from the environment or the app's secrets (ANTHROPIC_API_KEY) and is
 never logged, stored or put in a message. `read` takes a `factory(key) -> client` so
@@ -39,6 +46,7 @@ EFFORT = "high"
 MAX_TOKENS = 64000
 FALLBACK_BETA = "server-side-fallback-2026-07-01"
 KEY_NAME = "ANTHROPIC_API_KEY"
+MAX_PAGES = 60
 
 SETUP_CHECK = "AI reader is set up"
 READ_CHECK = "AI reader could read the order confirmation"
@@ -46,7 +54,9 @@ SUPPLIER_CHECK = "Order confirmation is from this brand's supplier"
 CURRENCY_CHECK = "Order confirmation is in the brand's cost currency"
 SIZES_CHECK = "Order confirmation prints a quantity under each size"
 NUMBERS_CHECK = "Every number the AI read is a printed amount the tool can parse"
-GROUNDING_CHECK = "Every code and amount the AI read is in the PDF text"
+GROUNDING_CHECK = "Each line's code, colour, size names, price and value are in that line's part of the PDF"
+PAGES_CHECK = "Every page and confirmation is read exactly once"
+TEXT_CHECK = "The PDF has text to check the AI reading against"
 KIND_CHECK = "Document is an order confirmation"
 GATE_CHECK = "Order confirmation passes its gates (parsed = printed)"
 READER_CHECK = "Order confirmation reader"
@@ -55,6 +65,8 @@ NO_KEY = f"The AI reader is not set up: the app has no {KEY_NAME} in its secrets
 NO_SIZES = ("this document prints no sizes, e.g. a proforma; upload the order confirmation it refers to")
 BUSY = "the AI service is busy or could not be reached; try again in a few minutes"
 NOT_FOUND = "no order confirmations found"
+NO_TEXT = "this PDF has no text to check the AI reading against (a scan?); ask Colwyn"
+SHIPPED = ("invoice", "delivery_note")   # quantities shipped, not ordered: refused
 
 KINDS = ["order_confirmation", "proforma_invoice", "invoice", "delivery_note", "other"]
 _S = {"type": "string"}
@@ -62,19 +74,20 @@ _NS = {"type": ["string", "null"]}
 _NI = {"type": ["integer", "null"]}
 LINE_KEYS = ["line_no", "style", "fabric", "colour", "product_class", "description", "composition", "made_in",
              "deliver_from", "deliver_to", "sizes", "qty_text", "price_text", "line_value_text", "page"]
-DOC_KEYS = ["number", "date", "collection", "currency", "total_qty_text", "net_total_text", "gross_total_text",
-            "pages", "lines"]
+DOC_KEYS = ["number", "label", "date", "collection", "currency", "total_qty_text", "net_total_text",
+            "gross_total_text", "pages", "lines"]
 SCHEMA = {
     "type": "object", "additionalProperties": False,
-    "required": ["supplier", "document_kind", "has_size_breakdown", "documents"],
+    "required": ["supplier", "document_kind", "has_size_breakdown", "pages_without_lines", "documents"],
     "properties": {
         "supplier": _S,
         "document_kind": {"type": "string", "enum": KINDS},
         "has_size_breakdown": {"type": "boolean"},
+        "pages_without_lines": {"type": "array", "items": {"type": "integer"}},
         "documents": {"type": "array", "items": {
             "type": "object", "additionalProperties": False, "required": DOC_KEYS,
             "properties": {
-                "number": _S, "date": _NS, "collection": _NS, "currency": _NS,
+                "number": _S, "label": _NS, "date": _NS, "collection": _NS, "currency": _NS,
                 "total_qty_text": _NS, "net_total_text": _NS, "gross_total_text": _NS,
                 "pages": {"type": "array", "items": {"type": "integer"}},
                 "lines": {"type": "array", "items": {
@@ -86,7 +99,7 @@ SCHEMA = {
                         "sizes": {"type": "array", "items": {
                             "type": "object", "additionalProperties": False, "required": ["size", "qty_text"],
                             "properties": {"size": _S, "qty_text": _S}}},
-                        "qty_text": _NS, "price_text": _NS, "line_value_text": _NS, "page": _NI,
+                        "qty_text": _NS, "price_text": _NS, "line_value_text": _NS, "page": {"type": "integer"},
                     }}},
             }}},
     },
@@ -109,8 +122,10 @@ example a proforma or invoice that gives one quantity per style), set has_size_b
 every line's sizes empty.
 
 One PDF can hold several confirmations, each with its own number, line numbering and totals: return one entry \
-per confirmation, in the order printed. A confirmation can run over several pages; a repeated page header does \
-not start a new one.
+per confirmation, in the order printed, each confirmation once. A confirmation can run over several pages; a \
+repeated page header does not start a new one. Return each confirmation's lines in the order printed, each line \
+once. pages lists the PDF pages (numbered from 1) that each confirmation is printed on; pages_without_lines lists \
+every other page (terms and conditions, covers, bank details). Every page of the PDF goes in exactly one of those.
 
 total_qty_text is the confirmation's printed total quantity. net_total_text is its printed goods (net) value, \
 the amount its lines add up to: not a deposit, an amount due, or a grand total that adds freight, duty or tax. \
@@ -120,13 +135,14 @@ currency is the ISO 4217 code of the prices (EUR for a euro sign or "Euro", USD 
 sterling), or null if none is shown.
 
 supplier is the company that issued the document (the seller), as printed. document_kind says what the \
-document is.
+document is. label is the brand or label a confirmation is for when the document prints one apart from the \
+issuer (for example a label name at the start of every line description), else null.
 
 For each line: line_no as printed (null if lines are not numbered); style, fabric and colour as printed (fabric \
 or colour null if the layout has no such field); product_class is the printed product class or category column, \
 if any; description, composition (material content) and made_in (country of origin) as printed or null; \
 deliver_from and deliver_to are the line's printed delivery dates, else null; page is the PDF page number the \
-line's quantities are printed on."""
+line's style code is printed on."""
 
 PROMPT = "Transcribe every order confirmation in this PDF."
 
@@ -266,14 +282,19 @@ def parse_int(text):
 
 
 # ---- grounding ------------------------------------------------------------------------
-def pdf_text(path):
-    """All pages' text layer, '' when there is none or it cannot be read."""
+def pdf_pages(path):
+    """Each page's text layer in pdfplumber's reading order; None when the PDF cannot be opened."""
     try:
         import pdfplumber
         with pdfplumber.open(path) as pdf:
-            return "\n".join(p.extract_text() or "" for p in pdf.pages)
+            return [p.extract_text() or "" for p in pdf.pages]
     except Exception:
-        return ""
+        return None
+
+
+def pdf_text(path):
+    """All pages' text layer, '' when there is none or it cannot be read."""
+    return "\n".join(pdf_pages(path) or [])
 
 
 def has_text_layer(text):
@@ -301,6 +322,69 @@ class Haystack:
         return bool(n) and any(n in h for h in self.hays)
 
 
+class Pages:
+    """The PDF's text, page by page, flattened (no whitespace, case-folded), as printed and with doubled bold
+    glyphs collapsed. Block grounding runs on each variant and a line passes if it passes on either."""
+
+    def __init__(self, pages):
+        self.n = len(pages)
+        self.variants = []
+        for tidy in (lambda t: t, undouble):
+            flats = [_flat(tidy(t)) for t in pages]
+            starts, pos = [], 0
+            for f in flats:
+                starts.append(pos)
+                pos += len(f)
+            self.variants.append(("".join(flats), starts + [pos]))
+
+    def page_text(self, v, page):
+        text, starts = self.variants[v]
+        return text[starts[page - 1]:starts[page]] if 1 <= page <= self.n else ""
+
+    def misses(self, raw):
+        """Per line (document order), what is not where it should be, on the variant that misses least."""
+        lines = [(d, i, l) for d in raw for i, l in enumerate(d["lines"], 1)]
+        best = None
+        for v in range(len(self.variants)):
+            got = self._misses(v, lines)
+            if best is None or sum(map(len, got)) < sum(map(len, best)):
+                best = got
+        return lines, best
+
+    def _misses(self, v, lines):
+        text, starts = self.variants[v]
+        pos, found = 0, []
+        for d, i, l in lines:
+            page, style = l["page"], _flat(l["style"])
+            j = -1
+            if style and 1 <= page <= self.n:
+                j = text.find(style, max(pos, starts[page - 1]), starts[page])
+            found.append(j)
+            if j >= 0:
+                pos = j + len(style)
+        out = []
+        for k, ((d, i, l), j) in enumerate(zip(lines, found)):
+            miss = []
+            if j < 0:
+                out.append([f"style '{l['style']}' is not on page {l['page']} after the previous line"])
+                continue
+            end = next((x for x in found[k + 1:] if x >= 0), len(text))
+            block = text[j:end]
+            for field, amount in (("price_text", True), ("line_value_text", True), ("fabric", False), ("colour", False)):
+                val = l[field]
+                if val is not None and _flat(_bare(val) if amount else val) not in block:
+                    miss.append(f"{field.replace('_text', '').replace('_', ' ')} '{val}'")
+            page_start = starts[l["page"] - 1]
+            first = min([x for x in found if page_start <= x < starts[l["page"]]] or [j])
+            prev = max([x for x in found[:k] if x >= 0] or [page_start])
+            region = text[min(prev, j):end] + text[page_start:first]
+            for sz in l["sizes"]:
+                if _flat(sz["size"]) not in region:
+                    miss.append(f"size '{sz['size']}'")
+            out.append(miss)
+        return out
+
+
 # ---- reading ------------------------------------------------------------------------------
 def suppliers_match(read, names):
     def norm(s):
@@ -308,8 +392,42 @@ def suppliers_match(read, names):
     return bool(norm(read)) and norm(read) in {norm(n) for n in names}
 
 
-def interpret(data, brand_cfg, text):
-    """Model JSON -> (docs, fails, warns). docs have the otb shape plus reader='ai' on every line."""
+def page_problems(data, pages):
+    """Every page in exactly one confirmation or in pages_without_lines; no confirmation or line twice."""
+    import collections
+    raw, n, out = data["documents"], pages.n, []
+    claims = collections.Counter(p for d in raw for p in d["pages"])
+    claims.update(data.get("pages_without_lines") or [])
+    twice = sorted(p for p, c in claims.items() if c > 1)
+    outside = sorted(p for p in claims if not 1 <= p <= n)
+    missing = sorted(set(range(1, n + 1)) - set(claims))
+    if twice:
+        out.append(f"page(s) {twice} given to more than one confirmation or also listed as having no order lines")
+    if outside:
+        out.append(f"page(s) {outside} do not exist (the PDF has {n})")
+    if missing:
+        out.append(f"page(s) {missing} of {n} are in no confirmation and not listed as pages with no order lines")
+    numbers = collections.Counter(d["number"] for d in raw)
+    out += [f"confirmation {k} returned {c} times" for k, c in numbers.items() if c > 1]
+    for d in raw:
+        off = sorted({l["page"] for l in d["lines"]} - set(d["pages"]))
+        if off:
+            out.append(f"{d['number']}: lines on page(s) {off}, which are not among its pages {d['pages']}")
+        keys = collections.Counter((l["style"], l["fabric"], l["colour"]) for l in d["lines"])
+        doc_text = "".join(pages.page_text(0, p) for p in sorted(set(d["pages"])))
+        for (style, fabric, colour), c in keys.items():
+            printed = doc_text.count(_flat(style)) if _flat(style) else 0
+            if c > 1 and printed < c:
+                out.append(f"{d['number']}: line {style} {fabric or ''} {colour or ''} returned {c} times but its "
+                           f"style is printed {printed} time(s)")
+    return out
+
+
+def interpret(data, brand_cfg, pages):
+    """Model JSON -> (docs, fails, warns). docs have the otb shape plus reader='ai' on every line.
+    `pages` is the PDF's text page by page (a single string counts as one page)."""
+    if isinstance(pages, str):
+        pages = [pages]
     fails, warns = [], []
     names = brand_cfg["oc_supplier"]
     names = [names] if isinstance(names, str) else list(names)
@@ -320,7 +438,11 @@ def interpret(data, brand_cfg, text):
             f"({brand_cfg.get('_name', 'brand')}), whose order confirmations come from {' or '.join(names)}. "
             "Check you picked the right brand. If the brand is not in the list yet, see 'My brand is not in "
             "the list' under the brand picker.")))
-    if kind != "order_confirmation":
+    if kind in SHIPPED:
+        fails.append(_check(KIND_CHECK, "FAIL", (
+            f"the AI read this as a {kind.replace('_', ' ')}: its quantities are what was shipped, not what was "
+            "ordered. Build the PO from the order confirmation.")))
+    elif kind != "order_confirmation":
         warns.append(_check(KIND_CHECK, "WARN", (
             f"the AI read this as a {kind.replace('_', ' ')}, not an order confirmation. Build the PO only from "
             "the document that confirms what was ordered.")))
@@ -374,7 +496,8 @@ def interpret(data, brand_cfg, text):
                 bad.append(f"{d['number']}: {what} " + (f"'{d[field]}'" if d[field] is not None else "not printed"))
         docs.append(dict(doc=d["number"], date=d["date"], collection=d["collection"], currency=d["currency"],
                          total_qty=tq, net=net, gross=parse_money(d["gross_total_text"]),
-                         gender=otb.collection_gender(d["collection"]), pages=d["pages"], lines=lines, reader="ai"))
+                         gender=otb.collection_gender(d["collection"]), pages=d["pages"], lines=lines, reader="ai",
+                         issuer=supplier, label=d.get("label")))
     if bad:
         fails.append(_check(NUMBERS_CHECK, "FAIL", f"{len(bad)} value(s) the tool cannot read as a number: "
                                                    + "; ".join(bad[:12])))
@@ -385,27 +508,25 @@ def interpret(data, brand_cfg, text):
         fails.append(_check(CURRENCY_CHECK, "FAIL", f"{'; '.join(off)}, but the brand's cost currency is {want}. "
                                                     "Check you picked the right brand and document."))
 
-    if has_text_layer(text):
-        hay, missing = Haystack(text), []
-        for d in raw:
-            if not hay.has(d["number"]):
-                missing.append(f"document number '{d['number']}'")
-            for field, what in (("total_qty_text", "total quantity"), ("net_total_text", "net total")):
-                if d[field] is not None and not hay.has(d[field], amount=True):
-                    missing.append(f"{d['number']} {what} '{d[field]}'")
-            for i, l in enumerate(d["lines"], 1):
-                tag = f"{d['number']} line {l['line_no'] or i}"
-                if not hay.has(l["style"]):
-                    missing.append(f"{tag} style '{l['style']}'")
-                for field, what in (("price_text", "price"), ("line_value_text", "line value")):
-                    if l[field] is not None and not hay.has(l[field], amount=True):
-                        missing.append(f"{tag} {what} '{l[field]}'")
-        if missing:
-            fails.append(_check(GROUNDING_CHECK, "FAIL", f"{len(missing)} value(s) the AI read are not in the PDF's "
-                                                         "text, so the read is not used: " + "; ".join(missing[:12])))
-    else:
-        warns.append(_check(GROUNDING_CHECK, "WARN", "the PDF has no text layer (a scan?), so the codes and amounts "
-                                                     "the AI read could not be cross-checked against the PDF text"))
+    pg = Pages(pages)
+    dup = page_problems(data, pg)
+    if dup:
+        fails.append(_check(PAGES_CHECK, "FAIL", "; ".join(dup[:10])))
+    missing = []
+    for d in raw:
+        doc_hay = Haystack("\n".join(pages[p - 1] for p in sorted(set(d["pages"])) if 1 <= p <= pg.n))
+        if not doc_hay.has(d["number"]):
+            missing.append(f"{d['number']}: document number not on its pages")
+        if d["net_total_text"] is not None and not doc_hay.has(d["net_total_text"], amount=True):
+            missing.append(f"{d['number']}: net total '{d['net_total_text']}' not on its pages")
+    lines, misses = pg.misses(raw)
+    for (d, i, l), miss in zip(lines, misses):
+        if miss:
+            missing.append(f"{d['number']} line {l['line_no'] or i} ({l['style']}): " + ", ".join(miss))
+    if missing:
+        fails.append(_check(GROUNDING_CHECK, "FAIL", (
+            f"{len(missing)} line(s) or document(s) where what the AI read is not in that part of the PDF text, so "
+            "the read is not used: " + "; ".join(missing[:12]))))
 
     if not bad:
         fails += [_check(GATE_CHECK, "FAIL", p) for p in otb.gate_problems(docs)]
@@ -417,13 +538,21 @@ def read(pdf_path, brand_cfg, factory=None):
     if not brand_cfg.get("oc_supplier"):
         raise ReadRefused([_check(SETUP_CHECK, "FAIL", (
             "the brand config has no oc_supplier, which the AI reader needs to check the PDF comes from this "
-            "brand's supplier. Add oc_supplier: the company name printed as the issuer on the brand's order "
-            "confirmations."))])
+            "brand's supplier. Ask Colwyn to add oc_supplier (the company name printed as the issuer on the "
+            "brand's order confirmations) to this brand's config."))])
+    pages = pdf_pages(pdf_path)
+    if pages is None:
+        raise ReadRefused([_check(READ_CHECK, "FAIL", "the PDF cannot be opened; nothing was sent to the AI service")])
+    if len(pages) > MAX_PAGES:
+        raise ReadRefused([_check(READ_CHECK, "FAIL", (
+            f"this PDF has {len(pages)} pages and the AI reader takes at most {MAX_PAGES}; nothing was sent. Split "
+            "it into smaller PDFs (whole confirmations each) and read them one at a time."))])
+    if not has_text_layer("".join(pages)):
+        raise ReadRefused([_check(TEXT_CHECK, "FAIL", NO_TEXT)])
     key = api_key()
     if not key:
         raise ReadRefused([_check(SETUP_CHECK, "FAIL", NO_KEY)])
     pdf = Path(pdf_path).read_bytes()
-    text = pdf_text(pdf_path)
     t0 = time.monotonic()
     try:
         msg = call((factory or make_client)(key), pdf)
@@ -448,15 +577,17 @@ def read(pdf_path, brand_cfg, factory=None):
     info.update(raw=data, supplier=data.get("supplier") if isinstance(data, dict) else None,
                 document_kind=data.get("document_kind") if isinstance(data, dict) else None)
     try:
-        docs, fails, warns = interpret(data, brand_cfg, text)
+        docs, fails, warns = interpret(data, brand_cfg, pages)
     except (KeyError, TypeError, AttributeError) as e:
         raise ReadRefused([_check(READ_CHECK, "FAIL", f"the AI's answer did not have the expected shape "
                                                       f"({type(e).__name__}: {e}); nothing from it was used")],
                           info) from None
-    info["text_layer"] = has_text_layer(text)
     if fails:
         raise ReadRefused(fails + warns, info)
     return docs, warns, info
+
+
+CHECK_EVERY_LINE = "Check every line's code, colour, sizes, quantities and price against the PDF."
 
 
 def reader_check(info, refused=False):
@@ -472,9 +603,8 @@ def reader_check(info, refused=False):
     if refused:
         return _check(READER_CHECK, "WARN", head + "The read was refused (see the FAIL rows) and nothing from it "
                                                    "was used; the request is still paid for.")
-    grounded = ("every code and amount it read was found in the PDF text" if info.get("text_layer") else
-                "the PDF has no text layer, so its codes and amounts could not be checked against the PDF text")
     return _check(READER_CHECK, "WARN", head + (
-        f"Every quantity, size and price came from an AI reading. It passed the same gates as the built-in reader, "
-        f"and {grounded}. A quantity read under the wrong size passes every gate, so check each line's sizes "
-        "against the PDF."))
+        "Every quantity, size and price came from an AI reading. It passed the same gates as the built-in reader. "
+        "Each line's code, colour, size names, price and line value were found in that line's part of the PDF "
+        "text; quantities and totals are too short to look up, so they were checked by arithmetic only. "
+        + CHECK_EVERY_LINE))

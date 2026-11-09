@@ -66,8 +66,13 @@ ZIP_MEMBERS = finalizem.OUTPUTS + ["finalize-checks.xlsx"]
 HISTORY_CHECK = "Past season POs (retail price history)"
 READER_CHECK = "Order confirmation reader"
 CURRENCY_CHECK = "Order confirmation is in the brand's cost currency"
+IDENTITY_CHECK = "Order confirmation is for the brand picked (issuer and label)"
+# A fixed reader's problem that is not a layout change: the arithmetic gates and a discount. Every other problem
+# (no confirmation found, a moved header, a quantity off its column) gets the hint to read the OC with AI.
+NOT_LAYOUT = re.compile(r": sizes sum | != line value |: parsed |discount", re.I)
 GATE_CHECK = "Order confirmation passes its gates (parsed = printed)"
-AI_HINT = "If this is the right brand and its layout changed, tick 'Read the OC with AI' and build again."
+AI_HINT = ("If this is the right brand and its layout changed, tick 'Read the OC with AI' and build again "
+           "(the box needs oc_supplier in the brand's config).")
 LAYOUTS = {"otb": "the OTB layout (Maison Margiela, MM6)", "admilano": "the AD Milano layout (Ann Demeulemeester)",
            "adidas": "the adidas AG layout (Y-3, Willy Chavarria, RS)",
            "fog": "the Fear of God layout (FOG Essentials, Fear of God LLC)"}
@@ -115,6 +120,9 @@ def read_oc(oc_path, brand_cfg, reader=None, ai_factory=None):
             docs, warns, info = ai.read(oc_path, brand_cfg, factory=ai_factory)
         except ai.ReadRefused as e:
             return None, [ai.reader_check(e.info, refused=True)] + e.checks, e.info
+        wrong = identity_problems(docs, brand_cfg, oc_path, issuer=False)
+        if wrong:
+            return None, [ai.reader_check(info, refused=True), _check(IDENTITY_CHECK, "FAIL", wrong)], info
         return docs, [ai.reader_check(info)] + warns, info
     try:
         reader_mod = adapter(brand_cfg)
@@ -125,12 +133,54 @@ def read_oc(oc_path, brand_cfg, reader=None, ai_factory=None):
         docs = reader_mod.parse_checked(oc_path)
     except Exception as e:
         problems = getattr(e, "problems", None) or [f"{type(e).__name__}: {e}"]
-        return None, [row] + [_check(GATE_CHECK, "FAIL", f"{p}. {AI_HINT}" if p == "no order confirmations found" else p)
+        return None, [row] + [_check(GATE_CHECK, "FAIL", p if NOT_LAYOUT.search(p) else f"{p}. {AI_HINT}")
                               for p in problems], None
     off = currency_off(docs, cost_currency(brand_cfg))
     if off:
         return None, [row, _check(CURRENCY_CHECK, "FAIL", currency_detail(off, brand_cfg))], None
+    wrong = identity_problems(docs, brand_cfg, oc_path)
+    if wrong:
+        return None, [row, _check(IDENTITY_CHECK, "FAIL", wrong)], None
     return docs, [row], None
+
+
+def _listed(v):
+    return [] if not v else [v] if isinstance(v, str) else list(v)
+
+
+def identity_problems(docs, brand_cfg, oc_path, issuer=True):
+    """'' when every document is from the config's oc_supplier and oc_label (each checked only when the config
+    sets it), else what was read against what the brand accepts. A reader that does not parse its issuer (otb)
+    passes when one of the oc_supplier names is printed on the document's pages."""
+    from .adapters import ai
+    names, labels = _listed(brand_cfg.get("oc_supplier")), _listed(brand_cfg.get("oc_label"))
+    out, pages = [], None
+    for d in docs:
+        if issuer and names:
+            got = d.get("issuer")
+            if got is None:
+                pages = pages if pages is not None else (ai.pdf_pages(oc_path) or [])
+                hay = ai.Haystack("\n".join(pages[p - 1] for p in d.get("pages") or range(1, len(pages) + 1)
+                                            if 1 <= p <= len(pages)))
+                ok, got = any(hay.has(n) for n in names), "none of those names on its pages"
+            else:
+                ok = ai.suppliers_match(got, names)
+            if not ok:
+                out.append(f"{d['doc']} is from {got!r}, not {' or '.join(names)}")
+        if labels and not ai.suppliers_match(d.get("label"), labels):
+            out.append(f"{d['doc']} is for label {d.get('label') or 'none the reader could find'!r}, "
+                       f"not {' or '.join(labels)}")
+    if not out:
+        return ""
+    return ("; ".join(out) + f". The brand picked is {brand_cfg.get('vendor')} ({brand_cfg.get('_name', 'brand')}). "
+            "Check you picked the right brand; nothing was drafted. If the brand is not in the list yet, see 'My "
+            "brand is not in the list' under the brand picker.")
+
+
+def ai_read_sent(checks):
+    """True when a draft's checks show a request reached the AI service (it is paid for, refused or not)."""
+    return any(c["Check"] == READER_CHECK and c["Result"] == "WARN" and str(c["Detail"]).startswith("read by AI")
+               for c in checks)
 
 
 def currency_detail(off, brand_cfg):

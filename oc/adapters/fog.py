@@ -146,7 +146,7 @@ def _new_doc(doc, t, rows):
     brand = after("FROM SHIP TO BILL TO", 0, 210)
     season = after("ORDER DATE", 635, 700, stop="CANCEL DATE")
     cur = after("CANCEL DATE", 100, 210)
-    return dict(doc=doc, brand=brand, date=after("ORDER DATE", 0, 100), start_ship=after("ORDER DATE", 100, 200),
+    return dict(doc=doc, brand=brand, issuer=brand, label=None, date=after("ORDER DATE", 0, 100), start_ship=after("ORDER DATE", 100, 200),
                 cancel_date=after("CANCEL DATE", 0, 100), currency=CURRENCIES.get(cur, cur),
                 collection=season, season=season, customer_po=g(r"Customer PO #\s*(\S+)"),
                 ship_terms=g(r"SHIP TERMS:\s*(.+)"), total_qty=None, net=None, gross=None, discount=None,

@@ -41,7 +41,8 @@ def _usd_docs(currency="US Dollar"):
 # ---- five readers ---------------------------------------------------------------------
 @pytest.mark.parametrize("name", brandm.ADAPTERS)
 def test_every_reader_loads_and_the_service_knows_it(name):
-    extra = dict(oc_supplier="X Ltd", join_key="{style}") if name == "ai" else {}
+    extra = dict(ai=dict(oc_supplier="X Ltd", join_key="{style}"), fog=dict(oc_supplier="X Ltd"),
+                 adidas=dict(oc_label="Y-3")).get(name, {})
     cfg = brandm.from_mapping(dict(base.BRAND, adapter=name, **extra), "t")
     assert cfg["adapter"] == name
     assert service.adapter(cfg) is importlib.import_module(f"oc.adapters.{name}")
@@ -61,9 +62,7 @@ def test_a_fixed_reader_on_a_layout_it_does_not_know_says_no_ai_and_points_at_th
     row = checks[0]
     assert row["Check"] == service.READER_CHECK and row["Result"] == "INFO"
     assert LAYOUT_WORDS[name] in row["Detail"] and "no AI was used" in row["Detail"]
-    assert [c["Detail"] for c in checks if c["Result"] == "FAIL"] == [
-        "no order confirmations found. If this is the right brand and its layout changed, tick 'Read the OC with "
-        "AI' and build again."]
+    assert [c["Detail"] for c in checks if c["Result"] == "FAIL"] == ["no order confirmations found. " + service.AI_HINT]
 
 
 @pytest.mark.parametrize("name", list(FIXED))
@@ -71,8 +70,9 @@ def test_the_cli_reads_each_fixed_layout_through_the_service(tmp_path, capsys, n
     pdf = FIXED[name](str(tmp_path / f"{name}.pdf"))
     cfg = tmp_path / f"{name}.yaml"
     cur = "EUR" if name == "admilano" else "USD"
+    who = dict(adidas="oc_label: Y-3\n", fog="oc_supplier: TEST Essentials\n").get(name, "")
     cfg.write_text(f"vendor: X\nadapter: {name}\nseason: S/S 27\nsku_prefix: XX\ncost_multiplier: 1.5\n"
-                   f"cost_currency: {cur}\nmargin_floor: 2.5\n")
+                   f"cost_currency: {cur}\nmargin_floor: 2.5\n{who}")
     assert cli.main(["read", pdf, "--brand-config", str(cfg)]) == 0
     out = capsys.readouterr().out
     assert f"[INFO] Order confirmation reader: read by the built-in reader for" in out and LAYOUT_WORDS[name] in out
@@ -109,9 +109,10 @@ def test_every_fixed_reader_refuses_an_oc_in_another_currency(monkeypatch, curre
 
 def test_a_real_usd_layout_is_refused_for_a_eur_brand(tmp_path):
     pdf = oc_synth.fog_pdf(str(tmp_path / "fog.pdf"))
-    docs, checks, _ = service.read_oc(pdf, dict(base.BRAND, adapter="fog", cost_currency="EUR"))
+    fog_cfg = dict(base.BRAND, adapter="fog", oc_supplier=["TEST Essentials"])
+    docs, checks, _ = service.read_oc(pdf, dict(fog_cfg, cost_currency="EUR"))
     assert docs is None and [c["Check"] for c in service.fails(checks)] == [service.CURRENCY_CHECK]
-    docs, checks, _ = service.read_oc(pdf, dict(base.BRAND, adapter="fog", cost_currency="USD"))
+    docs, checks, _ = service.read_oc(pdf, dict(fog_cfg, cost_currency="USD"))
     assert docs and not service.fails(checks)
 
 

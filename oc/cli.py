@@ -187,4 +187,6 @@ def main(argv=None):
     for sp in (d, c, f, r, rd):
         sp.add_argument("--brand-config", help="path to the brand .yaml (else $OC_BRAND_DIR, else oc/brands/)")
     args = p.parse_args(argv)
+    if args.cmd == "read" and not (args.brand or args.brand_config):
+        rd.error("give the brand: --brand-config <file.yaml> or --brand <name>")
     return args.fn(args)

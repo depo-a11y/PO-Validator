@@ -109,7 +109,22 @@ def parse(pdf_path):
                 d["total_incl_vat"] = num(v.group(1))
     for d in docs:
         problems += _read(d, d.pop("_stream"))
+        d["issuer"], d["label"] = "adidas AG", label_of(d["lines"])
     return docs, problems + gate_problems(docs)
+
+
+# The label a line is for, printed at the start of its description ("Y-3 DAD CAP", "WC ROSE TEE",
+# "Willy Chavarria Meg", "RS STAN"). The free-text Customer Order Number is not used: it is typed by the
+# account and one real confirmation carries no label in it at all.
+LABELS = (("Y-3", re.compile(r"Y-3\b")), ("Willy Chavarria", re.compile(r"(?:WC|Willy Chavarria)\b")),
+          ("RS", re.compile(r"RS\b")))
+
+
+def label_of(lines):
+    """'Y-3', 'Willy Chavarria' or 'RS' from the line descriptions; 'Y-3 + RS' when a confirmation mixes labels,
+    None when no line names one."""
+    found = sorted({name for l in lines for name, pat in LABELS if pat.match((l.get("description") or "").strip())})
+    return " + ".join(found) or None
 
 
 def _new_doc(doc, t):

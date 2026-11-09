@@ -76,7 +76,9 @@ def _doc_fields(t):
         return m.group(1).strip() if m else None
     win = re.search(r"Line Delivery Window\s+(\d\d/\d\d/\d{4})\s*-\s*(\d\d/\d\d/\d{4})", t)
     season, event = g(r"Season\s+(\d{4}\s+[A-Z]{2})"), g(r"Event\s+(.+?)\s+Date\b")
-    return dict(date=g(r"\bDate\s+(\d\d/\d\d/\d{4})"), brand=g(r"\bBrand\s+(.+?)\s+Payments\b"),
+    brand = g(r"\bBrand\s+(.+?)\s+Payments\b")
+    return dict(date=g(r"\bDate\s+(\d\d/\d\d/\d{4})"), brand=brand, label=brand,
+                issuer=g(r"(?m)^(.+?)\s+ORDER\s+PAYMENT\s+DETAILS\b"),
                 currency=g(r"\bCurrency\s+([A-Z]{3})\b"), season=season, event=event,
                 collection=" ".join(x for x in (season, event) if x) or None,
                 delivery_window=(win.group(1), win.group(2)) if win else (None, None))

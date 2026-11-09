@@ -6,7 +6,10 @@ adapter: otb                   # OC reader. Built-in, one layout each: otb (Mais
                                # Milano), adidas (adidas AG), fog (Fear of God). Or ai: any layout, read by Claude;
                                # needs oc_supplier and join_key below, and ANTHROPIC_API_KEY in the app's secrets
 # oc_supplier: Example Brand Ltd   # ai: the company printed as the issuer on the brand's OCs (a list if it varies);
-                               # a PDF from any other supplier is refused
+                               # a PDF from any other supplier is refused. Required for ai and fog; checked for
+                               # otb and admilano when set
+# oc_label: Y-3                # an issuer with several labels (adidas AG: Y-3, Willy Chavarria, RS); required
+                               # for adidas, checked for admilano (its Brand field) when set
 # join_key: "{style} {colour_code}"  # how the store's manufacture_code is built from an OC line, from {style},
                                # {fabric}, {colour}, {colour_code}. Default (otb): "{style}{fabric} {colour}"
 # colour_codes:                # {colour_code}: OC colour (any case) -> store colour code; an OC colour

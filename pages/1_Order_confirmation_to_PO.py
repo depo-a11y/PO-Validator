@@ -39,9 +39,14 @@ from example.yaml. Send him one of the brand's order confirmations and ask for o
 - the SKU prefix for new products
 - the cost multiplier and the cost currency
 - the margin floor
-- `adapter: ai`, so the brand's OCs are read by AI
-- `oc_supplier`: the company name printed on the brand's OCs
+- the reader: the built-in one if the brand's OCs are one of the known layouts (Margiela/MM6, AD Milano, \
+adidas, Fear of God), else `adapter: ai`, so they are read by AI
+- `oc_supplier`: the company name printed on the brand's OCs (and `oc_label` for an issuer with several labels)
 - `join_key` and `colour_codes`: how the store's manufacture code is built from an OC line"""
+AI_CAP = 10
+CAP_MSG = (f"This browser session has used its {AI_CAP} AI reads. Each one is paid for; ask Colwyn if you need "
+           "more.")
+NO_SUPPLIER = "The AI reader is off for this brand: ask Colwyn to add oc_supplier to this brand's config."
 S = st.session_state
 
 
@@ -215,16 +220,27 @@ if cfg:
         (st.warning if note["Result"] == "WARN" else st.caption)(f"Past season POs: {note['Detail'].rstrip('.')}.")
 
 use_ai = False
+capped = S.get("ai_reads", 0) >= AI_CAP
 if cfg and cfg["adapter"] == "ai":
-    st.caption("This brand's order confirmations are always read by AI. Check each line's sizes against the PDF.")
+    st.caption("This brand's order confirmations are always read by AI. Check every line's code, colour, sizes, "
+               "quantities and price against the PDF.")
+    if capped:
+        st.error(CAP_MSG)
 elif cfg:
-    use_ai = st.checkbox(AI_BOX, value=False, key="w_ai", help=AI_HELP)
+    use_ai = st.checkbox(AI_BOX, value=False, key="w_ai", help=AI_HELP,
+                         disabled=not cfg.get("oc_supplier") or capped)
+    if not cfg.get("oc_supplier"):
+        st.caption(NO_SUPPLIER)
+    elif capped:
+        st.caption(CAP_MSG)
+    use_ai = use_ai and bool(cfg.get("oc_supplier")) and not capped
+blocked = bool(cfg) and cfg["adapter"] == "ai" and capped
 
 need = [n for n, ok in (("a brand", cfg), ("the catalog export", S.get("catalog")), ("the order confirmation", oc_up))
         if not ok]
 if need:
     st.caption("To build the draft, add " + and_join(need) + ".")
-if st.button("Build draft PO", type="primary", disabled=bool(need)):
+if st.button("Build draft PO", type="primary", disabled=bool(need) or blocked):
     S.pop("draft", None)
     slow = " An AI read can take a few minutes." if use_ai or cfg["adapter"] == "ai" else ""
     with st.spinner("Reading the order confirmation and building the draft. This can take a minute." + slow):
@@ -236,6 +252,8 @@ if st.button("Build draft PO", type="primary", disabled=bool(need)):
                     save(tmp, "oc.pdf", oc_up.getvalue()), save(tmp, "catalog.csv", S["catalog"][1]), cfg,
                     cart_path=save(tmp, "cart.xlsx", cart_up.getvalue()) if cart_up else None,
                     history_paths=hist_paths or None, reader="ai" if use_ai else None)
+            if service.ai_read_sent(checks):
+                S["ai_reads"] = S.get("ai_reads", 0) + 1
             S["draft"] = dict(po=po, review=review, checks=checks, file=service.file_prefix(cfg) + "PO-draft.xlsx",
                               made_from=f"{oc_up.name} and {S['catalog'][0]}, brand config {cfg['_path']}")
         except Exception as e:

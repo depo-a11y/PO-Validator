@@ -4,6 +4,7 @@
 Every resolver returns (value, source, detail). Sources, in trust order:
   OC, catalog  -> green   (read from the confirmation or the live store, same style)
   OC (AI read) -> amber   (read from the confirmation by the AI reader)
+  OC (AI read), size not live -> red (an AI-read size the live product does not have)
   cart, history, rule, similar -> amber (the selling-session cart, past POs on 2+ rows,
                            a brand rule, or a different live style at the same wholesale)
   thin, fit, guess -> red (one past row, a fitted ratio, or nothing to go on)
@@ -18,10 +19,11 @@ from .util import cost_currency, norm_code, norm_size, sort_sizes, size_key, tit
 
 GREEN, AMBER, RED = "green", "amber", "red"
 AI_OC = "OC (AI read)"   # a value the AI reader took from the OC: never green, however well it passed the gates
+AI_NEW_SIZE = "OC (AI read), size not live"   # an AI-read size the live product does not have: red
 GENDERS = ("MEN", "WOMEN", "UNISEX")
 # A colour description is copied into a title; anything outside these is a garbled export ('Peach Pur}e').
 CLEAN_COLOUR = re.compile(r"[^\w\s/&'.,()+-]")
-COLOUR = {"OC": GREEN, AI_OC: AMBER, "catalog": GREEN, "cart": AMBER, "history": AMBER, "rule": AMBER, "similar": AMBER,
+COLOUR = {"OC": GREEN, AI_OC: AMBER, AI_NEW_SIZE: RED, "catalog": GREEN, "cart": AMBER, "history": AMBER, "rule": AMBER, "similar": AMBER,
           "thin": RED, "fit": RED, "guess": RED}
 RANK = {GREEN: 0, AMBER: 1, RED: 2}
 

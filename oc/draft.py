@@ -13,7 +13,7 @@ import collections
 
 from .brand import ColourCodeError, code_for, unmapped_colours
 from .poxlsx import PO_HEADER, CODE, MADE_IN, SEASON, NEW_SALE, COST_PRICE, TITLE_TAG, review_row
-from .resolve import Resolver, COLOUR, AI_OC, split_code, worse
+from .resolve import Resolver, COLOUR, AI_OC, AI_NEW_SIZE, split_code, worse
 from .util import norm_size, sort_sizes, size_key, fmt_money, cost_currency, slug
 
 
@@ -84,8 +84,14 @@ def build(docs, brand, catalog, history, tag_lookup, cart=None):
                 cell(row, "Option1 Name", brand["option1_name"], "rule", "house option order")
                 cell(row, "Option1 Value", (v or {}).get("colour") or colour, "catalog", "live colour option")
                 cell(row, "Option2 Name", brand["option2_name"], "rule", "house option order")
-                cell(row, "Option2 Value", size, "catalog" if v else "OC",
-                     "live variant" if v else "ordered size the live product does not have")
+                if v:
+                    cell(row, "Option2 Value", size, "catalog", "live variant")
+                elif l.get("reader") == "ai":
+                    cell(row, "Option2 Value", size, AI_NEW_SIZE,
+                         f"read by AI from {l['doc']} line {l['line_no']}; ordered size the live product does not "
+                         "have: check it against the PDF")
+                else:
+                    cell(row, "Option2 Value", size, "OC", "ordered size the live product does not have")
                 if v:
                     cell(row, "Variant SKU", v["sku"], "catalog", "live SKU")
                     price = max(v["price"] or 0, v["compare_at"] or 0)

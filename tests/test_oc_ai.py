@@ -67,7 +67,8 @@ def _line(style, fabric, colour, desc, sizes, qty, price, value):
 
 
 RESPONSE = dict(supplier="Example Atelier Ltd", document_kind="order_confirmation", has_size_breakdown=True,
-                documents=[dict(number="SO-90001", date="01 July 2026", collection=None, currency="EUR",
+                pages_without_lines=[],
+                documents=[dict(number="SO-90001", label=None, date="01 July 2026", collection=None, currency="EUR",
                                 total_qty_text="9", net_total_text="EUR 2.716,50", gross_total_text=None, pages=[1],
                                 lines=[
     _line("EXJK01", "100% Cotton", "Grey", "Example Jacket", [("S", "1"), ("M", "2"), ("L", "1")], "4",
@@ -85,7 +86,7 @@ def _expected_line(n, style, fabric, colour, desc, sizes, qty, price, value):
 
 
 EXPECTED = [dict(doc="SO-90001", date="01 July 2026", collection=None, currency="EUR", total_qty=9, net=2716.5,
-                 gross=None, gender=None, pages=[1], reader="ai", lines=[
+                 gross=None, gender=None, pages=[1], reader="ai", issuer="Example Atelier Ltd", label=None, lines=[
     _expected_line(1, "EXJK01", "100% Cotton", "Grey", "Example Jacket", {"S": 1, "M": 2, "L": 1}, 4, 120.0, 480.0),
     _expected_line(2, "EXTS02", "100% Cotton", "Black", "Example Tee", {"XS": 2, "S": 1}, 3, 45.5, 136.5),
     _expected_line(3, "EXCP03", "100% Wool", "Black", "Example Cap", {"ONE SIZE": 2}, 2, 1050.0, 2100.0),
@@ -178,7 +179,7 @@ def test_a_read_returns_otb_shaped_docs_that_pass_the_same_gates(pdf, key):
     assert otb.gate_problems(docs) == []
     assert info["model"] == ai.MODEL and info["input_tokens"] == 12000 and info["output_tokens"] == 3000
     assert info["cost_usd"] == pytest.approx(12000 * 4 / 1e6 + 3000 * 20 / 1e6)
-    assert info["text_layer"] is True and info["raw"] == RESPONSE
+    assert info["raw"] == RESPONSE
 
 
 def test_the_request_is_pinned(pdf, key):
@@ -285,7 +286,14 @@ def test_a_packing_list_with_no_prices_says_so(pdf, key):
     e = _refused(pdf, d)
     by = {c["Check"]: c for c in e.checks}
     assert "packing list or delivery note carries no prices" in by[ai.NUMBERS_CHECK]["Detail"]
-    assert by[ai.KIND_CHECK]["Result"] == "WARN" and "delivery note" in by[ai.KIND_CHECK]["Detail"]
+    assert by[ai.KIND_CHECK]["Result"] == "FAIL" and "delivery note" in by[ai.KIND_CHECK]["Detail"]
+
+
+@pytest.mark.parametrize("kind", ["invoice", "delivery_note"])
+def test_an_invoice_or_delivery_note_is_refused_as_shipped_not_ordered(pdf, key, kind):
+    e = _refused(pdf, _mut(lambda d, doc, ls: d.update(document_kind=kind)))
+    (k,) = [c for c in e.checks if c["Check"] == ai.KIND_CHECK]
+    assert k["Result"] == "FAIL" and "shipped, not what was ordered" in k["Detail"]
 
 
 def test_a_proforma_with_sizes_reads_with_a_warning(pdf, key):
@@ -308,15 +316,15 @@ def test_supplier_match_ignores_case_and_punctuation():
 
 
 # ---- grounding -------------------------------------------------------------------------
-def test_no_text_layer_is_a_warning_not_a_pass(tmp_path, key):
+def test_no_text_layer_is_refused_before_anything_is_sent(tmp_path, key):
     scan = make_pdf(tmp_path / "scan.pdf", [])
     assert ai.pdf_text(scan).strip() == ""
-    docs, warns, info = ai.read(scan, _cfg(), factory=FakeClient(message(
-        _mut(lambda d, doc, ls: ls[2].update(style="EXCP99")))).factory)
-    assert [(w["Check"], w["Result"]) for w in warns] == [(ai.GROUNDING_CHECK, "WARN")]
-    assert "no text layer" in warns[0]["Detail"] and info["text_layer"] is False
-    row = ai.reader_check(info)
-    assert "no text layer, so its codes and amounts could not be checked" in row["Detail"]
+    fake = FakeClient(message(RESPONSE))
+    with pytest.raises(ai.ReadRefused) as e:
+        ai.read(scan, _cfg(), factory=fake.factory)
+    assert [(c["Check"], c["Result"], c["Detail"]) for c in e.value.checks] == [(ai.TEXT_CHECK, "FAIL", ai.NO_TEXT)]
+    assert ai.NO_TEXT == "this PDF has no text to check the AI reading against (a scan?); ask Colwyn"
+    assert fake.calls == [] and fake.keys == [] and e.value.info is None
 
 
 def test_bold_text_printed_twice_is_still_found(tmp_path, key):
@@ -486,9 +494,11 @@ def test_draft_marks_every_ai_read_value_amber_and_says_which_reader(tmp_path, p
     row = next(c for c in checks if c["Check"] == service.READER_CHECK)
     assert row["Result"] == "WARN" and "claude-opus-5-5" in row["Detail"] and "US$0.11" in row["Detail"]
     for phrase in ("Every quantity, size and price came from an AI reading", "passed the same gates",
-                   "every code and amount it read was found in the PDF text",
-                   "A quantity read under the wrong size passes every gate, so check each line's sizes against the PDF"):
+                   "Each line's code, colour, size names, price and line value were found in that line's part of the "
+                   "PDF text", "quantities and totals are too short to look up, so they were checked by arithmetic only",
+                   "Check every line's code, colour, sizes, quantities and price against the PDF."):
         assert phrase in row["Detail"], phrase
+    assert "every code and amount" not in row["Detail"]
     assert next(c for c in checks if c["Check"] == "OC totals reproduced (parsed = printed)")["Result"] == "PASS"
     assert COLOUR[AI_OC] == "amber"
 
@@ -538,8 +548,9 @@ def test_the_otb_reader_row_is_info_and_no_confirmation_points_at_the_ai_box(tmp
     row = next(c for c in checks if c["Check"] == service.READER_CHECK)
     assert row["Result"] == "INFO" and "no AI was used" in row["Detail"]
     (f,) = service.fails(checks)
-    assert f["Detail"] == ("no order confirmations found. If this is the right brand and its layout changed, "
-                           "tick 'Read the OC with AI' and build again.")
+    assert f["Detail"] == "no order confirmations found. " + service.AI_HINT
+    assert service.AI_HINT == ("If this is the right brand and its layout changed, tick 'Read the OC with AI' and "
+                               "build again (the box needs oc_supplier in the brand's config).")
 
 
 def test_complete_marks_a_price_taken_from_an_ai_read_amber(tmp_path):

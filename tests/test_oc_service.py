@@ -96,7 +96,8 @@ def test_draft_turns_an_oc_gate_error_into_fail_checks(tmp_path, oc_stub):
     oc_stub["error"] = otb.GateError(["SS - 1 line 1: sizes sum 4 != Tot. Qty 3", "SS - 1: no printed totals"])
     po, review, checks = service.draft("oc.pdf", _catalog(tmp_path), _cfg())
     assert po is None and review.empty
-    assert [c["Detail"] for c in service.fails(checks)] == oc_stub["error"].problems
+    first, totals = oc_stub["error"].problems
+    assert [c["Detail"] for c in service.fails(checks)] == [first, f"{totals}. {service.AI_HINT}"]
 
 
 def test_draft_reports_a_catalog_missing_columns(tmp_path, oc_stub):

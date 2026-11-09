@@ -65,7 +65,8 @@ def _page_with_brand(tmp_path, monkeypatch, extra):
 
 @pytest.mark.parametrize("name", ["otb", "admilano", "adidas", "fog"])
 def test_a_fixed_reader_brand_offers_the_ai_reader_off_by_default(tmp_path, monkeypatch, name):
-    at = _page_with_brand(tmp_path, monkeypatch, f"adapter: {name}\n")
+    who = "oc_label: Y-3\n" if name == "adidas" else ""
+    at = _page_with_brand(tmp_path, monkeypatch, f"adapter: {name}\noc_supplier: X Ltd\n{who}")
     (box,) = [c for c in at.checkbox if c.label == "Read the OC with AI (for a layout the tool does not know)"]
     assert box.value is False and "no order confirmations found" in box.help
     assert not any("always read by AI" in c.value for c in at.caption)
@@ -103,3 +104,54 @@ def test_after_a_draft_the_page_says_which_reader_was_used(tmp_path, monkeypatch
     assert any(c.value == "Order confirmation read by the built-in reader for the OTB layout; no AI was used"
                for c in at.caption)
     assert not any("read by AI" in w.value for w in at.warning)
+
+
+def test_the_ai_box_is_off_for_a_brand_with_no_oc_supplier(tmp_path, monkeypatch):
+    at = _page_with_brand(tmp_path, monkeypatch, "adapter: otb\n")
+    (box,) = [c for c in at.checkbox if c.label == "Read the OC with AI (for a layout the tool does not know)"]
+    assert box.disabled
+    assert any(c.value == "The AI reader is off for this brand: ask Colwyn to add oc_supplier to this brand's config."
+               for c in at.caption)
+
+
+def _capped(tmp_path, monkeypatch, extra):
+    d = tmp_path / "brands"
+    d.mkdir()
+    (d / "aaa.local.yaml").write_text(BRAND_YAML + extra)
+    monkeypatch.setenv("OC_BRAND_DIR", str(d))
+    at = AppTest.from_file(str(PAGE), default_timeout=60)
+    at.session_state["ai_reads"] = 10
+    at.run()
+    assert not at.exception
+    return at
+
+
+CAP = "This browser session has used its 10 AI reads. Each one is paid for; ask Colwyn if you need more."
+
+
+def test_after_ten_ai_reads_the_ai_box_is_off(tmp_path, monkeypatch):
+    at = _capped(tmp_path, monkeypatch, "adapter: otb\noc_supplier: X Ltd\n")
+    (box,) = [c for c in at.checkbox if c.label.startswith("Read the OC with AI")]
+    assert box.disabled and any(c.value == CAP for c in at.caption)
+    (build,) = [b for b in at.button if b.label == "Build draft PO"]
+    assert not any(e.value == CAP for e in at.error)
+
+
+def test_after_ten_ai_reads_an_ai_brand_cannot_build(tmp_path, monkeypatch, ):
+    at = _capped(tmp_path, monkeypatch, "adapter: ai\noc_supplier: X Ltd\njoin_key: '{style}'\n")
+    assert any(e.value == CAP for e in at.error)
+    (build,) = [b for b in at.button if b.label == "Build draft PO"]
+    assert build.disabled
+
+
+def test_below_the_cap_an_ai_brand_shows_no_cap_message(tmp_path, monkeypatch):
+    at = _page_with_brand(tmp_path, monkeypatch, "adapter: ai\noc_supplier: X Ltd\njoin_key: '{style}'\n")
+    assert not any(e.value == CAP for e in at.error)
+
+
+def test_the_expander_names_the_built_in_readers_before_ai(tmp_path, monkeypatch):
+    at = _page_with_brand(tmp_path, monkeypatch, "adapter: otb\n")
+    (exp,) = [e for e in at.expander if e.label == "My brand is not in the list"]
+    text = " ".join(m.value for m in exp.markdown)
+    assert ("the built-in one if the brand's OCs are one of the known layouts (Margiela/MM6, AD Milano, adidas, "
+            "Fear of God), else `adapter: ai`") in text

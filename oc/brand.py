@@ -18,6 +18,12 @@ could otherwise make the hosted app read any file on its server. `history` comes
 back empty and `history_files` keeps each entry's label and bare file name, so
 past POs uploaded on the page can still be matched to their season labels.
 
+Which OCs a config accepts: `oc_supplier` names the issuer as printed and `oc_label` the
+label, for an issuer with several (adidas AG: Y-3, Willy Chavarria, RS). Every reader
+returns both per document and an OC that does not match the config is refused. fog needs
+`oc_supplier` (one reader for FOG Essentials and Fear of God LLC) and adidas needs
+`oc_label`; for the other readers the check runs when the key is set.
+
 `adapter` picks the OC reader: a built-in reader for one known layout (`otb` Maison
 Margiela/MM6, `admilano` AD Milano, `adidas` adidas AG, `fog` Fear of God) or `ai` (any
 layout, read by Claude; oc/adapters/ai.py). An `ai` brand must name `oc_supplier`
@@ -25,7 +31,7 @@ layout, read by Claude; oc/adapters/ai.py). An `ai` brand must name `oc_supplier
 
 `join_key` says how the store's manufacture_code is built from an OC line: a template
 over {style}, {fabric}, {colour} and {colour_code}. The default, for otb, is
-"{style}{fabric} {colour}" (Margiela's S51AM0539M35920 510). {colour_code} looks the
+"{style}{fabric} {colour}" (e.g. S99ZZ0001P0001 101). {colour_code} looks the
 OC's colour up in `colour_codes` (OC colour: store code, case-insensitive), for a brand
 whose store code carries a short colour code where its OC prints the colour name.
 The template is filled by plain substitution of exactly those four tokens, never by
@@ -68,6 +74,15 @@ AI_NEEDS = {
     "join_key": "join_key: how the store's manufacture_code is built from an OC line, from {style}, {fabric}, "
                 "{colour} and {colour_code}, e.g. \"{style} {colour_code}\" (with colour_codes mapping each OC "
                 "colour to its store code, e.g. GREY: GR)",
+}
+
+
+# Fixed readers that serve several brands: the config must say which one it accepts.
+FIXED_NEEDS = {
+    "fog": {"oc_supplier": "oc_supplier: the issuer printed on this brand's OCs (FOG Essentials or Fear of God LLC); "
+                           "one reader serves both, so the config says which it accepts"},
+    "adidas": {"oc_label": "oc_label: the label printed at the start of this brand's line descriptions (Y-3, "
+                           "Willy Chavarria or RS); one adidas AG reader serves all three"},
 }
 
 
@@ -194,12 +209,17 @@ def _reader_keys(cfg, data, source):
         if need:
             raise BrandError(f"{source}: adapter: ai needs {' and '.join(need)}. Add "
                              + "; ".join(AI_NEEDS[k] for k in need) + ".")
-    sup = cfg.get("oc_supplier")
-    if sup:
-        sup = [sup] if isinstance(sup, str) else list(sup)
-        if not all(isinstance(x, str) and x.strip() for x in sup):
-            raise BrandError(f"{source}: oc_supplier is a company name or a list of them, got {cfg['oc_supplier']!r}")
-        cfg["oc_supplier"] = sup
+    need = [k for k in FIXED_NEEDS.get(cfg["adapter"], {}) if not data.get(k)]
+    if need:
+        raise BrandError(f"{source}: adapter: {cfg['adapter']} needs {' and '.join(need)}. Add "
+                         + "; ".join(FIXED_NEEDS[cfg["adapter"]][k] for k in need) + ".")
+    for key, what in (("oc_supplier", "a company name"), ("oc_label", "a label name")):
+        val = cfg.get(key)
+        if val:
+            val = [val] if isinstance(val, str) else list(val)
+            if not all(isinstance(x, str) and x.strip() for x in val):
+                raise BrandError(f"{source}: {key} is {what} or a list of them, got {cfg[key]!r}")
+            cfg[key] = val
     tpl = cfg.get("join_key") or DEFAULT_JOIN_KEY
     if not isinstance(tpl, str):
         raise BrandError(f"{source}: join_key is a text template, got {tpl!r}")

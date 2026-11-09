@@ -35,7 +35,14 @@ Pure Python, files in and files out. Nothing here talks to Shopify, Matrixify or
   layout each: `otb` (Maison Margiela, MM6), `admilano` (AD Milano / Ann Demeulemeester), `adidas` (adidas AG: Y-3,
   Willy Chavarria, RS) and `fog` (FOG Essentials, Fear of God LLC). `ai` reads any layout (see "AI reader" below).
   All share `otb.gate_problems`, whose three gates hard-fail. Whatever the reader, an OC whose currency is not the
-  brand's `cost_currency` is refused (printed names are normalised: otb's "European Euro" is EUR).
+  brand's `cost_currency` is refused (printed names are normalised: otb's "European Euro" is EUR), and so is one
+  from another issuer or label: every reader returns both per document (fog the issuer; admilano the issuer and
+  its Brand field; adidas "adidas AG" and the label at the start of the line descriptions, Y-3, Willy Chavarria
+  or RS, never the free-text Customer Order Number; otb the collection's first word). The config's `oc_supplier`
+  and `oc_label` say what it accepts: fog needs `oc_supplier` and adidas `oc_label`; otb and admilano are checked
+  when the key is set (otb, which does not parse its issuer, passes when one of the names is printed on the
+  document's pages). Every layout problem of a fixed reader (no confirmation found, a moved header, a quantity off
+  its column) says to tick "Read the OC with AI"; the arithmetic gates and discounts do not.
 - Money: Wholesale Price, Total Order and the `Variant.cost_price` metafield are in the brand's `cost_currency`.
   The metafield is written and checked as `<cost_currency> <amount>` (`EUR 34`, `USD 150`), messages are worded in
   that currency, and the PO and Delivery file format those columns in it (EUR keeps the euro-sign format).
@@ -157,15 +164,26 @@ money needs a 2-digit decimal part or is a bare integer (`€ 1,488.60`, `1.234,
 (sizes sum to the line, qty x price = line value, lines sum to the printed totals). On top of that, a read is
 refused when: a line has no sizes (a proforma prints none: upload the order confirmation), the currency is not the
 brand's `cost_currency`, the issuer is not one of the brand's `oc_supplier` names (case and punctuation ignored),
-a number does not parse, or (when the PDF has a text layer) a line's style, price or line value, or a document's
-number or totals, is not in the PDF text. Bold text drawn twice (`PPRROOFFOORRMMAA`) is matched too. A PDF with
-no text layer is a WARN: nothing could be cross-checked. A document the AI calls anything but an order
-confirmation is a WARN.
+a number does not parse, or the AI calls it an invoice or delivery note (shipped quantities, not ordered; a
+proforma is a WARN). Before anything is sent, a PDF over 60 pages or with no text layer (a scan) is refused.
+
+Block grounding, on the text of each page in reading order: each line's style must be on the page the model
+names, after the previous line's; its price, line value, fabric and colour must be in that line's part of the text
+(from its style to the next line's style); and each size name in that part, in the gap before the line, or in
+the page's table header (some layouts print the size header above the style, once at the foot of the previous
+page). Every PDF page must belong to exactly one confirmation or be listed as a page with no order lines; a
+confirmation returned twice, a line returned more often than its style is printed, or a line on a page outside its
+confirmation is refused. Bold text drawn twice (`PPRROOFFOORRMMAA`) is matched too. Quantities and totals are too
+short to look up in the text: only the gates' arithmetic checks them. Checked against the fixed readers on the real
+PDFs, style -> price -> value -> next style holds on every line of otb (88), admilano (54), adidas (119) and fog
+(52); fog prints 3 lines' size header before the style, hence the size-name region.
 
 What no gate catches: a quantity read under the wrong size. So every value from an AI read is source
-`OC (AI read)` in the Review sheet, shaded amber (never green), its Why reads "read by AI from <doc> line <n>",
-and the Checks carry an "Order confirmation reader" WARN with the model, seconds and cost, telling the reviewer to
-check each line's sizes against the PDF. The otb reader's row is an INFO.
+`OC (AI read)` in the Review sheet, shaded amber (never green), its Why reads "read by AI from <doc> line <n>";
+an ordered size the live product does not have is red. The Checks carry an "Order confirmation reader" WARN with
+the model, seconds and cost, saying what was checked and telling the reviewer to check every line's code, colour,
+sizes, quantities and price against the PDF. A fixed reader's row is an INFO. The page allows 10 AI reads per
+browser session, and its AI box is off for a brand whose config has no `oc_supplier`.
 
 The key is `ANTHROPIC_API_KEY`: the environment first, else the app's Streamlit secrets (top level of
 `.streamlit/secrets.toml`, see `secrets.example.toml`). It is never logged or shown; with no key the read is a
