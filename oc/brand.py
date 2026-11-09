@@ -27,10 +27,13 @@ over {style}, {fabric}, {colour} and {colour_code}. The default, for otb, is
 "{style}{fabric} {colour}" (Margiela's S51AM0539M35920 510). {colour_code} looks the
 OC's colour up in `colour_codes` (OC colour: store code, case-insensitive), for a brand
 whose store code carries a short colour code where its OC prints the colour name.
+The template is filled by plain substitution of exactly those four tokens, never by
+str.format: a config can be an upload, and a format spec such as {style:>999999999}
+would make the server build a huge string. Any other brace is refused at load.
 """
 import copy
 import os
-import string
+import re
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -54,6 +57,7 @@ REQUIRED = ["vendor", "adapter", "season", "sku_prefix", "cost_multiplier",
 
 ADAPTERS = ("otb", "ai")
 JOIN_FIELDS = ("style", "fabric", "colour", "colour_code")
+JOIN_TOKEN = re.compile(r"\{(style|fabric|colour|colour_code)\}")
 DEFAULT_JOIN_KEY = "{style}{fabric} {colour}"
 AI_NEEDS = {
     "oc_supplier": "oc_supplier: the company name printed as the issuer on this brand's order confirmations "
@@ -81,7 +85,7 @@ def norm_colour(colour):
 
 
 def join_fields(template):
-    return [f for _, f, _, _ in string.Formatter().parse(template) if f is not None]
+    return JOIN_TOKEN.findall(template)
 
 
 def code_for(brand, style, fabric, colour):
@@ -93,7 +97,7 @@ def code_for(brand, style, fabric, colour):
         if cc is None:
             raise ColourCodeError([str(colour)])
         vals["colour_code"] = cc
-    return norm_code(tpl.format(**vals))
+    return norm_code(JOIN_TOKEN.sub(lambda m: str(vals[m.group(1)]), tpl))
 
 
 def unmapped_colours(brand, docs):
@@ -184,14 +188,12 @@ def _reader_keys(cfg, data, source):
     tpl = cfg.get("join_key") or DEFAULT_JOIN_KEY
     if not isinstance(tpl, str):
         raise BrandError(f"{source}: join_key is a text template, got {tpl!r}")
-    try:
-        fields = join_fields(tpl)
-    except ValueError as e:
-        raise BrandError(f"{source}: join_key {tpl!r} is not a template ({e})") from None
-    bad = [f for f in fields if f not in JOIN_FIELDS]
-    if bad or not fields:
+    fields, rest = join_fields(tpl), JOIN_TOKEN.sub("", tpl)
+    if "{" in rest or "}" in rest or not fields:
+        bad = re.findall(r"\{[^{}]*\}?", rest)
         raise BrandError(f"{source}: join_key {tpl!r} may use only " + ", ".join("{" + f + "}" for f in JOIN_FIELDS)
-                         + (f"; unknown: {', '.join('{' + f + '}' for f in bad)}" if bad else ""))
+                         + ", each written exactly so (no format specs, conversions or other braces)"
+                         + (f"; not allowed: {', '.join(bad)}" if bad else ""))
     cfg["join_key"] = tpl
     codes = cfg.get("colour_codes") or {}
     if not isinstance(codes, Mapping):

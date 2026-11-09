@@ -603,9 +603,12 @@ def test_a_colour_code_join_key_builds_the_store_code():
     (dict(oc_supplier=None), "adapter: ai needs oc_supplier. Add oc_supplier: the company name printed"),
     (dict(join_key=None), "adapter: ai needs join_key. Add join_key: how the store's manufacture_code is built"),
     (dict(oc_supplier=None, join_key=None), "adapter: ai needs oc_supplier and join_key"),
-    (dict(join_key="{style} {color}"), "may use only {style}, {fabric}, {colour}, {colour_code}; unknown: {color}"),
-    (dict(join_key="{style} {0}"), "unknown: {0}"),
-    (dict(join_key="{style"), "is not a template"),
+    (dict(join_key="{style} {color}"), "may use only {style}, {fabric}, {colour}, {colour_code}, each written "
+                                         "exactly so (no format specs, conversions or other braces); not allowed: {color}"),
+    (dict(join_key="{style} {0}"), "not allowed: {0}"),
+    (dict(join_key="{style} {}"), "not allowed: {}"),
+    (dict(join_key="{style"), "not allowed: {style"),
+    (dict(join_key="{style} }"), "may use only"),
     (dict(join_key="ABC"), "may use only"),
     (dict(join_key="{style} {colour_code}", colour_codes=None), "no colour_codes table"),
     (dict(adapter="pdfminer"), "adapter must be otb or ai"),
@@ -622,6 +625,21 @@ def test_a_bad_reader_config_fails_at_load_saying_what_to_add(extra, needle):
     with pytest.raises(brandm.BrandError) as e:
         brandm.from_mapping(d, "test config")
     assert needle in str(e.value), str(e.value)
+
+
+@pytest.mark.parametrize("tpl", ["{style:>999999999}", "{style!r} {colour}", "{style.upper} {colour}",
+                                 "{style[0]} {colour}", "{style}{fabric:{colour}}", "{{style}} {colour}"])
+def test_a_join_key_with_a_format_spec_conversion_or_attribute_is_refused_at_load(tpl):
+    """A config can be an upload on the hosted page: nothing in it may make the server build a string."""
+    d = dict(base.BRAND, adapter="ai", oc_supplier="X Ltd", join_key=tpl, colour_codes={"GREY": "GR"})
+    with pytest.raises(brandm.BrandError, match="no format specs, conversions or other braces"):
+        brandm.from_mapping(d, "uploaded file x.yaml")
+
+
+def test_the_join_key_is_filled_by_substitution_never_by_format():
+    """Even a template that skipped the load check is copied literally, never interpreted."""
+    assert brandm.code_for({"join_key": "{style:>40}|{style}"}, "ab", None, None) == "{STYLE:>40}|AB"
+    assert brandm.code_for({"join_key": "{style!r} {colour}"}, "ab", None, "x") == "{STYLE!R} X"
 
 
 def test_an_ai_config_from_yaml_loads():
