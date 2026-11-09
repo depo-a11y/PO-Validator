@@ -24,9 +24,8 @@ BRAND = dict(
     colour_families={"BLACK": ["black"], "WHITE": ["white"]}, country_names={"IT": "Italy"},
 )
 
-CAT_COLS = list(catm.REQUIRED) + ["Body HTML", "Variant Barcodes", "Variant Inventory Qty",
-                                  "Variant Country of Origin", "Variant HS Code", catm.MADE_IN, catm.SEASON,
-                                  catm.NEW_SALE, "Created At"]
+CAT_COLS = list(dict.fromkeys(list(catm.REQUIRED) + ["Body HTML", "Variant Barcodes", "Variant Country of Origin",
+                                                       "Variant HS Code", catm.MADE_IN, catm.NEW_SALE, "Created At"]))
 
 MERGE_SHEET_COLS = ["ID", "Command", "Tags Command", "Tags", poxlsx.SEASON, "Variant ID", "Variant Command", "Variant Cost"]
 
@@ -311,24 +310,31 @@ def test_brand_config_lookup_order(tmp_path, monkeypatch):
 LIVE_COSTS = {"40": ("310.00", "2"), "41": ("305.50", "1"), "42": ("312.25", "3")}
 
 
-@pytest.fixture
-def split_catalog_path(tmp_path):
-    """Product 1's live sizes carry three different costs and on-hand counts; product 3 is not re-bought."""
+def _split_rows():
+    """Product 1's live sizes carry three different costs and available counts; product 3 is not re-bought."""
     rows = []
     for i, (size, (cost, qty)) in enumerate(LIVE_COSTS.items()):
         r = _variant("1", "Replica Sneaker in White", "MEN SHOES SNEAKERS", "Active", "S99WS0001P0001 101",
                      "WHITE", size, f"MMFW26{100 + i}", "800.00", "800.00", cost, i == 0)
-        r["Variant Inventory Qty"] = qty
+        r[catm.AVAILABLE] = qty
         rows.append(r)
     for i, size in enumerate(["S", "M"]):
         rows.append(_variant("3", "Logo Tee in Black", "MEN CLOTHING T-SHIRTS SHORT SLEEVE", "Active", "S98GC0003S00003 900",
                              "BLACK", size, f"MMFW26{200 + i}", "560.00", "800.00", "250.00", i == 0))
-    p = tmp_path / "split.csv"
-    with open(p, "w", encoding="utf-8-sig", newline="") as fh:
-        w = csv.DictWriter(fh, fieldnames=CAT_COLS)
+    return rows
+
+
+def _write_catalog(path, rows, cols=CAT_COLS):
+    with open(path, "w", encoding="utf-8-sig", newline="") as fh:
+        w = csv.DictWriter(fh, fieldnames=cols, extrasaction="ignore")
         w.writeheader()
         w.writerows(rows)
-    return str(p)
+    return str(path)
+
+
+@pytest.fixture
+def split_catalog_path(tmp_path):
+    return _write_catalog(tmp_path / "split.csv", _split_rows())
 
 
 def _merge_po(tmp_path, po_cost=300.0, cost_price="EUR 200"):
@@ -434,3 +440,102 @@ def test_text_that_starts_like_a_formula_is_written_as_text(catalog_path, split_
     assert _cells(rb, poxlsx.SEASON)[0] == ("=F/W 26", "s")
     ns = openpyxl.load_workbook(prefix + "PU-merge-new-sizes.xlsx")["Products"]
     assert _cells(ns, poxlsx.COST_PRICE) == [("=EUR 200", "s")]
+
+
+# ---- the catalog's season and available stock (reviewer case 2026-11-09-buyer-8 F6) ----
+@pytest.mark.parametrize("col,group", [(catm.SEASON, "Metafields"), (catm.AVAILABLE, "Inventory / Variants")])
+def test_a_catalog_without_the_season_or_available_column_fails_naming_it_and_its_export_group(tmp_path, col, group):
+    path = _write_catalog(tmp_path / "short.csv", _split_rows(), [c for c in CAT_COLS if c != col])
+    with pytest.raises(catm.CatalogError) as e:
+        catm.load(path)
+    assert f"missing columns: '{col}' (Matrixify Products export, {group} group)." in str(e.value)
+
+
+def _by(checks, prefix):
+    return next(c for c in checks if c["Check"].startswith(prefix))
+
+
+def test_a_product_with_no_season_gets_ignore_in_the_rollback_never_an_empty_cell(tmp_path):
+    rows = _split_rows()
+    rows[0][catm.SEASON] = ""
+    prefix = str(tmp_path / "x-")
+    checks = finalize.run(_merge_po(tmp_path), BRAND, catm.load(_write_catalog(tmp_path / "c.csv", rows)), prefix)
+    assert not [c for c in checks if c["Result"] == "FAIL"], checks
+    rb = openpyxl.load_workbook(prefix + "PU-merge-ROLLBACK.xlsx")["Products"]
+    assert _cells(rb, poxlsx.SEASON)[0] == ("[IGNORE]", "s")  # an empty cell would delete the metafield
+    m = openpyxl.load_workbook(prefix + "PU-merge.xlsx")["Products"]
+    assert _cells(m, poxlsx.SEASON)[0] == ("S/S 27", "s")
+    warn = _by(checks, "Re-bought products with no season in the catalog export")
+    assert warn["Result"] == "WARN" and warn["Detail"].startswith("1: Replica Sneaker in White. ")
+    info = _by(checks, "Rollback for PU-merge")["Detail"]
+    assert "('', " not in info and "[]; 1 with none keep S/S 27, cell [IGNORE])" in info
+
+
+def test_restatement_counts_available_units(split_catalog_path, tmp_path):
+    checks = finalize.run(_merge_po(tmp_path), BRAND, catm.load(split_catalog_path), str(tmp_path / "x-"))
+    restate = _by(checks, "Cost restatement on available stock")
+    assert "on hand" not in restate["Check"] and restate["Detail"].startswith("6 units on 1 products")
+
+
+# ---- a catalog exported after PU-merge was imported (F8) ----
+POST_IMPORT = "Catalog export taken before PU-merge was imported"
+SIGNS = {"season": "season already S/S 27", "tag": "'S/S 27' tag already on it",
+         "cost": "every size already at the OC cost A$300.0"}
+
+
+def _imported(rows, signs=tuple(SIGNS)):
+    """Product 1 as the export reads after PU-merge is imported, or with only some of its marks."""
+    out = []
+    for r in rows:
+        r = dict(r)
+        if r["ID"] == "1":
+            if "cost" in signs:
+                r["Variant Cost"] = "300.00"
+            if r["Top Row"] == "true" and "season" in signs:
+                r[catm.SEASON] = "S/S 27"
+            if r["Top Row"] == "true" and "tag" in signs:
+                r["Tags"] += ", S/S 27"
+        out.append(r)
+    return out
+
+
+def _rollback(prefix):
+    return pd.read_excel(prefix + "PU-merge-ROLLBACK.xlsx").fillna("")
+
+
+def test_a_catalog_exported_after_the_import_warns_and_its_rollback_undoes_nothing(tmp_path):
+    rows = _split_rows()
+    first, rerun, late = (str(tmp_path / f"{n}-") for n in ("first", "rerun", "late"))
+    pre = _write_catalog(tmp_path / "pre.csv", rows)
+    for prefix in (first, rerun):  # a genuine re-run before the import is unchanged
+        checks = finalize.run(_merge_po(tmp_path), BRAND, catm.load(pre), prefix)
+        assert _by(checks, POST_IMPORT)["Result"] == "PASS"
+        assert not [c for c in checks if c["Result"] in ("FAIL", "WARN")], checks
+    assert _rollback(first).equals(_rollback(rerun))
+    assert list(_rollback(first)["Variant Cost"]) == [310.0, 305.5, 312.25]
+    assert _rollback(first)["Tags Command"][0] == "DELETE"
+
+    checks = finalize.run(_merge_po(tmp_path), BRAND, catm.load(_write_catalog(tmp_path / "post.csv", _imported(rows))),
+                          late)
+    assert not [c for c in checks if c["Result"] == "FAIL"], checks
+    warn = _by(checks, POST_IMPORT)
+    assert warn["Result"] == "WARN"
+    assert warn["Detail"].startswith(f"1 of 1 re-bought products already look imported: Replica Sneaker in White "
+                                     f"({', '.join(SIGNS.values())}). ")
+    assert "Keep and use the first PU-merge-ROLLBACK" in warn["Detail"]
+    rb = _rollback(late)  # why: built from the imported state, it puts back the OC cost and keeps the tag
+    assert list(rb["Variant Cost"]) == [300.0] * 3 and rb["Tags Command"][0] == "MERGE" and rb[poxlsx.SEASON][0] == "S/S 27"
+
+
+@pytest.mark.parametrize("sign", SIGNS)
+def test_each_post_import_sign_alone_warns(tmp_path, sign):
+    cat = catm.load(_write_catalog(tmp_path / "c.csv", _imported(_split_rows(), (sign,))))
+    warn = _by(finalize.run(_merge_po(tmp_path), BRAND, cat, str(tmp_path / "x-")), POST_IMPORT)
+    assert warn["Result"] == "WARN" and f"Replica Sneaker in White ({SIGNS[sign]}). " in warn["Detail"]
+
+
+def test_one_size_already_at_the_oc_cost_is_not_a_post_import_sign(tmp_path):
+    rows = _split_rows()
+    rows[0]["Variant Cost"] = "300.00"
+    cat = catm.load(_write_catalog(tmp_path / "c.csv", rows))
+    assert _by(finalize.run(_merge_po(tmp_path), BRAND, cat, str(tmp_path / "x-")), POST_IMPORT)["Result"] == "PASS"

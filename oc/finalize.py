@@ -26,6 +26,11 @@ PU-merge carryover, keyed on known product and variant IDs, so Command = UPDATE 
          Command MERGE) at the same OC cost. A rollback file restores the previous
          season, removes the tag where this run added it, and puts back each
          touched variant's prior Variant Cost from the catalog export.
+         A product with no season in the export gets [IGNORE] in the rollback's
+         season cell, not an empty one: Matrixify deletes a metafield on an empty
+         cell and leaves it unchanged on [IGNORE] (WARN names those products).
+         The rollback is only an undo when the catalog was exported before
+         PU-merge was imported, so a catalog that already looks imported is a WARN.
 Delivery the brand delivery workbook shape, with a Total Delivered roll-up that
          absorbs future tranche columns and Remaining = Order Qty - Total Delivered.
 """
@@ -57,6 +62,7 @@ DELIVERY_HEADER = [
 ]
 
 ID_COMMAND = "UPDATE"
+IGNORE = "[IGNORE]"  # Matrixify: this cell's metafield is left unchanged, as if the column were absent
 VARIANT_COMMAND = "UPDATE"
 MERGE_PRODUCT_COLS = ["ID", "Command", "Tags Command", "Tags", SEASON]
 ROLLBACK_COLS = ["ID", "Command", "Tags Command", "Tags", SEASON]
@@ -313,7 +319,7 @@ def _pu_merge(merge, brand, catalog, core, out_prefix):
             if i == 0:
                 row.update({"Tags Command": "MERGE", "Tags": season, SEASON: season})
                 back.update({"Tags Command": "MERGE" if tagged else "DELETE", "Tags": "" if tagged else season,
-                             SEASON: p["season"]})
+                             SEASON: p["season"] or IGNORE})
             row["Variant Cost"] = new_cost.get(pid)
             back["Variant Cost"] = v["cost"]
             rows.append(row)
@@ -336,9 +342,10 @@ def _pu_merge(merge, brand, catalog, core, out_prefix):
     per = []
     for pid, (p, _) in products.items():
         if pid in new_cost:
-            per.append((sum(v["on_hand"] * (new_cost[pid] - v["cost"]) for v in p["variants"] if v["cost"] is not None),
-                        sum(v["on_hand"] for v in p["variants"]), p["title"]))
-    out.append(dict(Check="Cost restatement on hand (information: on-hand units x (OC cost - old cost))", Result="INFO",
+            per.append((sum(v["available"] * (new_cost[pid] - v["cost"]) for v in p["variants"] if v["cost"] is not None),
+                        sum(v["available"] for v in p["variants"]), p["title"]))
+    out.append(dict(Check="Cost restatement on available stock (information: available units, Variant Inventory Qty, "
+                          "x (OC cost - old cost))", Result="INFO",
                     Detail=f"{sum(u for _, u, _ in per):g} units on {len(per)} products restate by "
                            f"A${sum(x for x, _, _ in per):,.2f}"
                            + (f"; {len(nocost)} variants had no cost before, not counted" if nocost else "") + ": "
@@ -354,9 +361,19 @@ def _pu_merge(merge, brand, catalog, core, out_prefix):
     writers.append((f"{out_prefix}PU-merge.xlsx", lambda p: write_frame(p, frame, "Products"), note))
 
     rb_frame = pd.DataFrame(rb, columns=ROLLBACK_COLS + VARIANT_COST_COLS)
+    unseasoned = [p["title"] for p, _ in products.values() if not p["season"]]
+    if unseasoned:
+        out.append(dict(Check="Re-bought products with no season in the catalog export (a rollback keeps the new season "
+                              "on them)", Result="WARN",
+                        Detail=f"{len(unseasoned)}: {'; '.join(unseasoned)}. Their rollback season cell is {IGNORE}, which "
+                               f"Matrixify reads as 'leave custom.product_season as it is'. An empty cell would delete "
+                               f"it. So after a rollback they keep {season}: remove it in Shopify by hand if it should go."))
+    out.append(_post_import_check(products, season, new_cost))
     out.append(dict(Check="Rollback for PU-merge", Result="INFO",
                     Detail=f"restores each product's previous custom.product_season from the catalog export "
-                           f"({collections.Counter(p['season'] for p, _ in products.values()).most_common()}), deletes the "
+                           f"({collections.Counter(p['season'] for p, _ in products.values() if p['season']).most_common()}"
+                           + (f"; {len(unseasoned)} with none keep {season}, cell {IGNORE}" if unseasoned else "")
+                           + "), deletes the "
                            f"'{season}' tag on {len(blocks) - len(tagged)} products (already carried it before this run: "
                            + (", ".join(p["title"] for p in tagged) or "none")
                            + f") and puts back the prior Variant Cost on {len(rb)} variants"
@@ -379,6 +396,36 @@ def _pu_merge(merge, brand, catalog, core, out_prefix):
                         lambda p: write_frame(p, ns_frame, "Products"),
                         f"{len(new_sizes)} variants, Command UPDATE, Variant Command MERGE"))
     return out, writers
+
+
+def _post_import_check(products, season, new_cost):
+    """Re-bought products whose catalog state already looks like PU-merge was imported.
+
+    WARN, not FAIL: each sign also occurs before any import (a product already bought this
+    season carries its season and tag; a carryover whose wholesale has not moved is already at
+    the OC cost), and a FAIL there would block a correct run that the sheet cannot fix."""
+    hits = []
+    for pid, (p, _) in products.items():
+        signs = []
+        if p["season"] == season:
+            signs.append(f"season already {season}")
+        if season in [t.strip() for t in p["tags"].split(",")]:
+            signs.append(f"'{season}' tag already on it")
+        costs = [v["cost"] for v in p["variants"]]
+        if pid in new_cost and costs and all(c is not None and abs(c - new_cost[pid]) <= 0.005 for c in costs):
+            signs.append(f"every size already at the OC cost A${new_cost[pid]}")
+        if signs:
+            hits.append(f"{p['title']} ({', '.join(signs)})")
+    check = "Catalog export taken before PU-merge was imported (else this run's rollback cannot undo PU-merge)"
+    if not hits:
+        return dict(Check=check, Result="PASS", Detail=f"{len(products)} re-bought products: none already carries "
+                                                        f"{season}, its tag or the OC cost on every size")
+    return dict(Check=check, Result="WARN",
+                Detail=f"{len(hits)} of {len(products)} re-bought products already look imported: " + "; ".join(hits)
+                       + ". This run's PU-merge-ROLLBACK puts back what this catalog holds, so on them it would not "
+                         "undo a PU-merge that was already imported. Keep and use the first PU-merge-ROLLBACK, made "
+                         "before the import, and do not use this one. If PU-merge has not been imported yet (a product "
+                         "already bought this season, or a cost that has not changed), this is expected.")
 
 
 def _cost_overwrite_check(merge, mult, catalog, products, rows, new_sizes):

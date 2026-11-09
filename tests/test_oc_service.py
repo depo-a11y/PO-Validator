@@ -11,7 +11,7 @@ import pytest
 import yaml
 
 import test_oc_tool as base
-from oc import brand as brandm, finalize as finalizem, poxlsx, service
+from oc import brand as brandm, catalog as catm, finalize as finalizem, poxlsx, service
 from oc.adapters import otb
 
 DAY = datetime.date(2026, 11, 9)
@@ -200,6 +200,15 @@ def test_finalize_refuses_even_if_files_were_left_behind(tmp_path, monkeypatch):
     monkeypatch.setattr(finalizem, "run", leaky_run)
     z, checks, _ = service.finalize(_full_po(tmp_path), _catalog(tmp_path), _cfg(), day=DAY)
     assert z is None and service.fails(checks) == [dict(Check="A gate", Result="FAIL", Detail="broken")]
+
+
+@pytest.mark.parametrize("col", [catm.SEASON, catm.AVAILABLE])
+def test_finalize_gives_no_zip_for_a_catalog_without_the_season_or_available_column(tmp_path, col):
+    rows = list(csv.DictReader(open(_catalog(tmp_path), encoding="utf-8-sig")))
+    short = base._write_catalog(tmp_path / "short.csv", rows, [c for c in base.CAT_COLS if c != col])
+    z, checks, _ = service.finalize(_full_po(tmp_path), short, _cfg(), day=DAY)
+    assert z is None and [c["Check"] for c in checks] == ["Catalog export has the columns the tool needs"]
+    assert f"'{col}' (Matrixify Products export" in checks[0]["Detail"]
 
 
 def test_finalize_reports_an_unreadable_po_as_a_fail(tmp_path):

@@ -79,6 +79,29 @@ MUTANTS = [
     ("oc/complete.py", "            as_text(c)", "            pass", "complete writes cart text as a formula"),
     ("oc/poxlsx.py", '        return v == "" if isinstance(v, str) else bool(pd.isna(v))',
      '        return False if isinstance(v, str) else bool(pd.isna(v))', "write_frame writes '' as an empty text cell"),
+    # ---- catalog season and available stock (case 2026-11-09-buyer-8 F6) ----
+    ("oc/catalog.py", '    SEASON: "Metafields",\n', "", "season column not required"),
+    ("oc/catalog.py", '"Variant Compare At Price", AVAILABLE], "Inventory / Variants")',
+     '"Variant Compare At Price"], "Inventory / Variants")', "Variant Inventory Qty not required"),
+    ("oc/catalog.py", "available=money(r[AVAILABLE]) or 0", "available=0", "restatement ignores available stock"),
+    ("oc/finalize.py", 'SEASON: p["season"] or IGNORE})', 'SEASON: p["season"]})',
+     "no live season written as an empty rollback cell (deletes the metafield)"),
+    ("oc/finalize.py", "    if unseasoned:\n        out.append(", "    if False:\n        out.append(", "no-season WARN removed"),
+    # ---- rollback built from a catalog exported after the import (F8) ----
+    ("oc/finalize.py", "        if signs:\n            hits.append", "        if False:\n            hits.append",
+     "post-import WARN removed"),
+    ("oc/finalize.py", '        if p["season"] == season:\n            signs.append', "        if False:\n            signs.append",
+     "post-import season sign removed"),
+    ("oc/finalize.py", '        if season in [t.strip() for t in p["tags"].split(",")]:\n            signs.append',
+     "        if False:\n            signs.append", "post-import tag sign removed"),
+    ("oc/finalize.py", "        if pid in new_cost and costs and all(", "        if False and all(", "post-import cost sign removed"),
+    ("oc/finalize.py", "all(c is not None and abs(c - new_cost[pid]) <= 0.005 for c in costs)",
+     "any(c is not None and abs(c - new_cost[pid]) <= 0.005 for c in costs)", "post-import cost sign on any size, not every"),
+    ("oc/finalize.py", '    return dict(Check=check, Result="WARN",', '    return dict(Check=check, Result="INFO",',
+     "post-import signs reported as INFO"),
+    ("pages/1_Order_confirmation_to_PO.py",
+     '"costs back. Keep the first PU-merge-ROLLBACK you make and never use one made after importing "\n', '"costs back. "\n',
+     "page drops the keep-the-first-rollback line"),
 ]
 
 

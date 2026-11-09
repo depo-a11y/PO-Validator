@@ -3,8 +3,11 @@
 Contract (the colleague runs the same saved Matrixify export template):
 UTF-8 with BOM; one row per variant; `Top Row` = true on a product's first row,
 and product-level fields are filled only there, so they are forward-filled by ID.
-Required columns are listed in REQUIRED. The product-level join key is
-`Metafield: my_fields.manufacture_code [single_line_text_field]`.
+Required columns are listed in REQUIRED, and a missing one fails the load naming
+the Matrixify column group it is ticked in (GROUP). The product-level join key is
+`Metafield: my_fields.manufacture_code [single_line_text_field]`. The season and
+`Variant Inventory Qty` are required because finalize's rollback restores the
+season from this export and its cost restatement counts available units from it.
 
 Variant-level metafields are NOT in the export, which is why the MERGE upload
 never emits a variant-metafield column for an existing variant (a blank cell
@@ -20,10 +23,18 @@ MCODE = "Metafield: my_fields.manufacture_code [single_line_text_field]"
 MADE_IN = "Metafield: custom.made_in [single_line_text_field]"
 SEASON = "Metafield: custom.product_season [single_line_text_field]"
 NEW_SALE = "Metafield: custom.new_sale [single_line_text_field]"
+AVAILABLE = "Variant Inventory Qty"
 
-REQUIRED = ["ID", "Handle", "Title", "Vendor", "Type", "Tags", "Status", "Top Row",
-            "Variant ID", "Option1 Name", "Option1 Value", "Option2 Name", "Option2 Value",
-            "Variant SKU", "Variant Price", "Variant Compare At Price", "Variant Cost", MCODE]
+# Each required column and the column group of the Matrixify Products export it is ticked in.
+GROUP = {
+    **dict.fromkeys(["ID", "Handle", "Title", "Vendor", "Type", "Tags", "Status", "Top Row"], "Basic Columns"),
+    **dict.fromkeys(["Variant ID", "Option1 Name", "Option1 Value", "Option2 Name", "Option2 Value", "Variant SKU",
+                     "Variant Price", "Variant Compare At Price", AVAILABLE], "Inventory / Variants"),
+    "Variant Cost": "Variant Cost",
+    MCODE: "Metafields",
+    SEASON: "Metafields",
+}
+REQUIRED = list(GROUP)
 
 PRODUCT_FIELDS = ["Created At", "Handle", "Title", "Body HTML", "Vendor", "Type", "Tags", "Status",
                   "Option1 Name", "Option2 Name", MCODE, MADE_IN, SEASON, NEW_SALE,
@@ -97,7 +108,10 @@ def load(path):
         reader = csv.DictReader(fh)
         missing = [c for c in REQUIRED if c not in (reader.fieldnames or [])]
         if missing:
-            raise CatalogError(f"catalog export is missing columns: {missing}")
+            raise CatalogError(
+                "catalog export is missing columns: "
+                + "; ".join(f"'{c}' (Matrixify Products export, {GROUP[c]} group)" for c in missing)
+                + ". Export the brand's products again from Matrixify with these columns ticked.")
         rows = list(reader)
 
     products = {}
@@ -128,7 +142,7 @@ def load(path):
             option1=r["Option1 Value"], option2=r["Option2 Value"],
             size=norm_size(size) if size is not None else "", colour=colour,
             price=money(r["Variant Price"]), compare_at=money(r["Variant Compare At Price"]),
-            cost=money(r["Variant Cost"]), on_hand=money(r.get("Variant Inventory Qty")) or 0,
+            cost=money(r["Variant Cost"]), available=money(r[AVAILABLE]) or 0,
             country=(r.get("Variant Country of Origin") or "").strip(),
             hs=(r.get("Variant HS Code") or "").strip()))
     for p in products.values():

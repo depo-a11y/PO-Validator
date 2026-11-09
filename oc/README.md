@@ -17,16 +17,21 @@ Pure Python, files in and files out. Nothing here talks to Shopify, Matrixify or
   size (the OC's wholesale x the brand's cost multiplier, sizes not on the OC included), keyed on ID and Variant
   ID with Command and Variant Command UPDATE. It does not rewrite the `Variant.cost_price` metafield on existing
   sizes. New sizes take the same cost. The rollback puts back each product's previous season, removes the season
-  tag where this run added it, and puts back each size's previous cost. It is all or nothing: if any check
-  fails (the gate, a title still holding a raw code such as "in T2180", a blank colour family) no upload or
-  delivery file is written, and exit code is 1.
+  tag where this run added it, and puts back each size's previous cost. A product with no season in the catalog
+  gets `[IGNORE]` in the rollback's season cell (Matrixify leaves the metafield alone; an empty cell would delete
+  it), and a WARN names it. The rollback undoes PU-merge only if the catalog was exported before PU-merge was
+  imported: keep the first one, and a catalog that already carries the season, its tag or the OC cost is a WARN.
+  It is all or nothing: if any check fails (the gate, a title still holding a raw code such as "in T2180", a
+  blank colour family) no upload or delivery file is written, and exit code is 1.
 
 **Inputs**
 
 - OC PDF: one adapter per layout in `adapters/` (`otb`: Maison Margiela, MM6). Its three gates hard-fail.
 - Catalog: a Matrixify Products export (CSV, UTF-8) for the brand's vendors, all statuses, with variants,
-  `Variant Cost`, `Variant Country of Origin` and metafields in `my_fields`, `custom` and `global`. Required
-  columns are `catalog.REQUIRED`.
+  `Variant Cost`, `Variant Inventory Qty`, `Variant Country of Origin` and metafields in `my_fields`, `custom` and
+  `global`. Required columns are `catalog.REQUIRED`, including `custom.product_season` (the rollback restores it)
+  and `Variant Inventory Qty` (the cost restatement counts available units); a missing one fails the load and
+  names the Matrixify column group to tick.
 - Brand config: `<brand>.local.yaml`, copied from `brands/example.yaml`. It holds the cost multiplier and past
   PO paths, so it never goes in git. Marais keeps the real ones outside the repo in
   `~/Code/marais/_work/oc-brands/`; point the tool there with `export OC_BRAND_DIR=~/Code/marais/_work/oc-brands`
@@ -99,10 +104,10 @@ nothing is written into the repo and nothing talks to Shopify.
   pasted whole as a TOML multi-line string (a TOML table with the same keys also works). Shape:
   `.streamlit/secrets.example.toml`. They are listed only to a viewer whose sign-in email is in `oc_viewers`
   (whole addresses, any case). Streamlit knows that email only when the app signs viewers in itself with
-  `st.login`, which needs an `[auth]` section in secrets and the Authlib package: since Streamlit 1.42, Community
-  Cloud does not pass a Community Cloud viewer's email to the app. With no `oc_viewers` or no sign-in, saved
-  brands stay hidden and the page says why. This is a second layer: keep the hosted app private, with its viewer
-  list limited to staff.
+  `st.login`, which needs an `[auth]` section in secrets and the Authlib package (`Authlib>=1.3.2`, installed by
+  `requirements.txt`): since Streamlit 1.42, Community Cloud does not pass a Community Cloud viewer's email to the
+  app. With no `oc_viewers` or no sign-in, saved brands stay hidden and the page says why. This is a second
+  layer: keep the hosted app private, with its viewer list limited to staff.
 - On this computer: `$OC_BRAND_DIR`, then the gitignored `oc/brands/`, the same lookup as the CLI.
 - Uploaded: a brand .yaml file.
 

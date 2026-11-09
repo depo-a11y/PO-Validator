@@ -298,5 +298,7 @@ if S.get("final"):
                 "re-bought product: its season, its season tag and the cost of every size (to this order's cost). "
                 "PU-merge-new-sizes adds the ordered sizes a product lacks, at that cost. The order is PU-new, then "
                 "PU-merge, then PU-merge-new-sizes. Keep PU-merge-ROLLBACK: it puts the season, the tag and the old "
-                "costs back. Read the amber checks below first.")
+                "costs back. Keep the first PU-merge-ROLLBACK you make and never use one made after importing "
+                "PU-merge: it is built from a catalog that already holds the new values, so it puts nothing back. "
+                "Read the amber checks below first.")
     checks_table(f["checks"])
