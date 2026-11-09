@@ -3,7 +3,7 @@ import collections
 
 from .draft import oc_lines
 from .poxlsx import read_po, CODE
-from .util import norm_size, norm_code, size_key
+from .util import cost_currency, norm_size, norm_code, size_key
 
 
 def _norm(v):
@@ -127,6 +127,7 @@ def run(draft_path, hand_path, docs, out, allow_price=(), brand=None):
     _, d = read_po(draft_path)
     _, h = read_po(hand_path)
     r = compare(d, h, docs, set(allow_price), brand)
+    r["currency"] = cost_currency(brand)
     r["by_colour"] = by_colour(draft_path, r)
     ok = not r["draft_qty_mismatch"] and not r["hand_qty_mismatch"] and not r["unexpected_price"]
     write_md(r, out, draft_path, hand_path)
@@ -135,16 +136,17 @@ def run(draft_path, hand_path, docs, out, allow_price=(), brand=None):
 
 def write_md(r, out, draft_path, hand_path, extra=""):
     L = []
+    cur = r.get("currency", "EUR")
     a, n = r["agree_rows"], r["new_rows"]
     ap, np_ = r["agree_products"], r["new_products"]
     L.append("| Check | Result |\n|---|---|")
-    L.append(f"| OC | {r['oc_units']} units, EUR {r['oc_value']:,.2f} |")
-    L.append(f"| Draft vs OC, qty per code+size | {len(r['draft_qty_mismatch'])} mismatches; {r['draft_units']} units, EUR {r['draft_value']:,.2f} |")
-    L.append(f"| Hand PO vs OC, qty per code+size | {len(r['hand_qty_mismatch'])} mismatches; {r['hand_units']} units, EUR {r['hand_value']:,.2f} |")
+    L.append(f"| OC | {r['oc_units']} units, {cur} {r['oc_value']:,.2f} |")
+    L.append(f"| Draft vs OC, qty per code+size | {len(r['draft_qty_mismatch'])} mismatches; {r['draft_units']} units, {cur} {r['draft_value']:,.2f} |")
+    L.append(f"| Hand PO vs OC, qty per code+size | {len(r['hand_qty_mismatch'])} mismatches; {r['hand_units']} units, {cur} {r['hand_value']:,.2f} |")
     L.append(f"| Draft vs hand PO, qty per code+size (zero rows count as 0) | {len(r['draft_vs_hand_qty'])} mismatches |")
     L.append(f"| Draft wholesale vs OC | {len(r['draft_price_diff'])} codes differ |")
     L.append(f"| Hand PO wholesale vs OC | {len(r['hand_price_diff'])} codes differ: "
-             + "; ".join(f"{c} EUR {v} vs OC EUR {o:g}" for c, v, o in r["hand_price_diff"]) + " |")
+             + "; ".join(f"{c} {cur} {v} vs OC {cur} {o:g}" for c, v, o in r["hand_price_diff"]) + " |")
     L.append(f"| MERGE / NEW split | draft {dict(r['draft_commands'])}, hand {dict(r['hand_commands'])}; "
              f"{len(r['command_disagree'])} codes disagree |")
     L.append("")

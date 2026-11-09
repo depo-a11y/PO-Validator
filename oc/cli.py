@@ -70,7 +70,8 @@ def cmd_draft(args):
     docs, rchecks = _read(args, b)
     rows, review, checks, fills = draft.build(docs, b, cat, hist, tags, cart=_cart(args))
     checks = rchecks + checks
-    poxlsx.write_po(args.out, poxlsx.PO_HEADER, rows, review, checks, fills)
+    from .util import cost_currency
+    poxlsx.write_po(args.out, poxlsx.PO_HEADER, rows, review, checks, fills, currency=cost_currency(b))
     _print_checks(checks)
     print(f"-> {args.out} ({len(rows)} rows)")
     return 1 if _fails(checks) else 0
@@ -155,7 +156,7 @@ def main(argv=None):
     c.add_argument("--catalog", required=True)
     c.add_argument("--brand", required=True)
     c.add_argument("--out", required=True)
-    c.add_argument("--set-price", action="append", metavar="CODE=EUR",
+    c.add_argument("--set-price", action="append", metavar="CODE=PRICE",
                    help="correct a wholesale price to the OC's (repeatable)")
     c.set_defaults(fn=cmd_complete)
     f = sub.add_parser("finalize", help="reviewed PO -> PU-new, PU-merge, delivery file")

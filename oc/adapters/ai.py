@@ -31,6 +31,7 @@ import time
 from pathlib import Path
 
 from . import otb
+from ..util import cost_currency, currency_off
 
 MODEL = "claude-opus-5-5"
 PRICE_USD_PER_MTOK = (4.0, 20.0)    # claude-opus-5-5 input, output (thinking is billed as output)
@@ -378,9 +379,8 @@ def interpret(data, brand_cfg, text):
         fails.append(_check(NUMBERS_CHECK, "FAIL", f"{len(bad)} value(s) the tool cannot read as a number: "
                                                    + "; ".join(bad[:12])))
 
-    want = str(brand_cfg["cost_currency"]).strip().upper()
-    off = [f"{d['doc']} is in {d['currency'] or 'no currency the AI could find'}" for d in docs
-           if str(d["currency"] or "").strip().upper() != want]
+    want = cost_currency(brand_cfg)
+    off = currency_off(docs, want)
     if off:
         fails.append(_check(CURRENCY_CHECK, "FAIL", f"{'; '.join(off)}, but the brand's cost currency is {want}. "
                                                     "Check you picked the right brand and document."))

@@ -611,7 +611,7 @@ def test_a_colour_code_join_key_builds_the_store_code():
     (dict(join_key="{style} }"), "may use only"),
     (dict(join_key="ABC"), "may use only"),
     (dict(join_key="{style} {colour_code}", colour_codes=None), "no colour_codes table"),
-    (dict(adapter="pdfminer"), "adapter must be otb or ai"),
+    (dict(adapter="pdfminer"), "adapter must be one of otb, admilano, adidas, fog, ai"),
     (dict(oc_supplier=[""]), "oc_supplier is a company name or a list"),
 ])
 def test_a_bad_reader_config_fails_at_load_saying_what_to_add(extra, needle):

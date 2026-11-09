@@ -51,9 +51,9 @@ import pandas as pd
 from openpyxl.styles import Font
 from openpyxl.utils import get_column_letter
 
-from .poxlsx import (read_po, CODE, MADE_IN, SEASON, NEW_SALE, COST_PRICE, TITLE_TAG, AUD_FMT, EUR_FMT, write_table,
-                     write_frame, append_text)
-from .util import blank, norm_code, norm_size, money, slug
+from .poxlsx import (read_po, CODE, MADE_IN, SEASON, NEW_SALE, COST_PRICE, TITLE_TAG, AUD_FMT, money_format,
+                     write_table, write_frame, append_text)
+from .util import blank, cost_currency, norm_code, norm_size, money, slug
 
 REPO = Path(__file__).resolve().parent.parent
 
@@ -132,7 +132,7 @@ def run(po_path, brand, catalog, out_prefix):
 
     for build in (_pu_new(new, brand, catalog, core, out_prefix),
                   _pu_merge(merge, brand, catalog, core, out_prefix),
-                  _delivery(rows, out_prefix)):
+                  _delivery(rows, out_prefix, cost_currency(brand))):
         c, w = build
         checks += c
         writers += w
@@ -287,7 +287,7 @@ def _pu_merge(merge, brand, catalog, core, out_prefix):
         cost = None if eur is None else round(eur * mult, 2)
         po = _r2(r.get("Variant Cost"))
         if cost is None or po is None or abs(po - cost) > 0.005:
-            po_off.append(f"row {r['_row']} {code} size {size}: PO A${po} vs EUR {eur} x {mult} = A${cost}")
+            po_off.append(f"row {r['_row']} {code} size {size}: PO A${po} vs {cost_currency(brand)} {eur} x {mult} = A${cost}")
         p, note, _ = catalog.match(code)
         if p is None:
             problems.append(f"row {r['_row']} {code}: {note or 'no live product'}")
@@ -500,7 +500,7 @@ def _cost_overwrite_check(merge, mult, catalog, products, rows, new_sizes):
 
 
 # ---- delivery ------------------------------------------------------------------
-def _delivery(rows, out_prefix):
+def _delivery(rows, out_prefix, currency="EUR"):
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "Sheet 1"
@@ -534,9 +534,9 @@ def _delivery(rows, out_prefix):
         for h in ("Variant Price", "Variant Compare At Price", "Variant Cost"):
             ws.cell(n, col[h]).number_format = AUD_FMT
         for h in ("Wholesale Price", "Total Order"):
-            ws.cell(n, col[h]).number_format = EUR_FMT
+            ws.cell(n, col[h]).number_format = money_format(currency)
     ws.freeze_panes = "A2"
     wb.properties.title = run_id(out_prefix)
-    note = (f"{len(rows)} rows, {units} units, EUR {value:,.2f}; Total Delivered = SUMIF over {first_tranche}:AZ "
+    note = (f"{len(rows)} rows, {units} units, {currency} {value:,.2f}; Total Delivered = SUMIF over {first_tranche}:AZ "
             "excluding 'Value' columns, so new tranche columns roll up without a formula edit")
     return [], [(f"{out_prefix}Delivery.xlsx", lambda p: wb.save(p), note)]

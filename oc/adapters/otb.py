@@ -169,9 +169,12 @@ def parse(pdf_path):
 
 
 def gate_problems(docs):
-    """Re-derive the three gates from parsed data. [] means every gate holds."""
+    """Re-derive the three gates from parsed data. [] means every gate holds. Money is worded in the
+    document's own currency."""
+    from ..util import iso_currency
     problems = []
     for d in docs:
+        cur = (iso_currency(d.get("currency")) or "") + " "
         for l in d["lines"]:
             tag = f"{d['doc']} line {l['line_no']} {l['style']}"
             if sum(l["sizes"].values()) != l["qty"]:
@@ -187,7 +190,7 @@ def gate_problems(docs):
         if q != d["total_qty"]:
             problems.append(f"{d['doc']}: parsed {q} units, printed {d['total_qty']}")
         if abs(v - d["net"]) > 0.02:
-            problems.append(f"{d['doc']}: parsed EUR {v:,.2f}, printed net {d['net']:,.2f}")
+            problems.append(f"{d['doc']}: parsed {cur.lstrip()}{v:,.2f}, printed net {d['net']:,.2f}")
     return problems
 
 

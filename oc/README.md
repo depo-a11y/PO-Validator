@@ -31,8 +31,17 @@ Pure Python, files in and files out. Nothing here talks to Shopify, Matrixify or
 
 **Inputs**
 
-- OC PDF: read by the brand config's `adapter`. `otb` (Maison Margiela, MM6) reads the text layer by position;
-  its three gates hard-fail. `ai` reads any layout (see "AI reader" below) and is held to the same gates.
+- OC PDF: read by the brand config's `adapter`. The built-in readers read the text layer by position, one known
+  layout each: `otb` (Maison Margiela, MM6), `admilano` (AD Milano / Ann Demeulemeester), `adidas` (adidas AG: Y-3,
+  Willy Chavarria, RS) and `fog` (FOG Essentials, Fear of God LLC). `ai` reads any layout (see "AI reader" below).
+  All share `otb.gate_problems`, whose three gates hard-fail. Whatever the reader, an OC whose currency is not the
+  brand's `cost_currency` is refused (printed names are normalised: otb's "European Euro" is EUR).
+- Money: Wholesale Price, Total Order and the `Variant.cost_price` metafield are in the brand's `cost_currency`.
+  The metafield is written and checked as `<cost_currency> <amount>` (`EUR 34`, `USD 150`), messages are worded in
+  that currency, and the PO and Delivery file format those columns in it (EUR keeps the euro-sign format).
+- Templates: `title_tag` may use `{vendor}` and `{title}`, `body_html` `{composition}`, `{made_in}` and `{code}`,
+  `join_key` `{style}`, `{fabric}`, `{colour}` and `{colour_code}`. They are filled by plain substitution, never
+  `str.format` (a config can be uploaded on the hosted page), and any other brace is refused when the config loads.
 - Catalog: a Matrixify Products export (CSV, UTF-8) for the brand's vendors, all statuses, with variants,
   `Variant Cost`, `Variant Inventory Qty`, `Variant Country of Origin` and metafields in `my_fields`, `custom` and
   `global`. Required columns are `catalog.REQUIRED`, including `custom.product_season` (the rollback restores it)

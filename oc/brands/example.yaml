@@ -2,9 +2,9 @@
 # *.local.yaml is gitignored: cost multipliers, history paths and price data are
 # commercial and must never be committed while this repo is public.
 vendor: EXAMPLE BRAND          # exactly as in validator_core.APPROVED_VENDORS
-adapter: otb                   # OC reader: otb (built-in, Maison Margiela/MM6 layout) or ai (any layout, read
-                               # by Claude; needs oc_supplier and join_key below, and ANTHROPIC_API_KEY in the
-                               # app's secrets)
+adapter: otb                   # OC reader. Built-in, one layout each: otb (Maison Margiela/MM6), admilano (AD
+                               # Milano), adidas (adidas AG), fog (Fear of God). Or ai: any layout, read by Claude;
+                               # needs oc_supplier and join_key below, and ANTHROPIC_API_KEY in the app's secrets
 # oc_supplier: Example Brand Ltd   # ai: the company printed as the issuer on the brand's OCs (a list if it varies);
                                # a PDF from any other supplier is refused
 # join_key: "{style} {colour_code}"  # how the store's manufacture_code is built from an OC line, from {style},
@@ -15,7 +15,9 @@ adapter: otb                   # OC reader: otb (built-in, Maison Margiela/MM6 l
 season: S/S 27                 # Marais season label (slash form)
 sku_prefix: EXSS27             # new SKUs continue after the highest existing one
 sku_digits: 3
-cost_currency: EUR             # Variant.cost_price is written as "EUR 123"
+cost_currency: EUR             # the OC's currency (an OC in any other is refused); Variant.cost_price is
+                               # written as "<cost_currency> 123", e.g. "EUR 123" or "USD 123"
+# title_tag: "{vendor} - {title} |MARAIS"   # only {vendor} {title}; body_html only {composition} {made_in} {code}
 cost_multiplier: 1.0           # AUD Variant Cost = wholesale x this (season convention)
 margin_floor: 2.5              # must match validator_core.margin_threshold for the vendor
 price_round: 50                # retail rounded to this step when fitted from a ratio

@@ -69,8 +69,38 @@ def blank(v):
     return str(v).strip() == ""
 
 
+def fmt_money(x, currency):
+    """The Variant.cost_price form, '<currency> <amount>': 'EUR 34', 'USD 150.50'."""
+    return f"{currency} {int(x)}" if float(x).is_integer() else f"{currency} {x:.2f}"
+
+
 def fmt_eur(x):
-    return f"EUR {int(x)}" if float(x).is_integer() else f"EUR {x:.2f}"
+    return fmt_money(x, "EUR")
+
+
+# Printed currency names the readers meet, upper-cased. A bare '$' or '¥' names no one currency, so it is not here.
+CURRENCY_NAMES = {"EURO": "EUR", "EUROS": "EUR", "EUROPEAN EURO": "EUR", "€": "EUR", "US DOLLAR": "USD",
+                  "US DOLLARS": "USD", "U.S. DOLLAR": "USD", "UNITED STATES DOLLAR": "USD", "US$": "USD",
+                  "POUND STERLING": "GBP", "BRITISH POUND": "GBP", "£": "GBP", "JAPANESE YEN": "JPY",
+                  "AUSTRALIAN DOLLAR": "AUD"}
+
+
+def iso_currency(text):
+    """'European Euro' (otb's printed text), 'EUR', '€' -> 'EUR'. None when it names no currency the tool knows."""
+    t = " ".join(str(text or "").split()).upper()
+    return t if re.fullmatch(r"[A-Z]{3}", t) else CURRENCY_NAMES.get(t)
+
+
+def cost_currency(brand):
+    """The brand's cost_currency as an ISO code, the currency every OC for it must be in."""
+    raw = (brand or {}).get("cost_currency") or "EUR"
+    return iso_currency(raw) or str(raw).strip().upper()
+
+
+def currency_off(docs, want):
+    """['SO-1 is in USD', ...] for each document whose currency, normalised, is not `want`."""
+    return [f"{d['doc']} is in {d.get('currency') or 'no currency the reader could find'}" for d in docs
+            if iso_currency(d.get("currency")) != want]
 
 
 def title_colour(title):

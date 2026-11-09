@@ -13,7 +13,8 @@ import html
 import math
 import re
 
-from .util import norm_code, norm_size, sort_sizes, size_key, title_colour, slug
+from .brand import fill_text
+from .util import cost_currency, norm_code, norm_size, sort_sizes, size_key, title_colour, slug
 
 GREEN, AMBER, RED = "green", "amber", "red"
 AI_OC = "OC (AI read)"   # a value the AI reader took from the OC: never green, however well it passed the gates
@@ -40,6 +41,7 @@ def split_code(code):
 class Resolver:
     def __init__(self, brand, catalog, history, tag_lookup, oc_lines=None, cart=None):
         self.b = brand
+        self.cur = cost_currency(brand)
         self.cat = catalog
         self.hist = history
         self.types = set(t for t in tag_lookup if t and t != "nan")
@@ -276,7 +278,7 @@ class Resolver:
             prices = [max(v["price"] or 0, v["compare_at"] or 0) for v in p["variants"]]
             if sib_eur is not None and abs(sib_eur - eur) < 0.005 and prices:
                 price = collections.Counter(prices).most_common(1)[0][0]
-                src, detail = "catalog", f"same style+fabric {p['title']} at EUR {sib_eur:g} sells at A${price:g}"
+                src, detail = "catalog", f"same style+fabric {p['title']} at {self.cur} {sib_eur:g} sells at A${price:g}"
                 break
         if price is None:
             same = collections.Counter()
@@ -288,10 +290,10 @@ class Resolver:
                     same.update(max(v["price"] or 0, v["compare_at"] or 0) for v in p["variants"][:1])
             if same:
                 price, n = same.most_common(1)[0]
-                src, detail = "similar", (f"{n} carryover line(s) of other styles on this OC at EUR {eur:g} "
+                src, detail = "similar", (f"{n} carryover line(s) of other styles on this OC at {self.cur} {eur:g} "
                                           f"sell at A${price:g} today")
         if price is None:
-            price, detail, n = self.hist.ladder(eur)
+            price, detail, n = self.hist.ladder(eur, self.cur)
             src = ("history" if n >= 2 else "thin") if price else None
         if price is None:
             from .history import category_of
@@ -300,7 +302,7 @@ class Resolver:
                 ratio, why = self.hist.ratio()
             if ratio is not None:
                 price = math.ceil(eur * ratio / step) * step
-                src, detail = "fit", f"EUR {eur:g} x {ratio:.2f} ({why}), rounded up to {step}"
+                src, detail = "fit", f"{self.cur} {eur:g} x {ratio:.2f} ({why}), rounded up to {step}"
         if price is None:
             return None, "guess", "no price history"
         floor = self.floor_price(eur)
@@ -371,14 +373,14 @@ class Resolver:
 
     # ---- fixed text ---------------------------------------------------------
     def title_tag(self, title):
-        return self.b["title_tag"].format(vendor=self.b["vendor"], title=title)
+        return fill_text(self.b, "title_tag", vendor=self.b["vendor"], title=title)
 
     def body_html(self, code, composition, made_in, composition_is_html=False):
         """Fill the brand's Body HTML template. Text is escaped; a composition read out
         of a live product's Body HTML (source catalog) is already HTML and is not."""
         comp = composition if composition_is_html else html.escape(str(composition), quote=False)
-        return self.b["body_html"].format(code=html.escape(str(code), quote=False), composition=comp,
-                                          made_in=html.escape(str(made_in), quote=False))
+        return fill_text(self.b, "body_html", code=html.escape(str(code), quote=False), composition=comp,
+                         made_in=html.escape(str(made_in), quote=False))
 
     def handle_taken(self, title):
         return slug(title) in self.cat.handles

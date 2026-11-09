@@ -27,7 +27,15 @@ PO_HEADER = [
 AUD_FMT = '_("$"* #,##0.00_);_("$"* \\(#,##0.00\\);_("$"* "-"??_);_(@_)'
 EUR_FMT = '_([$€-2]\\ * #,##0.00_);_([$€-2]\\ * \\(#,##0.00\\);_([$€-2]\\ * "-"??_);_(@_)'
 AUD_COLS = {"Variant Price", "Variant Compare At Price", "Variant Cost"}
-EUR_COLS = {"Wholesale Price", "Total Order"}
+EUR_COLS = {"Wholesale Price", "Total Order"}   # amounts in the brand's cost currency
+
+
+def money_format(currency):
+    """Excel accounting format for an amount in `currency`: EUR keeps the euro-sign format the PO has always had."""
+    if currency == "EUR":
+        return EUR_FMT
+    c = f'"{currency} "'
+    return f'_({c}* #,##0.00_);_({c}* \\(#,##0.00\\);_({c}* "-"??_);_(@_)'
 
 FILLS = {"green": PatternFill("solid", fgColor="C6EFCE"),
          "amber": PatternFill("solid", fgColor="FFEB9C"),
@@ -136,8 +144,9 @@ def read_po(path, sheet=None):
     return header, rows
 
 
-def write_po(path, header, rows, review=None, checks=None, fills=None, title="Sheet1", raw=False):
-    """rows: list of dicts keyed like read_po. fills: {(row_index, key): colour}."""
+def write_po(path, header, rows, review=None, checks=None, fills=None, title="Sheet1", raw=False, currency="EUR"):
+    """rows: list of dicts keyed like read_po. fills: {(row_index, key): colour}. Wholesale Price and Total Order
+    are formatted in `currency`, the brand's cost currency."""
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = title
@@ -154,7 +163,7 @@ def write_po(path, header, rows, review=None, checks=None, fills=None, title="Sh
             if h in AUD_COLS or (h is None and j > 0 and header[j - 1] in AUD_COLS):
                 cell.number_format = AUD_FMT
             elif h in EUR_COLS:
-                cell.number_format = EUR_FMT
+                cell.number_format = money_format(currency)
     if fills:
         for (i, key), colour in fills.items():
             ws.cell(i + 2, keys.index(key) + 1).fill = FILLS[colour]

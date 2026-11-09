@@ -6,6 +6,7 @@ import zipfile
 from pathlib import Path
 
 import pandas as pd
+import pytest
 from streamlit.testing.v1 import AppTest
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -62,8 +63,9 @@ def _page_with_brand(tmp_path, monkeypatch, extra):
     return at
 
 
-def test_an_otb_brand_offers_the_ai_reader_off_by_default(tmp_path, monkeypatch):
-    at = _page_with_brand(tmp_path, monkeypatch, "adapter: otb\n")
+@pytest.mark.parametrize("name", ["otb", "admilano", "adidas", "fog"])
+def test_a_fixed_reader_brand_offers_the_ai_reader_off_by_default(tmp_path, monkeypatch, name):
+    at = _page_with_brand(tmp_path, monkeypatch, f"adapter: {name}\n")
     (box,) = [c for c in at.checkbox if c.label == "Read the OC with AI (for a layout the tool does not know)"]
     assert box.value is False and "no order confirmations found" in box.help
     assert not any("always read by AI" in c.value for c in at.caption)

@@ -14,7 +14,7 @@ import collections
 from .brand import ColourCodeError, code_for, unmapped_colours
 from .poxlsx import PO_HEADER, CODE, MADE_IN, SEASON, NEW_SALE, COST_PRICE, TITLE_TAG, review_row
 from .resolve import Resolver, COLOUR, AI_OC, split_code, worse
-from .util import norm_size, sort_sizes, size_key, fmt_eur, slug
+from .util import norm_size, sort_sizes, size_key, fmt_money, cost_currency, slug
 
 
 def oc_lines(docs, brand=None):
@@ -159,7 +159,7 @@ def build(docs, brand, catalog, history, tag_lookup, cart=None):
             rows.append(row)
 
     if cart is not None:
-        checks += cart_checks(lines, cart)
+        checks += cart_checks(lines, cart, brand)
     checks = _draft_checks(docs, lines, rows, R, brand, catalog, tag_lookup, dup) + checks
     review = [review_row(i + 2, rows[i].get(CODE), rows[i].get("Option2 Value"), k, v, s, w)
               for i, k, v, s, w in cells]
@@ -167,8 +167,9 @@ def build(docs, brand, catalog, history, tag_lookup, cart=None):
     return rows, review, checks, fills
 
 
-def cart_checks(lines, cart):
+def cart_checks(lines, cart, brand=None):
     """How the cart lines up with the OC. Zero shared codes means the wrong cart."""
+    cur = cost_currency(brand)
     rows = cart["rows"]
     oc = {}
     for l in lines:
@@ -187,7 +188,7 @@ def cart_checks(lines, cart):
             if rows[c]["wholesale"] is not None and abs(rows[c]["wholesale"] - oc[c]["price"]) > 0.005]
     if diff:
         out.append(dict(Check="Cart wholesale differs from the OC (the OC's is used)", Result="INFO",
-                        Detail=f"{len(diff)} code(s): " + "; ".join(f"{c} cart {w:g} vs OC EUR {p:g}" for c, w, p in diff)))
+                        Detail=f"{len(diff)} code(s): " + "; ".join(f"{c} cart {w:g} vs OC {cur} {p:g}" for c, w, p in diff)))
     if cart["duplicates"]:
         out.append(dict(Check="One cart row per code", Result="WARN",
                         Detail=f"{len(cart['duplicates'])} code(s) on 2+ rows, first row used: " + ", ".join(cart["duplicates"])))
@@ -230,8 +231,9 @@ def _dedupe_titles(pending, R, brand, checks):
 
 
 def _money_cells(cell, row, R, brand, eur, qty):
-    cell(row, "Variant Cost", R.cost(eur), "rule", f"EUR {eur:g} x {brand['cost_multiplier']} (season cost convention)")
-    cell(row, COST_PRICE, fmt_eur(eur), "OC", "confirmed unit price")
+    cur = cost_currency(brand)
+    cell(row, "Variant Cost", R.cost(eur), "rule", f"{cur} {eur:g} x {brand['cost_multiplier']} (season cost convention)")
+    cell(row, COST_PRICE, fmt_money(eur, cur), "OC", "confirmed unit price")
     cell(row, "Wholesale Price", eur, "OC", "confirmed unit price")
     cell(row, "Order Qty", qty, "OC" if qty else "rule", "confirmed quantity" if qty else "size in the run, not ordered")
     cell(row, "Total Order", round(qty * eur, 2), "OC", "Order Qty x Wholesale Price")
@@ -240,16 +242,17 @@ def _money_cells(cell, row, R, brand, eur, qty):
 def _draft_checks(docs, lines, rows, R, brand, catalog, tag_lookup, dup):
     from .adapters import otb
     t = otb.totals(docs)
+    cur = cost_currency(brand)
     out = []
     ok = t["units"] == t["printed_units"] and abs(t["value"] - t["printed_value"]) < 0.01
     out.append(dict(Check="OC totals reproduced (parsed = printed)", Result="PASS" if ok else "FAIL",
-                    Detail=f"{t['docs']} confirmations, {t['lines']} lines, {t['units']} units, EUR {t['value']:,.2f} "
-                           f"(printed {t['printed_units']} / EUR {t['printed_value']:,.2f})"))
+                    Detail=f"{t['docs']} confirmations, {t['lines']} lines, {t['units']} units, {cur} {t['value']:,.2f} "
+                           f"(printed {t['printed_units']} / {cur} {t['printed_value']:,.2f})"))
     units = sum(r["Order Qty"] for r in rows)
     value = round(sum(r["Total Order"] for r in rows), 2)
     ok = units == t["units"] and abs(value - t["value"]) < 0.01
     out.append(dict(Check="PO Order Qty and Total Order equal the OC", Result="PASS" if ok else "FAIL",
-                    Detail=f"{units} units, EUR {value:,.2f}"))
+                    Detail=f"{units} units, {cur} {value:,.2f}"))
     oc_q = collections.Counter()
     for l in lines:
         for s, q in l["sizes_norm"].items():

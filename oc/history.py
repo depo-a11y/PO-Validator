@@ -23,7 +23,7 @@ class History:
         for r in self.rows:
             self.by_code[r["code"]].append(r)
 
-    def ladder(self, eur):
+    def ladder(self, eur, currency="EUR"):
         """Most common retail for this exact wholesale in the newest season that has it.
 
         Returns (price, detail, n) where n is the number of past PO rows behind it."""
@@ -32,7 +32,7 @@ class History:
                                     if r["eur"] is not None and abs(r["eur"] - eur) < 0.005 and r["price"])
             if c:
                 (price, n), = c.most_common(1)
-                return price, f"{label}: EUR {eur:g} sold at A${price:g} on {n} row(s)", n
+                return price, f"{label}: {currency} {eur:g} sold at A${price:g} on {n} row(s)", n
         return None, None, 0
 
     def ratio(self, category=None):

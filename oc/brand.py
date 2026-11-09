@@ -18,8 +18,9 @@ could otherwise make the hosted app read any file on its server. `history` comes
 back empty and `history_files` keeps each entry's label and bare file name, so
 past POs uploaded on the page can still be matched to their season labels.
 
-`adapter` picks the OC reader: `otb` (the built-in Maison Margiela/MM6 layout) or `ai`
-(any layout, read by Claude; oc/adapters/ai.py). An `ai` brand must name `oc_supplier`
+`adapter` picks the OC reader: a built-in reader for one known layout (`otb` Maison
+Margiela/MM6, `admilano` AD Milano, `adidas` adidas AG, `fog` Fear of God) or `ai` (any
+layout, read by Claude; oc/adapters/ai.py). An `ai` brand must name `oc_supplier`
 (the company printed as the issuer on its OCs) and `join_key`.
 
 `join_key` says how the store's manufacture_code is built from an OC line: a template
@@ -30,6 +31,7 @@ whose store code carries a short colour code where its OC prints the colour name
 The template is filled by plain substitution of exactly those four tokens, never by
 str.format: a config can be an upload, and a format spec such as {style:>999999999}
 would make the server build a huge string. Any other brace is refused at load.
+title_tag and body_html are filled the same way, each from its own tokens (TEXT_TEMPLATES).
 """
 import copy
 import os
@@ -55,7 +57,8 @@ DEFAULTS = dict(
 REQUIRED = ["vendor", "adapter", "season", "sku_prefix", "cost_multiplier",
             "cost_currency", "margin_floor"]
 
-ADAPTERS = ("otb", "ai")
+FIXED = ("otb", "admilano", "adidas", "fog")   # built-in readers, one per known layout (oc/adapters/<name>.py)
+ADAPTERS = FIXED + ("ai",)
 JOIN_FIELDS = ("style", "fabric", "colour", "colour_code")
 JOIN_TOKEN = re.compile(r"\{(style|fabric|colour|colour_code)\}")
 DEFAULT_JOIN_KEY = "{style}{fabric} {colour}"
@@ -86,6 +89,18 @@ def norm_colour(colour):
 
 def join_fields(template):
     return JOIN_TOKEN.findall(template)
+
+
+TEXT_TEMPLATES = {"title_tag": ("vendor", "title"), "body_html": ("composition", "made_in", "code")}
+
+
+def _tokens(fields):
+    return re.compile(r"\{(" + "|".join(fields) + r")\}")
+
+
+def fill_text(brand, key, **values):
+    """The brand's title_tag or body_html with exactly its own tokens replaced; any other text is copied as is."""
+    return _tokens(TEXT_TEMPLATES[key]).sub(lambda m: str(values[m.group(1)]), brand[key])
 
 
 def code_for(brand, style, fabric, colour):
@@ -173,7 +188,7 @@ def from_mapping(data, source, name=None):
 def _reader_keys(cfg, data, source):
     """adapter, oc_supplier, join_key and colour_codes, checked at load so a bad config never reaches a PDF."""
     if cfg["adapter"] not in ADAPTERS:
-        raise BrandError(f"{source}: adapter must be {' or '.join(ADAPTERS)}, got {cfg['adapter']!r}")
+        raise BrandError(f"{source}: adapter must be one of {', '.join(ADAPTERS)}, got {cfg['adapter']!r}")
     if cfg["adapter"] == "ai":
         need = [k for k in AI_NEEDS if not data.get(k)]
         if need:
@@ -204,6 +219,20 @@ def _reader_keys(cfg, data, source):
     cfg["colour_codes"] = {norm_colour(k): str(v).strip() for k, v in codes.items()}
 
 
+def _text_templates(cfg, source):
+    """title_tag and body_html may hold only their own {tokens}; any other brace is refused, as for join_key."""
+    for key, fields in TEXT_TEMPLATES.items():
+        tpl = cfg[key]
+        if not isinstance(tpl, str):
+            raise BrandError(f"{source}: {key} is a text template, got {tpl!r}")
+        rest = _tokens(fields).sub("", tpl)
+        if "{" in rest or "}" in rest:
+            bad = re.findall(r"\{[^{}]*\}?", rest)
+            raise BrandError(f"{source}: {key} {tpl!r} may use only " + ", ".join("{" + f + "}" for f in fields)
+                             + ", each written exactly so (no format specs, conversions or other braces)"
+                             + (f"; not allowed: {', '.join(bad)}" if bad else ""))
+
+
 def _plain(v):
     if isinstance(v, Mapping):
         return {k: _plain(x) for k, x in v.items()}
@@ -223,6 +252,7 @@ def _finish(data, source, name, paths=False):
     if missing:
         raise BrandError(f"{source}: missing {missing}")
     _reader_keys(cfg, data, source)
+    _text_templates(cfg, source)
     for h in cfg["history"]:
         if not isinstance(h, Mapping) or not h.get("path") or not h.get("label"):
             raise BrandError(f"{source}: each history entry needs a label and a path, got {h!r}")

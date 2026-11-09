@@ -15,11 +15,12 @@ from .draft import oc_lines, cart_checks
 from .poxlsx import (FILLS, CODE, MADE_IN, COST_PRICE, TITLE_TAG, SEASON, NEW_SALE, PO_FORMULA,
                      resolve_formula, write_table, review_row, clean_text, as_text)
 from .resolve import Resolver, COLOUR, AI_OC
-from .util import blank, norm_code, norm_size, fmt_eur, money, slug
+from .util import blank, norm_code, norm_size, fmt_money, cost_currency, money, slug
 
 
 def run(po_path, docs, brand, catalog, history, tag_lookup, out, price_overrides=None, cart=None):
     price_overrides = {norm_code(k): v for k, v in (price_overrides or {}).items()}
+    cur = cost_currency(brand)
     lines = oc_lines(docs, brand)
     by_code = {l["code"]: l for l in lines}
     R = Resolver(brand, catalog, history, tag_lookup, lines, cart)
@@ -56,21 +57,21 @@ def run(po_path, docs, brand, catalog, history, tag_lookup, out, price_overrides
     oc_eur = {l["code"]: l["price"] for l in lines}
     for code, eur in price_overrides.items():
         if code not in oc_eur or abs(eur - oc_eur[code]) > 0.005:
-            raise SystemExit(f"--set-price {code}={eur:g} does not match the OC (EUR {oc_eur.get(code)})")
+            raise SystemExit(f"--set-price {code}={eur:g} does not match the OC ({cur} {oc_eur.get(code)})")
     for r in data_rows:
         code = norm_code(get(r, CODE))
         if code in price_overrides:
             eur = price_overrides[code]
             if abs(eur - oc_eur.get(code, -1)) > 0.005:
-                raise SystemExit(f"--set-price {code}={eur:g} does not match the OC (EUR {oc_eur.get(code)})")
+                raise SystemExit(f"--set-price {code}={eur:g} does not match the OC ({cur} {oc_eur.get(code)})")
             qty = money(get(r, "Order Qty")) or 0
-            why = f"OC confirms EUR {eur:g}; sheet had EUR {money(get(r, 'Wholesale Price')):g}"
+            why = f"OC confirms {cur} {eur:g}; sheet had {cur} {money(get(r, 'Wholesale Price')):g}"
             l = by_code[code]
             src, ai = (AI_OC, f"read by AI from {l['doc']} line {l['line_no']}; ") if l.get("reader") == "ai" else ("OC", "")
             put(r, "Wholesale Price", eur, src, ai + why)
-            put(r, COST_PRICE, fmt_eur(eur), src, ai + why)
-            put(r, "Variant Cost", R.cost(eur), src, ai + f"EUR {eur:g} x {brand['cost_multiplier']}")
-            put(r, "Total Order", round(qty * eur, 2), src, ai + f"{qty:g} x EUR {eur:g}")
+            put(r, COST_PRICE, fmt_money(eur, cur), src, ai + why)
+            put(r, "Variant Cost", R.cost(eur), src, ai + f"{cur} {eur:g} x {brand['cost_multiplier']}")
+            put(r, "Total Order", round(qty * eur, 2), src, ai + f"{qty:g} x {cur} {eur:g}")
 
     # 2. SKUs: NEW rows first, then new sizes on MERGE rows
     for command in ("NEW", "MERGE"):
@@ -107,7 +108,7 @@ def run(po_path, docs, brand, catalog, history, tag_lookup, out, price_overrides
 
     checks = _checks(ws, col, data_rows, get, lines, R, brand, catalog, tag_lookup, review)
     if cart is not None:
-        checks += cart_checks(lines, cart)
+        checks += cart_checks(lines, cart, brand)
     write_table(wb, "Review", review, colour_key="Colour")
     write_table(wb, "Checks", checks, colour_key="Result")
     wb.save(out)
@@ -116,6 +117,7 @@ def run(po_path, docs, brand, catalog, history, tag_lookup, out, price_overrides
 
 def _checks(ws, col, data_rows, get, lines, R, brand, catalog, tag_lookup, review):
     out = []
+    cur = cost_currency(brand)
     oc_q, oc_eur = collections.Counter(), {}
     for l in lines:
         oc_eur[l["code"]] = l["price"]
@@ -132,7 +134,7 @@ def _checks(ws, col, data_rows, get, lines, R, brand, catalog, tag_lookup, revie
     value = round(sum(money(x["Total Order"]) or 0 for x in rows), 2)
     oc_units, oc_value = sum(oc_q.values()), round(sum(l["line_value"] for l in lines), 2)
     out.append(dict(Check="Order Qty and Total Order equal the OC", Result="PASS" if (units, value) == (oc_units, oc_value) else "FAIL",
-                    Detail=f"{units} units, EUR {value:,.2f} (OC {oc_units}, EUR {oc_value:,.2f})"))
+                    Detail=f"{units} units, {cur} {value:,.2f} (OC {oc_units}, {cur} {oc_value:,.2f})"))
     wrong = sorted({(norm_code(x[CODE]), money(x["Wholesale Price"])) for x in rows
                     if abs((money(x["Wholesale Price"]) or 0) - oc_eur.get(norm_code(x[CODE]), -1)) > 0.005})
     out.append(dict(Check="Wholesale equals the OC on every row", Result="FAIL" if wrong else "PASS",
@@ -144,8 +146,8 @@ def _checks(ws, col, data_rows, get, lines, R, brand, catalog, tag_lookup, revie
     cst = [x for x in rows if abs((money(x["Variant Cost"]) or 0) - round((money(x["Wholesale Price"]) or 0) * mult, 2)) > 0.01]
     out.append(dict(Check=f"Variant Cost = Wholesale x {mult} on every row", Result="FAIL" if cst else "PASS",
                     Detail=f"{len(cst)} rows off" + (f": {[x['_row'] for x in cst][:10]}" if cst else "")))
-    cpx = [x for x in rows if str(x[COST_PRICE]).strip() != fmt_eur(money(x["Wholesale Price"]) or 0)]
-    out.append(dict(Check="cost_price metafield = 'EUR <wholesale>' on every row", Result="FAIL" if cpx else "PASS",
+    cpx = [x for x in rows if str(x[COST_PRICE]).strip() != fmt_money(money(x["Wholesale Price"]) or 0, cur)]
+    out.append(dict(Check=f"cost_price metafield = '{cur} <wholesale>' on every row", Result="FAIL" if cpx else "PASS",
                     Detail=f"{len(cpx)} rows off" + (f": {[(x['_row'], x[COST_PRICE]) for x in cpx][:5]}" if cpx else "")))
     skus = [str(x["Variant SKU"]).strip() for x in rows]
     empty = [x["_row"] for x in rows if blank(x["Variant SKU"])]

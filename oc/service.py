@@ -32,6 +32,7 @@ for otb, WARN for AI (model, time, cost, and the instruction to check sizes by e
 import collections
 import csv
 import datetime
+import importlib
 import io
 import os
 import re
@@ -48,7 +49,7 @@ from . import catalog as catm
 from . import finalize as finalizem
 from . import history as histm
 from . import poxlsx
-from .util import slug
+from .util import cost_currency, currency_off, slug
 
 REPO = Path(__file__).resolve().parent.parent
 
@@ -64,10 +65,17 @@ FIXABLE_IN_SHEET = (
 ZIP_MEMBERS = finalizem.OUTPUTS + ["finalize-checks.xlsx"]
 HISTORY_CHECK = "Past season POs (retail price history)"
 READER_CHECK = "Order confirmation reader"
+CURRENCY_CHECK = "Order confirmation is in the brand's cost currency"
 GATE_CHECK = "Order confirmation passes its gates (parsed = printed)"
 AI_HINT = "If this is the right brand and its layout changed, tick 'Read the OC with AI' and build again."
-OTB_READER = ("read by the built-in reader for the OTB layout (Maison Margiela, MM6), which reads the PDF's text "
-              "by position; no AI was used")
+LAYOUTS = {"otb": "the OTB layout (Maison Margiela, MM6)", "admilano": "the AD Milano layout (Ann Demeulemeester)",
+           "adidas": "the adidas AG layout (Y-3, Willy Chavarria, RS)",
+           "fog": "the Fear of God layout (FOG Essentials, Fear of God LLC)"}
+
+
+def fixed_reader_row(name):
+    return _check(READER_CHECK, "INFO", f"read by the built-in reader for {LAYOUTS[name]}, which reads the PDF's "
+                                        "text by position; no AI was used")
 RED_WARNING = "Retail prices for new styles will mostly come back red."
 
 SEASON_RE = re.compile(r"\b(S/S|F/W|A/W)\s*(\d{2})\b")
@@ -87,26 +95,20 @@ def _check(name, result, detail):
 
 
 def adapter(brand_cfg):
-    if brand_cfg["adapter"] == "otb":
-        from .adapters import otb
-        return otb
-    if brand_cfg["adapter"] == "admilano":
-        from .adapters import admilano
-        return admilano
-    if brand_cfg["adapter"] == "adidas":
-        from .adapters import adidas
-        return adidas
-    if brand_cfg["adapter"] == "fog":
-        from .adapters import fog
-        return fog
-    raise brandm.BrandError(f"unknown adapter '{brand_cfg['adapter']}'")
+    """The reader module for the config's adapter: one of brand.ADAPTERS."""
+    name = brand_cfg["adapter"]
+    if name not in brandm.ADAPTERS:
+        raise brandm.BrandError(f"unknown adapter '{name}'")
+    return importlib.import_module(f".adapters.{name}", __package__)
 
 
 def read_oc(oc_path, brand_cfg, reader=None, ai_factory=None):
     """The OC as docs, by the config's reader or `reader="ai"`. -> (docs | None, checks, info).
 
     docs None means a FAIL among the checks. info is the AI reader's (model, tokens, seconds, cost and its raw
-    answer), None for otb. `ai_factory(key) -> client` replaces the Anthropic client (tests)."""
+    answer), None for a fixed reader. `ai_factory(key) -> client` replaces the Anthropic client (tests).
+    Whatever the reader, an OC whose currency (normalised: otb prints "European Euro") is not the brand's
+    cost_currency is refused."""
     if (reader or brand_cfg["adapter"]) == "ai":
         from .adapters import ai
         try:
@@ -114,16 +116,26 @@ def read_oc(oc_path, brand_cfg, reader=None, ai_factory=None):
         except ai.ReadRefused as e:
             return None, [ai.reader_check(e.info, refused=True)] + e.checks, e.info
         return docs, [ai.reader_check(info)] + warns, info
-    row = _check(READER_CHECK, "INFO", OTB_READER)
     try:
-        docs = adapter(brand_cfg).parse_checked(oc_path)
+        reader_mod = adapter(brand_cfg)
     except brandm.BrandError as e:
         return None, [_check("Brand config names a known OC layout", "FAIL", str(e))], None
+    row = fixed_reader_row(brand_cfg["adapter"])
+    try:
+        docs = reader_mod.parse_checked(oc_path)
     except Exception as e:
         problems = getattr(e, "problems", None) or [f"{type(e).__name__}: {e}"]
         return None, [row] + [_check(GATE_CHECK, "FAIL", f"{p}. {AI_HINT}" if p == "no order confirmations found" else p)
                               for p in problems], None
+    off = currency_off(docs, cost_currency(brand_cfg))
+    if off:
+        return None, [row, _check(CURRENCY_CHECK, "FAIL", currency_detail(off, brand_cfg))], None
     return docs, [row], None
+
+
+def currency_detail(off, brand_cfg):
+    return (f"{'; '.join(off)}, but the brand's cost currency is {cost_currency(brand_cfg)}. "
+            "Check you picked the right brand and document.")
 
 
 def cart_supported():
@@ -321,7 +333,7 @@ def draft(oc_path, catalog_path, brand_cfg, cart_path=None, history_paths=None, 
     checks = pre + checks
     with tempfile.TemporaryDirectory(prefix="oc-draft-") as tmp:
         out = os.path.join(tmp, "PO-draft.xlsx")
-        poxlsx.write_po(out, poxlsx.PO_HEADER, rows, review, checks, fills)
+        poxlsx.write_po(out, poxlsx.PO_HEADER, rows, review, checks, fills, currency=cost_currency(brand_cfg))
         data = Path(out).read_bytes()
     return (None if blocking(checks) else data), pd.DataFrame(review), checks
 

@@ -66,7 +66,8 @@ def catalog_path(tmp_path):
 
 
 def _docs():
-    return [dict(doc="SS - 1", collection="MM MALE SHOES AVP", gender="MEN", total_qty=6, net=1200.0, lines=[
+    return [dict(doc="SS - 1", collection="MM MALE SHOES AVP", gender="MEN", total_qty=6, net=1200.0,
+                 currency="European Euro", lines=[
         dict(line_no=1, style="S99WS0001", fabric="P0001", colour="101", product_class="SNEAKERS",
              sizes={"41": 1, "43": 1}, qty=2, price=200.0, line_value=400.0),
         dict(line_no=2, style="S99WS0001", fabric="P0001", colour="900", product_class="SNEAKERS",
