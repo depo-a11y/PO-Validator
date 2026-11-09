@@ -4,6 +4,10 @@ Carryover lines (join key found on one live product) become MERGE rows carrying
 the live ID, Handle, SKU, Title, Type and price; a size the live product lacks
 becomes a MERGE row with a new SKU. Everything else is drafted as NEW rows.
 Every drafted cell carries a source for the Review sheet.
+
+A cart (oc.cart.load) supplies colour words, colour family, composition, made in,
+gender and subcategory, matched on the full join key. Quantities and prices are
+always the OC's; a cart wholesale that differs is reported, never used.
 """
 import collections
 
@@ -94,12 +98,13 @@ def build(docs, brand, catalog, history, tag_lookup, cart=None):
 
         # ---- NEW: resolve now, emit after titles are de-duplicated -------------
         cname, cn_src, cn_why = R.colour_name(code)
-        ptype, t_src, t_why = R.product_type(code, l["product_class"], l["gender"])
-        title, ti_src, ti_why = R.title(code, l["product_class"], cname)
+        gender, pclass = R.gender_of(code, l["gender"]), R.product_class_of(code, l["product_class"])
+        ptype, t_src, t_why = R.product_type(code, pclass, gender)
+        title, ti_src, ti_why = R.title(code, pclass, cname)
         if worse(cn_src, ti_src) == cn_src and COLOUR[cn_src] != COLOUR[ti_src]:
             ti_src, ti_why = cn_src, f"{ti_why}; colour name: {cn_why}"
         pending.append(dict(
-            l=l, code=code, eur=eur, ptype=(ptype, t_src, t_why), title=[title, ti_src, ti_why],
+            l=l, code=code, eur=eur, gender=gender, ptype=(ptype, t_src, t_why), title=[title, ti_src, ti_why],
             fam=R.colour_family(code, cname), run=R.size_run(code, l["sizes_norm"], ptype),
             price=R.retail(code, eur, ptype), made=R.made_in(code), comp=R.composition(code)))
 
@@ -119,7 +124,8 @@ def build(docs, brand, catalog, history, tag_lookup, cart=None):
             cell(row, "Title", title, ti_src, ti_why)
             cell(row, "Vendor", brand["vendor"], "rule", "brand config")
             cell(row, "Type", ptype, t_src, t_why)
-            cell(row, "Body HTML", R.body_html(code, comp, made), "guess" if "guess" in (comp_src, made_src) else "catalog",
+            cell(row, "Body HTML", R.body_html(code, comp, made), "guess" if "guess" in (comp_src, made_src)
+                 else "cart" if "cart" in (comp_src, made_src) else "catalog",
                  f"template; composition: {comp_why}; made in: {made_why}")
             cell(row, "Status", brand["status"], "rule", "brand config")
             cell(row, "Published", brand["published_new"], "rule", "new stock is created unpublished")
@@ -140,6 +146,8 @@ def build(docs, brand, catalog, history, tag_lookup, cart=None):
             cell(row, TITLE_TAG, R.title_tag(title), ti_src, "house title_tag template over the drafted title")
             rows.append(row)
 
+    if cart is not None:
+        checks += cart_checks(lines, cart)
     checks = _draft_checks(docs, lines, rows, R, brand, catalog, tag_lookup, dup) + checks
     review = [review_row(i + 2, rows[i].get(CODE), rows[i].get("Option2 Value"), k, v, s, w)
               for i, k, v, s, w in cells]
@@ -147,10 +155,39 @@ def build(docs, brand, catalog, history, tag_lookup, cart=None):
     return rows, review, checks, fills
 
 
+def cart_checks(lines, cart):
+    """How the cart lines up with the OC. Zero shared codes means the wrong cart."""
+    rows = cart["rows"]
+    oc = {}
+    for l in lines:
+        oc.setdefault(l["code"], l)
+    hit = [c for c in oc if c in rows]
+    oc_only = sorted(c for c in oc if c not in rows)
+    cart_only = sorted(c for c in rows if c not in oc)
+    out = [dict(Check="Cart matches this OC", Result="PASS" if hit else "FAIL",
+                Detail=f"{len(hit)} of {len(oc)} OC codes are in {cart['label']} ({len(rows)} cart rows, "
+                       f"sheet '{cart['sheet']}')" + ("" if hit else "; wrong cart for this OC, nothing taken from it")),
+           dict(Check="OC codes not in the cart", Result="INFO",
+                Detail=f"{len(oc_only)} code(s), drafted without cart data" + (": " + ", ".join(oc_only) if oc_only else "")),
+           dict(Check="Cart codes not on the OC", Result="INFO",
+                Detail=f"{len(cart_only)} code(s), ignored" + (": " + ", ".join(cart_only) if cart_only else ""))]
+    diff = [(c, rows[c]["wholesale"], oc[c]["price"]) for c in hit
+            if rows[c]["wholesale"] is not None and abs(rows[c]["wholesale"] - oc[c]["price"]) > 0.005]
+    if diff:
+        out.append(dict(Check="Cart wholesale differs from the OC (the OC's is used)", Result="INFO",
+                        Detail=f"{len(diff)} code(s): " + "; ".join(f"{c} cart {w:g} vs OC EUR {p:g}" for c, w, p in diff)))
+    if cart["duplicates"]:
+        out.append(dict(Check="One cart row per code", Result="WARN",
+                        Detail=f"{len(cart['duplicates'])} code(s) on 2+ rows, first row used: " + ", ".join(cart["duplicates"])))
+    return out
+
+
 def _dedupe_titles(pending, R, brand, checks):
     """Matrixify groups NEW rows by Title, so two codes may never share one, and a
-    title whose handle is already live would fail as a duplicate. Prefix the
-    women's product first (house convention); whatever still collides is a FAIL."""
+    title whose handle is already live would fail as a duplicate. Prefix one
+    gender's product (brand `title_prefixes`, default the women's with
+    `womens_prefix`); whatever still collides is a FAIL."""
+    prefixes = brand.get("title_prefixes") or {"WOMEN": brand["womens_prefix"]}
     for _ in range(2):
         groups = collections.defaultdict(list)
         for n in pending:
@@ -160,9 +197,10 @@ def _dedupe_titles(pending, R, brand, checks):
             if len(ns) < 2 and not taken:
                 continue
             for n in ns:
-                if (n["l"]["gender"] or "") == "WOMEN" and not n["title"][0].startswith(brand["womens_prefix"]):
-                    n["title"] = [brand["womens_prefix"] + n["title"][0], "rule",
-                                  n["title"][2] + "; 'Womens' prefix keeps it apart from a same-named product"]
+                pre = prefixes.get(n["gender"] or "")
+                if pre and not n["title"][0].startswith(pre):
+                    n["title"] = [pre + n["title"][0], "rule",
+                                  n["title"][2] + f"; '{pre.strip()}' prefix keeps it apart from a same-named product"]
     groups = collections.defaultdict(list)
     for n in pending:
         groups[slug(n["title"][0])].append(n)

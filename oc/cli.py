@@ -1,7 +1,7 @@
 """oc: Order Confirmation -> PO buy sheet -> PU (product upload) + delivery file.
 
-    python -m oc draft    --oc OC.pdf --catalog export.csv --brand margiela --out PO-draft.xlsx
-    python -m oc complete --po hand_PO.xlsx --oc OC.pdf --catalog export.csv --brand margiela --out PO.xlsx
+    python -m oc draft    --oc OC.pdf --catalog export.csv --brand margiela --out PO-draft.xlsx [--cart CART.xlsx]
+    python -m oc complete --po hand_PO.xlsx --oc OC.pdf --catalog export.csv --brand margiela --out PO.xlsx [--cart CART.xlsx]
     python -m oc finalize --po PO.xlsx --catalog export.csv --brand margiela --out-prefix <path-prefix>
     python -m oc reconcile --draft PO-draft.xlsx --po hand_PO.xlsx --oc OC.pdf --out accuracy.md
 
@@ -38,6 +38,18 @@ def _adapter(b):
     raise SystemExit(f"unknown adapter {b['adapter']}")
 
 
+def _cart(args):
+    if not getattr(args, "cart", None):
+        return None
+    from . import cart as cartm
+    try:
+        c = cartm.load(args.cart)
+    except cartm.CartError as e:
+        raise SystemExit(f"cart: {e}")
+    print(f"cart: {c['label']}, sheet '{c['sheet']}', {len(c['rows'])} style-colours")
+    return c
+
+
 def _fails(checks):
     return [c for c in checks if c["Result"] == "FAIL"]
 
@@ -46,7 +58,7 @@ def cmd_draft(args):
     from . import draft, poxlsx
     b, cat, hist, tags = _common(args)
     docs = _adapter(b).parse_checked(args.oc)
-    rows, review, checks, fills = draft.build(docs, b, cat, hist, tags)
+    rows, review, checks, fills = draft.build(docs, b, cat, hist, tags, cart=_cart(args))
     poxlsx.write_po(args.out, poxlsx.PO_HEADER, rows, review, checks, fills)
     _print_checks(checks)
     print(f"-> {args.out} ({len(rows)} rows)")
@@ -58,7 +70,7 @@ def cmd_complete(args):
     b, cat, hist, tags = _common(args)
     docs = _adapter(b).parse_checked(args.oc)
     checks = complete.run(args.po, docs, b, cat, hist, tags, args.out,
-                          price_overrides=_overrides(args.set_price))
+                          price_overrides=_overrides(args.set_price), cart=_cart(args))
     _print_checks(checks)
     print(f"-> {args.out}")
     return 1 if _fails(checks) else 0
@@ -128,6 +140,9 @@ def main(argv=None):
     r.add_argument("--allow-price", action="append", metavar="CODE",
                    help="a code whose wholesale is known to differ (reported, not failed)")
     r.set_defaults(fn=cmd_reconcile)
+    for sp in (d, c):
+        sp.add_argument("--cart", help="the brand's selling-session cart export (.xlsx): colour words, "
+                                       "composition, made in; never quantities or prices")
     for sp in (d, c, f, r):
         sp.add_argument("--brand-config", help="path to the brand .yaml (else $OC_BRAND_DIR, else oc/brands/)")
     args = p.parse_args(argv)

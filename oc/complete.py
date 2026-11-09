@@ -11,17 +11,17 @@ import collections
 import openpyxl
 from openpyxl.utils import get_column_letter
 
-from .draft import oc_lines
+from .draft import oc_lines, cart_checks
 from .poxlsx import (FILLS, CODE, MADE_IN, COST_PRICE, TITLE_TAG, SEASON, NEW_SALE,
                      resolve_formula, write_table, review_row)
 from .resolve import Resolver, COLOUR
 from .util import blank, norm_code, norm_size, fmt_eur, money, slug
 
 
-def run(po_path, docs, brand, catalog, history, tag_lookup, out, price_overrides=None):
+def run(po_path, docs, brand, catalog, history, tag_lookup, out, price_overrides=None, cart=None):
     price_overrides = {norm_code(k): v for k, v in (price_overrides or {}).items()}
     lines = oc_lines(docs)
-    R = Resolver(brand, catalog, history, tag_lookup, lines)
+    R = Resolver(brand, catalog, history, tag_lookup, lines, cart)
     wb = openpyxl.load_workbook(po_path)
     ws = wb.worksheets[0]
     header = [c.value for c in ws[1]]
@@ -95,10 +95,12 @@ def run(po_path, docs, brand, catalog, history, tag_lookup, out, price_overrides
         code = norm_code(get(r, CODE))
         product = catalog.match(code)[0] if str(get(r, "Command")).strip().upper() == "MERGE" else None
         v, s, why = R.made_in(code, product)
-        if s == "catalog":
+        if s in ("catalog", "cart"):
             put(r, MADE_IN, v, s, why)
 
     checks = _checks(ws, col, data_rows, get, lines, R, brand, catalog, tag_lookup, review)
+    if cart is not None:
+        checks += cart_checks(lines, cart)
     write_table(wb, "Review", review, colour_key="Colour")
     write_table(wb, "Checks", checks, colour_key="Result")
     wb.save(out)

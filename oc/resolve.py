@@ -3,8 +3,8 @@
 
 Every resolver returns (value, source, detail). Sources, in trust order:
   OC, catalog  -> green   (read from the confirmation or the live store, same style)
-  cart, history, rule, similar -> amber (a linesheet, past POs on 2+ rows, a brand
-                           rule, or a different live style at the same wholesale)
+  cart, history, rule, similar -> amber (the selling-session cart, past POs on 2+ rows,
+                           a brand rule, or a different live style at the same wholesale)
   thin, fit, guess -> red (one past row, a fitted ratio, or nothing to go on)
 """
 import collections
@@ -14,6 +14,9 @@ import re
 from .util import norm_code, norm_size, sort_sizes, size_key, title_colour, slug
 
 GREEN, AMBER, RED = "green", "amber", "red"
+GENDERS = ("MEN", "WOMEN", "UNISEX")
+# A colour description is copied into a title; anything outside these is a garbled export ('Peach Pur}e').
+CLEAN_COLOUR = re.compile(r"[^\w\s/&'.,()+-]")
 COLOUR = {"OC": GREEN, "catalog": GREEN, "cart": AMBER, "history": AMBER, "rule": AMBER, "similar": AMBER,
           "thin": RED, "fit": RED, "guess": RED}
 RANK = {GREEN: 0, AMBER: 1, RED: 2}
@@ -41,6 +44,7 @@ class Resolver:
         for l in oc_lines or []:
             self.oc[l["code"]] = l
         self.cart = cart or {}
+        self._cart_rows = self.cart.get("rows", {})
         self._next_sku = None
         self.used_skus = set()
 
@@ -60,6 +64,28 @@ class Resolver:
         style, body, _ = split_code(code)
         key = body if level == "fabric" else style
         return [r for c, rs in self.hist.by_code.items() if c.startswith(key) and c != norm_code(code) for r in rs]
+
+    # ---- cart ---------------------------------------------------------------
+    def cart_row(self, code):
+        """The cart row for this exact style+fabric+colour, or None. Never matched on
+        the colour code alone (fabric-scoped colour codes)."""
+        return self._cart_rows.get(norm_code(code))
+
+    def cart_why(self, row, what):
+        return f"{self.cart['label']} row {row['row']}: {what}"
+
+    def gender_of(self, code, oc_gender):
+        """OC gender, else the cart's (Female/Male); Unisex and blank stay None."""
+        if oc_gender:
+            return oc_gender
+        row = self.cart_row(code)
+        return row["gender"] if row else None
+
+    def product_class_of(self, code, oc_class):
+        if (oc_class or "").strip():
+            return oc_class
+        row = self.cart_row(code)
+        return row["style_name"] if row else oc_class
 
     # ---- colour -------------------------------------------------------------
     def _colour_votes(self, code, field):
@@ -91,8 +117,18 @@ class Resolver:
 
     def colour_name(self, code):
         _, body, colour = split_code(code)
-        if colour in self.cart.get("colours", {}):
-            return self.cart["colours"][colour], "cart", "linesheet colour description"
+        row = self.cart_row(code)
+        if row and row["colour"]:
+            name = tidy_colour(row["colour"])
+            odd = sorted(set(CLEAN_COLOUR.findall(name)))
+            if odd:
+                return name, "guess", self.cart_why(row, f"Color Description '{row['colour']}' carries "
+                                                         f"unexpected character(s) {' '.join(odd)}; retype it")
+            v, n, tot, how = self._colour_votes(code, "title_colour")
+            if v and how == "same fabric+colour" and v.casefold() == name.casefold():
+                return v, "catalog", (f"{how} {colour} titled '{v}' on {n} of {tot} product(s); "
+                                      + self.cart_why(row, "Color Description agrees"))
+            return name, "cart", self.cart_why(row, f"Color Description '{row['colour']}'")
         v, n, tot, how = self._colour_votes(code, "title_colour")
         if v:
             return v, "catalog", f"{how} {colour} titled '{v}' on {n} of {tot} product(s)"
@@ -101,15 +137,35 @@ class Resolver:
         return colour, "guess", why + "; the OC has no colour description"
 
     def colour_family(self, code, colour_name):
+        """Same fabric+colour in the catalog first (the house's own call on this
+        fabric's colour). With a cart row, its colour description through the brand
+        keywords comes next, ahead of other fabrics' use of the colour code."""
         _, _, colour = split_code(code)
         v, n, tot, how = self._colour_votes(code, "colour_family")
+        row = self.cart_row(code)
+        if v and (how == "same fabric+colour" or row is None):
+            return v, "catalog", f"{how} {colour} is {v} on {n} of {tot} product(s)"
+        fam = self.keyword_family(colour_name)
+        if row is not None and fam:
+            other = f"; other fabrics' {colour} is {v} in the catalog" if v and v != fam else ""
+            return fam, "cart", self.cart_why(row, f"colour '{colour_name}' matches the {fam} keyword list{other}")
         if v:
             return v, "catalog", f"{how} {colour} is {v} on {n} of {tot} product(s)"
-        low = (colour_name or "").lower()
-        for fam_name, words in self.b["colour_families"].items():
-            if any(re.search(r"\b" + re.escape(w) + r"\b", low) for w in words):
-                return fam_name, "rule", f"'{colour_name}' matches the {fam_name} keyword list"
+        if fam:
+            return fam, "rule", f"'{colour_name}' matches the {fam} keyword list"
         return "", "guess", f"no colour family for '{colour_name}'"
+
+    def keyword_family(self, colour_name):
+        """Family whose keyword appears earliest in the name, so 'Black/Camel' is
+        BLACK and 'Turkish Coffee/Black' is BROWN; a tie keeps config order."""
+        low = (colour_name or "").lower()
+        best = None
+        for fam_name, words in self.b["colour_families"].items():
+            for w in words:
+                m = re.search(r"\b" + re.escape(w.lower()) + r"\b", low)
+                if m and (best is None or m.start() < best[0]):
+                    best = (m.start(), fam_name)
+        return best[1] if best else None
 
     # ---- type ---------------------------------------------------------------
     def product_type(self, code, product_class, gender):
@@ -130,13 +186,27 @@ class Resolver:
             if share >= 0.6 and (gender is None or t.startswith(gender + " ")):
                 return t, "history", f"style family {fam}: {t} on {n} of {sum(cnt.values())} products/rows"
         pc = (product_class or "").strip().upper()
-        rest = self.b["product_class_types"].get(pc)
         g = gender or self.b["default_gender"]
-        if rest:
-            t = f"{g} {rest}"
+        t, rest = self._table_type(self.b["product_class_types"].get(pc), g)
+        if t:
+            return t, "rule", f"product class '{product_class}' -> {rest} (brand table, gender {g})"
+        row = self.cart_row(code)
+        if row and row["subcategory"]:
+            t, rest = self._table_type(self.b.get("subcategory_types", {}).get(row["subcategory"].upper()), g)
+            if t:
+                return t, "cart", self.cart_why(row, f"Subcategory '{row['subcategory']}' -> {rest} "
+                                                     f"(brand subcategory_types, gender {g})")
+        return "", "guess", f"no Type for product class '{product_class}'" + \
+            (f" or cart subcategory '{row['subcategory']}'" if row and row["subcategory"] else "")
+
+    def _table_type(self, entry, gender):
+        """A brand-table entry is a Type without gender, a list of them (first valid
+        for the gender wins), or a full Type starting with MEN/WOMEN/UNISEX."""
+        for rest in ([entry] if isinstance(entry, str) else entry or []):
+            t = rest if rest.split(" ", 1)[0] in GENDERS else f"{gender} {rest}"
             if t in self.types:
-                return t, "rule", f"product class '{product_class}' -> {rest} (brand table, gender {g})"
-        return "", "guess", f"no Type for product class '{product_class}'"
+                return t, rest
+        return None, None
 
     # ---- title --------------------------------------------------------------
     def title(self, code, product_class, colour_name):
@@ -156,9 +226,6 @@ class Resolver:
             if stems:
                 stem = max(stems, key=lambda s: (stems[s], -list(first).index(s)))
                 return f"{stem} in {colour_name}", "catalog", f"{label}: stem of '{first[stem]['title']}'"
-        name = self.cart.get("names", {}).get(split_code(code)[1])
-        if name:
-            return f"{name} in {colour_name}", "cart", "linesheet style name"
         stem = " ".join(w.capitalize() for w in re.split(r"\s+", (product_class or "").strip()) if w)
         return f"{stem} in {colour_name}", "guess", f"product class '{product_class}' title-cased"
 
@@ -253,18 +320,31 @@ class Resolver:
             v, why = self.made_in_of(product)
             if v:
                 return v, "catalog", why
-        for p in self.siblings(code, "fabric"):
-            v, why = self.made_in_of(p)
-            if v:
-                return v, "catalog", f"same style+fabric {why}"
+        sib = next(((v, f"same style+fabric {why}") for p in self.siblings(code, "fabric")
+                    for v, why in [self.made_in_of(p)] if v), None)
+        row = self.cart_row(code)
+        if row and row["made_in"]:
+            return self._cart_or_agreed(row, row["made_in"], f"Made In '{row['made_in_raw']}'", sib)
+        if sib:
+            return sib[0], "catalog", sib[1]
         return self.b["unknown"], "guess", "made-in not known for this style"
 
     def composition(self, code):
-        for p in self.siblings(code, "fabric"):
-            m = re.search(r"Composition:\s*([^<\n]+)", p["body"] or "")
-            if m:
-                return m.group(1).strip(), "catalog", f"same style+fabric {p['title']} description"
+        sib = next(((m.group(1).strip(), f"same style+fabric {p['title']} description")
+                    for p in self.siblings(code, "fabric")
+                    for m in [re.search(r"Composition:\s*([^<\n]+)", p["body"] or "")] if m), None)
+        row = self.cart_row(code)
+        if row and row["materials"]:
+            return self._cart_or_agreed(row, row["materials"], "Materials", sib)
+        if sib:
+            return sib[0], "catalog", sib[1]
         return self.b["unknown"], "guess", "no composition source (no linesheet supplied)"
+
+    def _cart_or_agreed(self, row, value, what, sib):
+        """The cart's value; green only when the live same style+fabric says the same."""
+        if sib and " ".join(sib[0].split()).casefold() == " ".join(value.split()).casefold():
+            return sib[0], "catalog", f"{sib[1]}; " + self.cart_why(row, f"{what} agrees")
+        return value, "cart", self.cart_why(row, what) + (f"; {sib[1]} says '{sib[0]}'" if sib else "")
 
     # ---- SKU ----------------------------------------------------------------
     def next_sku(self):
@@ -287,6 +367,12 @@ class Resolver:
 
     def handle_taken(self, title):
         return slug(title) in self.cat.handles
+
+
+def tidy_colour(desc):
+    """'Off white' -> 'Off White', 'Berry/ Clear White' -> 'Berry/Clear White'."""
+    t = re.sub(r"\s*/\s*", "/", re.sub(r"\s+", " ", str(desc or "").strip()))
+    return re.sub(r"(^|[\s/-])(\w)", lambda m: m.group(1) + m.group(2).upper(), t)
 
 
 def _created(p):

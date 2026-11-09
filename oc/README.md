@@ -30,3 +30,38 @@ Pure Python, files in and files out. Nothing here talks to Shopify, Matrixify or
   brand config, a catalog export or a PO while this repo is public.
 
 `python tests/mutate_oc.py` re-runs the mutation harness for the guards.
+
+## Cart (linesheet)
+
+    python -m oc draft    ... --cart CART.xlsx
+    python -m oc complete ... --cart CART.xlsx
+
+The OC carries codes, quantities and prices but no colour words, composition or names. The brand's
+selling-session cart export (OTB: `<BRAND> SS27 AVP X MARAIS, ID <session>.xlsx`) fills part of that gap.
+`oc/cart.py` reads it: the header row is found by content in the first 50 rows of any sheet (it must hold
+`Model`, `Fabric`, `Color Code`, `Color Description`), one row per style-colour, keyed by the full join key
+`<Model><Fabric> <Color Code>`. A Margiela numeric colour code means a different colour on every fabric, so
+nothing is ever looked up by the colour code alone. An unreadable file, a missing header or no rows raise
+`CartError`.
+
+What the draft takes from the cart, shaded amber with the cart's session and row in the Review sheet:
+
+- title colour words (`<Product> in <Color Description>`, words capitalised); a description with a stray
+  character (`Peach Pur}e`) is red;
+- colour family: the brand's `colour_families` keywords on that description, the keyword nearest the start
+  winning (`Black/Camel` is BLACK). The live catalog's own family for the same fabric+colour still comes first;
+- composition (`Materials`) and made in (`Made In`, often blank) for the Body HTML and made_in;
+- gender (Female/Male) when the OC has none, the Style Name when the OC has no product class, and Type from
+  the brand's `subcategory_types` table when the product class gives none.
+
+Where the live same style+fabric product says the same thing, the cell stays green. The product-name part of a
+new title still comes from the catalog (same style+fabric, then same style), else the class name in red.
+
+Never from the cart: quantities, wholesale and retail. Its Sugg. Retail is ignored (OTB sends 0) and a Wholesale
+that differs from the OC is an INFO check. Coverage checks: OC codes not in the cart and cart codes not on the OC
+(INFO, with counts), and a cart sharing no code with the OC is a FAIL (wrong cart).
+
+Brand config keys the cart uses: `colour_families`, `subcategory_types` (cart Subcategory to Type without gender),
+`title_prefixes` (which gender's product gets a prefix when two NEW titles collide; default `{WOMEN: "Womens "}`).
+A `product_class_types` or `subcategory_types` value may be a list (first valid Type for the gender wins) or a
+full Type starting MEN, WOMEN or UNISEX.

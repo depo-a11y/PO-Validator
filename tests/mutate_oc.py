@@ -3,6 +3,10 @@
 Each mutant breaks one guard; the suite must fail on every one. A mutant that
 does not compile is reported BROKEN, never KILLED. Sources are restored in a
 finally block and checked byte-identical at the end.
+
+The unmutated suite must pass first, or every mutant would read KILLED. Sources
+are restored from a snapshot taken at start, so run this on a committed copy
+(git archive HEAD | tar -x -C <dir>), never in a tree someone else is editing.
 """
 import hashlib
 import py_compile
@@ -39,6 +43,25 @@ MUTANTS = [
     ("oc/finalize.py", '            costs = collections.Counter(round(x["cost"], 2) for x in sib if x["cost"] is not None)',
      '            costs = collections.Counter([_r2(r["Variant Cost"])])', "new sizes take the PO cost"),
     ("oc/complete.py", "        if old == value:\n            return\n", "", "no-op fills logged (harmless: expect SURVIVED)"),
+    # ---- cart ----
+    ("oc/draft.py", 'Result="PASS" if hit else "FAIL"', 'Result="PASS" if hit else "INFO"', "wrong cart is not a FAIL"),
+    ("oc/draft.py", '        code, eur = l["code"], l["price"]',
+     '        code, eur = l["code"], (cart or {}).get("rows", {}).get(l["code"], {}).get("wholesale") or l["price"]',
+     "cart wholesale used over the OC's"),
+    ("oc/draft.py", "    if diff:\n", "    if False:\n", "cart-vs-OC wholesale INFO removed"),
+    ("oc/resolve.py", "        return self._cart_rows.get(norm_code(code))",
+     "        return self._cart_rows.get(norm_code(code)) or next("
+     "(r for r in self._cart_rows.values() if r[\"colour_code\"] == split_code(code)[2]), None)",
+     "cart colour falls back to the bare colour code"),
+    ("oc/cart.py", "        code = join_key(model, fabric, colour_code)", '        code = join_key(model, "", colour_code)',
+     "cart keyed without the fabric"),
+    ("oc/resolve.py", '"cart": AMBER', '"cart": GREEN', "cart-sourced cells shaded green"),
+    ("oc/resolve.py", "            if odd:", "            if False:", "garbled cart colour accepted"),
+    ("oc/draft.py", '    prefixes = brand.get("title_prefixes") or {"WOMEN": brand["womens_prefix"]}',
+     '    prefixes = {"WOMEN": brand["womens_prefix"]}', "brand title_prefixes ignored"),
+    ("oc/resolve.py", '        if row and row["subcategory"]:', "        if False:", "cart subcategory Type removed"),
+    ("oc/resolve.py", '        if sib and " ".join(sib[0].split()).casefold() == " ".join(value.split()).casefold():',
+     "        if sib:", "cart value green although the live style disagrees"),
 ]
 
 
@@ -46,7 +69,15 @@ def digest(p):
     return hashlib.md5(p.read_bytes()).hexdigest()
 
 
+def _suite():
+    return subprocess.run([sys.executable, "-m", "pytest", "-q", "-x", "-p", "no:cacheprovider"],
+                          cwd=ROOT, capture_output=True, text=True)
+
+
 def main():
+    base = _suite()
+    if base.returncode != 0:
+        sys.exit("the unmutated suite does not pass, so no mutant can be judged:\n" + base.stdout[-2000:])
     files = {f for f, *_ in MUTANTS}
     before = {f: (ROOT / f).read_bytes() for f in files}
     sums = {f: digest(ROOT / f) for f in files}
@@ -63,8 +94,7 @@ def main():
                 results.append((label, "BROKEN"))
                 p.write_bytes(before[f])
                 continue
-            r = subprocess.run([sys.executable, "-m", "pytest", "-q", "-x", "-p", "no:cacheprovider"],
-                               cwd=ROOT, capture_output=True, text=True)
+            r = _suite()
             results.append((label, "KILLED" if r.returncode == 1 else "SURVIVED" if r.returncode == 0 else f"ERROR {r.returncode}"))
             p.write_bytes(before[f])
     finally:
