@@ -240,7 +240,8 @@ need = [n for n, ok in (("a brand", cfg), ("the catalog export", S.get("catalog"
         if not ok]
 if need:
     st.caption("To build the draft, add " + and_join(need) + ".")
-if st.button("Build draft PO", type="primary", disabled=bool(need) or blocked):
+build = False if blocked else st.button("Build draft PO", type="primary", disabled=bool(need))
+if build:
     S.pop("draft", None)
     slow = " An AI read can take a few minutes." if use_ai or cfg["adapter"] == "ai" else ""
     with st.spinner("Reading the order confirmation and building the draft. This can take a minute." + slow):

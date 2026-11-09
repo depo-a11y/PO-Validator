@@ -264,6 +264,14 @@ TOTAL PRICE $2,269.50"""], RAW("Example Atelier Ltd", "TC-P0001", [
 }
 
 
+LAYOUTS["one style in two colours (a real fog order and Margiela both have one)"] = (["""ORDER # SO9000002
+1 RW00433 FLEECE 0001 BLACK S M 2 1 1 $60.00 $120.00
+2 RW00433 FLEECE 0002 GREY S M 2 1 1 $70.00 $140.00
+Total Units: 4 Total Amount: $260.00"""], RAW("Example Atelier Ltd", "SO9000002", [
+    L("RW00433", "FLEECE", "0001", [("S", "1"), ("M", "1")], "2", "$60.00", "$120.00"),
+    L("RW00433", "FLEECE", "0002", [("S", "1"), ("M", "1")], "2", "$70.00", "$140.00")], "4", "$260.00", cur="USD"))
+
+
 def _layout_cfg(raw):
     return dict(oc_supplier=["Example Atelier Ltd"], cost_currency=raw["documents"][0]["currency"], vendor="EX",
                 _name="ex")

@@ -140,13 +140,13 @@ def test_after_ten_ai_reads_the_ai_box_is_off(tmp_path, monkeypatch):
 def test_after_ten_ai_reads_an_ai_brand_cannot_build(tmp_path, monkeypatch, ):
     at = _capped(tmp_path, monkeypatch, "adapter: ai\noc_supplier: X Ltd\njoin_key: '{style}'\n")
     assert any(e.value == CAP for e in at.error)
-    (build,) = [b for b in at.button if b.label == "Build draft PO"]
-    assert build.disabled
+    assert not [b for b in at.button if b.label == "Build draft PO"]
 
 
 def test_below_the_cap_an_ai_brand_shows_no_cap_message(tmp_path, monkeypatch):
     at = _page_with_brand(tmp_path, monkeypatch, "adapter: ai\noc_supplier: X Ltd\njoin_key: '{style}'\n")
     assert not any(e.value == CAP for e in at.error)
+    assert [b for b in at.button if b.label == "Build draft PO"]
 
 
 def test_the_expander_names_the_built_in_readers_before_ai(tmp_path, monkeypatch):
