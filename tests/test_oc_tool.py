@@ -24,8 +24,9 @@ BRAND = dict(
     colour_families={"BLACK": ["black"], "WHITE": ["white"]}, country_names={"IT": "Italy"},
 )
 
-CAT_COLS = list(dict.fromkeys(list(catm.REQUIRED) + ["Body HTML", "Variant Barcodes", "Variant Country of Origin",
-                                                       "Variant HS Code", catm.MADE_IN, catm.NEW_SALE, "Created At"]))
+CAT_COLS = list(dict.fromkeys(list(catm.REQUIRED) + ["Body HTML", "Variant Barcodes", "Variant Inventory Qty",
+                                                       "Variant Country of Origin", "Variant HS Code", catm.MADE_IN,
+                                                       catm.SEASON, catm.NEW_SALE, "Created At"]))
 
 MERGE_SHEET_COLS = ["ID", "Command", "Tags Command", "Tags", poxlsx.SEASON, "Variant ID", "Variant Command", "Variant Cost"]
 
