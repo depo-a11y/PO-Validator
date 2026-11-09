@@ -84,6 +84,10 @@ MUTANTS = [
     ("oc/catalog.py", '"Variant Compare At Price", AVAILABLE], "Inventory / Variants")',
      '"Variant Compare At Price"], "Inventory / Variants")', "Variant Inventory Qty not required"),
     ("oc/catalog.py", "available=money(r[AVAILABLE]) or 0", "available=0", "restatement ignores available stock"),
+    ("oc/catalog.py", """                + f'. Make the export again in Matrixify with the preset "{EXPORT_PRESET}". If that preset is '
+                  "not there, ask Colwyn.")""",
+     """                + ". Export the brand's products again from Matrixify with these columns ticked.")""",
+     "missing-column message asks for a hand-built export again (N3)"),
     # ---- no season in the export: an empty rollback cell deletes the metafield (case 2026-11-09-buyer-9 N2) ----
     ("oc/finalize.py", 'SEASON: p["season"]})', 'SEASON: p["season"] or "[IGNORE]"})',
      "no-season rollback cell [IGNORE] again (keeps the new season)"),

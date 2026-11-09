@@ -35,8 +35,9 @@ Pure Python, files in and files out. Nothing here talks to Shopify, Matrixify or
 - Catalog: a Matrixify Products export (CSV, UTF-8) for the brand's vendors, all statuses, with variants,
   `Variant Cost`, `Variant Inventory Qty`, `Variant Country of Origin` and metafields in `my_fields`, `custom` and
   `global`. Required columns are `catalog.REQUIRED`, including `custom.product_season` (the rollback restores it)
-  and `Variant Inventory Qty` (the cost restatement counts available units); a missing one fails the load and
-  names the Matrixify column group to tick.
+  and `Variant Inventory Qty` (the cost restatement counts available units). Make it with the saved Matrixify
+  export preset "OC catalog: Margiela + MM6" (ask Colwyn if it is not there). A missing column fails the load,
+  naming the column and its Matrixify group, and says to make the export again with that preset.
 - Brand config: `<brand>.local.yaml`, copied from `brands/example.yaml`. It holds the cost multiplier and past
   PO paths, so it never goes in git. Marais keeps the real ones outside the repo in
   `~/Code/marais/_work/oc-brands/`; point the tool there with `export OC_BRAND_DIR=~/Code/marais/_work/oc-brands`

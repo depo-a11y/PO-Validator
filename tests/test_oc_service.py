@@ -210,6 +210,7 @@ def test_finalize_gives_no_zip_for_a_catalog_without_the_season_or_available_col
     z, checks, _ = service.finalize(_full_po(tmp_path), short, _cfg(), when=WHEN)
     assert z is None and [c["Check"] for c in checks] == ["Catalog export has the columns the tool needs"]
     assert f"'{col}' (Matrixify Products export" in checks[0]["Detail"]
+    assert 'with the preset "OC catalog: Margiela + MM6". If that preset is not there, ask Colwyn.' in checks[0]["Detail"]
 
 
 def test_finalize_reports_an_unreadable_po_as_a_fail(tmp_path):

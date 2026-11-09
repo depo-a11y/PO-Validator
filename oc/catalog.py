@@ -1,10 +1,11 @@
 """Catalog input: a Matrixify Products export (CSV) for the brand's vendors.
 
-Contract (the colleague runs the same saved Matrixify export template):
+Contract (the colleague runs the saved Matrixify export preset EXPORT_PRESET):
 UTF-8 with BOM; one row per variant; `Top Row` = true on a product's first row,
 and product-level fields are filled only there, so they are forward-filled by ID.
 Required columns are listed in REQUIRED, and a missing one fails the load naming
-the Matrixify column group it is ticked in (GROUP). The product-level join key is
+the column and its Matrixify column group (GROUP), and says to make the export
+again with the preset rather than pick columns by hand. The product-level join key is
 `Metafield: my_fields.manufacture_code [single_line_text_field]`. The season and
 `Variant Inventory Qty` are required because finalize's rollback restores the
 season from this export and its cost restatement counts available units from it.
@@ -24,6 +25,7 @@ MADE_IN = "Metafield: custom.made_in [single_line_text_field]"
 SEASON = "Metafield: custom.product_season [single_line_text_field]"
 NEW_SALE = "Metafield: custom.new_sale [single_line_text_field]"
 AVAILABLE = "Variant Inventory Qty"
+EXPORT_PRESET = "OC catalog: Margiela + MM6"
 
 # Each required column and the column group of the Matrixify Products export it is ticked in.
 GROUP = {
@@ -111,7 +113,8 @@ def load(path):
             raise CatalogError(
                 "catalog export is missing columns: "
                 + "; ".join(f"'{c}' (Matrixify Products export, {GROUP[c]} group)" for c in missing)
-                + ". Export the brand's products again from Matrixify with these columns ticked.")
+                + f'. Make the export again in Matrixify with the preset "{EXPORT_PRESET}". If that preset is '
+                  "not there, ask Colwyn.")
         rows = list(reader)
 
     products = {}

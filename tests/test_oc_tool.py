@@ -449,7 +449,11 @@ def test_a_catalog_without_the_season_or_available_column_fails_naming_it_and_it
     path = _write_catalog(tmp_path / "short.csv", _split_rows(), [c for c in CAT_COLS if c != col])
     with pytest.raises(catm.CatalogError) as e:
         catm.load(path)
-    assert f"missing columns: '{col}' (Matrixify Products export, {group} group)." in str(e.value)
+    msg = str(e.value)
+    assert f"missing columns: '{col}' (Matrixify Products export, {group} group)." in msg
+    assert msg.endswith('. Make the export again in Matrixify with the preset "OC catalog: Margiela + MM6". '
+                        "If that preset is not there, ask Colwyn.")
+    assert "tick" not in msg
 
 
 def _by(checks, prefix):

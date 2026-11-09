@@ -19,7 +19,7 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from oc import brand as brandm, service  # noqa: E402
+from oc import brand as brandm, catalog as catm, service  # noqa: E402
 
 st.set_page_config(page_title="Order confirmation to PO", layout="wide")
 
@@ -173,7 +173,8 @@ with col1:
             st.login()
 with col2:
     up = st.file_uploader("Catalog export (Matrixify Products CSV)", type=["csv"], key="w_catalog",
-                          help="The brand's products from Matrixify: all statuses, with variants and metafields.")
+                          help=f'Made in Matrixify with the export preset "{catm.EXPORT_PRESET}". '
+                               "If that preset is not there, ask Colwyn.")
     if up is not None:
         S["catalog"] = (up.name, up.getvalue())
     elif S.get("catalog"):
