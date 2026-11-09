@@ -109,7 +109,7 @@ def parse(pdf_path):
                 d["total_incl_vat"] = num(v.group(1))
     for d in docs:
         problems += _read(d, d.pop("_stream"))
-        d["issuer"], d["label"] = "adidas AG", label_of(d["lines"])
+        d["issuer"], d["label"] = "adidas AG", doc_label(d)
     return docs, problems + gate_problems(docs)
 
 
@@ -118,6 +118,11 @@ def parse(pdf_path):
 # account and one real confirmation carries no label in it at all.
 LABELS = (("Y-3", re.compile(r"Y-3\b")), ("Willy Chavarria", re.compile(r"(?:WC|Willy Chavarria)\b")),
           ("RS", re.compile(r"RS\b")))
+
+
+def doc_label(d):
+    """Also applied to an AI read of an adidas brand, so both readers are held to the same oc_label rule."""
+    return label_of(d["lines"])
 
 
 def label_of(lines):

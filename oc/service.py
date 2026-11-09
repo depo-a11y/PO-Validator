@@ -120,6 +120,11 @@ def read_oc(oc_path, brand_cfg, reader=None, ai_factory=None):
             docs, warns, info = ai.read(oc_path, brand_cfg, factory=ai_factory)
         except ai.ReadRefused as e:
             return None, [ai.reader_check(e.info, refused=True)] + e.checks, e.info
+        own = getattr(importlib.import_module(f".adapters.{brand_cfg['adapter']}", __package__), "doc_label", None) \
+            if brand_cfg["adapter"] in brandm.FIXED else None
+        if own:
+            for d in docs:
+                d["label"] = own(d)   # the brand's own reader's label rule, on what the AI read
         wrong = identity_problems(docs, brand_cfg, oc_path, issuer=False)
         if wrong:
             return None, [ai.reader_check(info, refused=True), _check(IDENTITY_CHECK, "FAIL", wrong)], info

@@ -23,7 +23,7 @@ LAYOUT_WORDS = {"otb": "Maison Margiela, MM6", "admilano": "AD Milano", "adidas"
 
 def _catalog(tmp_path):
     rows = [base._variant("1", "Replica Sneaker in White", "MEN SHOES SNEAKERS", "Active", "S99WS0001P0001 101",
-                          "WHITE", s, f"MMFW26{100 + i}", "800.00", "800.00", "310.00", i == 0)
+                          "WHITE", s, f"ZXFW26{100 + i}", "800.00", "800.00", "310.00", i == 0)
             for i, s in enumerate(["40", "41", "42"])]
     return base._write_catalog(tmp_path / "catalog.csv", rows, base.CAT_COLS)
 
@@ -109,7 +109,7 @@ def test_every_fixed_reader_refuses_an_oc_in_another_currency(monkeypatch, curre
 
 def test_a_real_usd_layout_is_refused_for_a_eur_brand(tmp_path):
     pdf = oc_synth.fog_pdf(str(tmp_path / "fog.pdf"))
-    fog_cfg = dict(base.BRAND, adapter="fog", oc_supplier=["TEST Essentials"])
+    fog_cfg = dict(base.BRAND, adapter="fog", oc_supplier=["TEST Essentials"], oc_label=None)
     docs, checks, _ = service.read_oc(pdf, dict(fog_cfg, cost_currency="EUR"))
     assert docs is None and [c["Check"] for c in service.fails(checks)] == [service.CURRENCY_CHECK]
     docs, checks, _ = service.read_oc(pdf, dict(fog_cfg, cost_currency="USD"))
@@ -144,7 +144,7 @@ def test_a_eur_draft_keeps_the_euro_format():
 def test_complete_checks_and_writes_cost_price_in_the_brand_currency(tmp_path):
     cat = base.catm.load(_catalog(tmp_path))
     row = {"Command": "MERGE", "Title": "Replica Sneaker in White", "Vendor": "EXAMPLE USD BRAND",
-           "Type": "MEN SHOES SNEAKERS", "Option2 Value": "41", "Variant SKU": "MMFW26101", "Variant Price": 800.0,
+           "Type": "MEN SHOES SNEAKERS", "Option2 Value": "41", "Variant SKU": "ZXFW26101", "Variant Price": 800.0,
            poxlsx.CODE: "S99WS0001P0001 101", "Order Qty": 1, "Wholesale Price": 200.0, "Total Order": 200.0,
            "Variant Cost": 300.0, poxlsx.MADE_IN: "Italy"}
 

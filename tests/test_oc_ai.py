@@ -150,7 +150,7 @@ def pdf(tmp_path):
 
 
 def _cfg(**kw):
-    d = dict(base.BRAND, vendor="EXAMPLE ATELIER", adapter="ai", season="S/S 27", sku_prefix="EXSS27",
+    d = dict(base.BRAND, vendor="EXAMPLE ATELIER", adapter="ai", season="S/S 27", sku_prefix="EXSS27", oc_label=None,
              oc_supplier="Example Atelier Ltd", join_key="{style} {colour_code}",
              colour_codes={"Grey": "GR", "black": "BK"})
     d.update(kw)
@@ -494,8 +494,9 @@ def test_draft_marks_every_ai_read_value_amber_and_says_which_reader(tmp_path, p
     row = next(c for c in checks if c["Check"] == service.READER_CHECK)
     assert row["Result"] == "WARN" and "claude-opus-5-5" in row["Detail"] and "US$0.11" in row["Detail"]
     for phrase in ("Every quantity, size and price came from an AI reading", "passed the same gates",
-                   "Each line's code, colour, size names, price and line value were found in that line's part of the "
-                   "PDF text", "quantities and totals are too short to look up, so they were checked by arithmetic only",
+                   "Each line's code, colour, price and line value were found in that line's part of the PDF text, "
+                   "and its size names near the line",
+                   "quantities and totals are too short to look up, so they were checked by arithmetic only",
                    "Check every line's code, colour, sizes, quantities and price against the PDF."):
         assert phrase in row["Detail"], phrase
     assert "every code and amount" not in row["Detail"]
@@ -523,8 +524,10 @@ def test_an_unmapped_colour_is_a_fail_naming_every_one(tmp_path, pdf, key):
 
 def test_reader_ai_forces_the_ai_reader_for_an_otb_brand(tmp_path, pdf, key, monkeypatch):
     monkeypatch.setattr(service, "adapter", lambda cfg: pytest.fail("the otb reader ran"))
-    cfg = _cfg(adapter="otb", join_key=None, colour_codes={}, oc_supplier="Example Atelier Ltd")
-    fake = FakeClient(message(RESPONSE))
+    cfg = _cfg(adapter="otb", join_key=None, colour_codes={}, oc_supplier="Example Atelier Ltd", oc_label="MM")
+    read = copy.deepcopy(RESPONSE)
+    read["documents"][0]["collection"] = "MM MALE RTW AVP"
+    fake = FakeClient(message(read))
     po, review, checks = service.draft(pdf, _catalog(tmp_path), cfg, reader="ai", ai_factory=fake.factory)
     assert len(fake.calls) == 1 and po is not None
     assert set(review[review["Column"] == poxlsx.CODE]["Value"]) == {"EXJK01100% COTTON GREY", "EXTS02100% COTTON BLACK",
@@ -559,7 +562,7 @@ def test_complete_marks_a_price_taken_from_an_ai_read_amber(tmp_path):
     for l in docs[0]["lines"]:
         l["reader"] = "ai"
     row = {"Command": "MERGE", "Title": "Replica Sneaker in White", "Vendor": "MAISON MARGIELA",
-           "Type": "MEN SHOES SNEAKERS", "Option2 Value": "41", "Variant SKU": "MMFW26101", "Variant Price": 800.0,
+           "Type": "MEN SHOES SNEAKERS", "Option2 Value": "41", "Variant SKU": "ZXFW26101", "Variant Price": 800.0,
            poxlsx.CODE: "S99WS0001P0001 101", "Order Qty": 1, "Wholesale Price": 150.0, "Total Order": 150.0,
            "Variant Cost": 225.0, poxlsx.COST_PRICE: "EUR 150", poxlsx.MADE_IN: "Italy"}
     hand = tmp_path / "hand.xlsx"
@@ -579,7 +582,7 @@ def test_complete_marks_a_price_taken_from_an_ai_read_amber(tmp_path):
 
 def _write_one_product_catalog(tmp_path):
     rows = [base._variant("1", "Replica Sneaker in White", "MEN SHOES SNEAKERS", "Active", "S99WS0001P0001 101",
-                          "WHITE", s, f"MMFW26{100 + i}", "800.00", "800.00", "310.00", i == 0)
+                          "WHITE", s, f"ZXFW26{100 + i}", "800.00", "800.00", "310.00", i == 0)
             for i, s in enumerate(["40", "41", "42"])]
     return base._write_catalog(tmp_path / "cat.csv", rows, base.CAT_COLS)
 

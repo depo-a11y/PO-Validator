@@ -39,9 +39,10 @@ Pure Python, files in and files out. Nothing here talks to Shopify, Matrixify or
   from another issuer or label: every reader returns both per document (fog the issuer; admilano the issuer and
   its Brand field; adidas "adidas AG" and the label at the start of the line descriptions, Y-3, Willy Chavarria
   or RS, never the free-text Customer Order Number; otb the collection's first word). The config's `oc_supplier`
-  and `oc_label` say what it accepts: fog needs `oc_supplier` and adidas `oc_label`; otb and admilano are checked
-  when the key is set (otb, which does not parse its issuer, passes when one of the names is printed on the
-  document's pages). Every layout problem of a fixed reader (no confirmation found, a moved header, a quantity off
+  and `oc_label` say what it accepts: fog needs `oc_supplier`, adidas and otb need `oc_label` (otb: MM or MM6);
+  admilano is checked when the key is set. An AI read of a fixed-layout brand takes its label by that reader's own
+  rule (otb: the collection's first word; adidas: the description prefixes). otb, which does not parse its issuer,
+  passes the issuer check when one of the names is printed on the document's pages. Every layout problem of a fixed reader (no confirmation found, a moved header, a quantity off
   its column) says to tick "Read the OC with AI"; the arithmetic gates and discounts do not.
 - Money: Wholesale Price, Total Order and the `Variant.cost_price` metafield are in the brand's `cost_currency`.
   The metafield is written and checked as `<cost_currency> <amount>` (`EUR 34`, `USD 150`), messages are worded in
@@ -167,16 +168,24 @@ brand's `cost_currency`, the issuer is not one of the brand's `oc_supplier` name
 a number does not parse, or the AI calls it an invoice or delivery note (shipped quantities, not ordered; a
 proforma is a WARN). Before anything is sent, a PDF over 60 pages or with no text layer (a scan) is refused.
 
-Block grounding, on the text of each page in reading order: each line's style must be on the page the model
-names, after the previous line's; its price, line value, fabric and colour must be in that line's part of the text
-(from its style to the next line's style); and each size name in that part, in the gap before the line, or in
-the page's table header (some layouts print the size header above the style, once at the foot of the previous
-page). Every PDF page must belong to exactly one confirmation or be listed as a page with no order lines; a
-confirmation returned twice, a line returned more often than its style is printed, or a line on a page outside its
-confirmation is refused. Bold text drawn twice (`PPRROOFFOORRMMAA`) is matched too. Quantities and totals are too
-short to look up in the text: only the gates' arithmetic checks them. Checked against the fixed readers on the real
+Block grounding, on the words of each page in reading order (pdfplumber's default extraction and a tight one,
+x_tolerance=1, which keeps apart words the default runs together, e.g. adidas descriptions; each also with bold
+drawn twice, `PPRROOFFOORRMMAA`, collapsed): each line's style must be on the page the model names, after the
+previous line's; its price and line value must be in that line's part of the text (from its style to the next
+line's style), matched with spaces removed; its fabric and colour must be whole words there, never part of a word
+('101' is not in '510 15/10/2026'), or for a value of five or more letters whole words in order that spell it (a
+cell wrapped over lines, even mid-word); and each size name must be a word or the head of a size cell ('S/3') near
+the line: in that part, in the gap before it, or in the page's table header. Every PDF page must belong to exactly
+one confirmation or be listed as a page with no order lines, and each page so listed is checked on its own: it must
+not print a number shaped like a returned confirmation number, after the same words, that was not returned, nor a
+style-shaped code with two or more amounts in the confirmation's money format. A confirmation returned twice, a line
+returned more often than its style is printed, or a line on a page outside its confirmation is refused. Quantities
+and totals are too short to look up in the text: only the gates' arithmetic checks them. Checked against the fixed readers on the real
 PDFs, style -> price -> value -> next style holds on every line of otb (88), admilano (54), adidas (119) and fog
-(52); fog prints 3 lines' size header before the style, hence the size-name region.
+(52); fog prints 3 lines' size header before the style, hence the size-name region. True transcriptions of all 25
+real files (those plus 3 FCW sales orders) raise no FAIL, whether pages without lines are given to their
+confirmation or declared empty; dropping any of the Margiela OC's 7 confirmations, or any page with lines, is
+refused.
 
 What no gate catches: a quantity read under the wrong size. So every value from an AI read is source
 `OC (AI read)` in the Review sheet, shaded amber (never green), its Why reads "read by AI from <doc> line <n>";

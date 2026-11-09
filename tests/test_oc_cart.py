@@ -73,7 +73,7 @@ def _catalog(tmp_path, body="<p>Composition: 100% Calf Leather</p>"):
     for i, size in enumerate(["40", "41", "42"]):
         r = {c: "" for c in CAT_COLS}
         r.update({"ID": "1", "Variant ID": f"1{size}", "Option1 Name": "Colour", "Option1 Value": "WHITE",
-                  "Option2 Name": "Size", "Option2 Value": size, "Variant SKU": f"MMFW26{100 + i}",
+                  "Option2 Name": "Size", "Option2 Value": size, "Variant SKU": f"ZXFW26{100 + i}",
                   "Variant Price": "800.00", "Variant Compare At Price": "800.00", "Variant Cost": "310.00",
                   "Top Row": "true" if i == 0 else ""})
         if i == 0:

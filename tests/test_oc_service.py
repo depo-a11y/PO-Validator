@@ -27,7 +27,7 @@ def _catalog(tmp_path, extra=()):
     rows = []
     for i, size in enumerate(["40", "41", "42"]):
         rows.append(base._variant("1", "Replica Sneaker in White", "MEN SHOES SNEAKERS", "Active", "S99WS0001P0001 101",
-                                  "WHITE", size, f"MMFW26{100 + i}", "800.00", "800.00", "310.00", i == 0))
+                                  "WHITE", size, f"ZXFW26{100 + i}", "800.00", "800.00", "310.00", i == 0))
     rows += list(extra)
     p = tmp_path / "catalog.csv"
     with open(p, "w", encoding="utf-8-sig", newline="") as fh:
@@ -86,7 +86,7 @@ def test_draft_withholds_the_workbook_on_a_fail_the_sheet_cannot_fix(tmp_path, o
 def test_draft_keeps_the_workbook_on_a_fail_the_reviewer_fixes(tmp_path, oc_stub):
     # The draft names the 900 colourway "Replica Sneaker in 900"; a live product already holds that handle.
     taken = base._variant("9", "Replica Sneaker in 900", "MEN SHOES SNEAKERS", "Active", "S00XX0001P0001 1",
-                          "BLACK", "41", "MMFW26900", "800.00", "800.00", "310.00", True)
+                          "BLACK", "41", "ZXFW26900", "800.00", "800.00", "310.00", True)
     po, review, checks = service.draft("oc.pdf", _catalog(tmp_path, [taken]), _cfg())
     assert [c["Check"] for c in service.fails(checks)] == ["NEW title does not collide with a live handle"]
     assert service.blocking(checks) == [] and po is not None
@@ -161,7 +161,7 @@ def _full_po(tmp_path, new_title="Replica Sneaker in Black"):
              "Type": "MEN SHOES SNEAKERS", "Published": True, "Option1 Value": "WHITE", "Variant Price": 800.0,
              poxlsx.CODE: "S99WS0001P0001 101", poxlsx.MADE_IN: "Italy", "Order Qty": 1, "Total Order": 200.0}
     rows = [{k: v for k, v in r.items() if not k.startswith("_")} for r in new_rows]
-    rows += [dict(merge, **{"Option2 Value": "41", "Variant SKU": "MMFW26101"}),
+    rows += [dict(merge, **{"Option2 Value": "41", "Variant SKU": "ZXFW26101"}),
              dict(merge, **{"Option2 Value": "43", "Variant SKU": "MMSS27101"})]
     po = tmp_path / "full_po.xlsx"
     base._hand_po(po, rows)
@@ -257,7 +257,7 @@ def test_one_run_id_on_every_file_of_the_zip_and_first_in_the_checks(tmp_path):
 
 
 # ---- brand config without a file -----------------------------------------------
-REQ = dict(vendor="X", adapter="otb", season="S/S 27", sku_prefix="XX", cost_multiplier=1.5,
+REQ = dict(vendor="X", adapter="otb", oc_label="MM", season="S/S 27", sku_prefix="XX", cost_multiplier=1.5,
            cost_currency="EUR", margin_floor=2.5)
 
 

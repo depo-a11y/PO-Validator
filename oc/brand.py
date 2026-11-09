@@ -21,8 +21,9 @@ past POs uploaded on the page can still be matched to their season labels.
 Which OCs a config accepts: `oc_supplier` names the issuer as printed and `oc_label` the
 label, for an issuer with several (adidas AG: Y-3, Willy Chavarria, RS). Every reader
 returns both per document and an OC that does not match the config is refused. fog needs
-`oc_supplier` (one reader for FOG Essentials and Fear of God LLC) and adidas needs
-`oc_label`; for the other readers the check runs when the key is set.
+`oc_supplier` (one reader for FOG Essentials and Fear of God LLC); adidas and otb need
+`oc_label` (otb's is the collection's first word: MM or MM6); for admilano and ai the
+check runs when the key is set.
 
 `adapter` picks the OC reader: a built-in reader for one known layout (`otb` Maison
 Margiela/MM6, `admilano` AD Milano, `adidas` adidas AG, `fog` Fear of God) or `ai` (any
@@ -79,6 +80,8 @@ AI_NEEDS = {
 
 # Fixed readers that serve several brands: the config must say which one it accepts.
 FIXED_NEEDS = {
+    "otb": {"oc_label": "oc_label: the first word of this brand's OC collections (MM for Maison Margiela, MM6 for "
+                        "MM6); one OTB reader serves both, so the config says which it accepts"},
     "fog": {"oc_supplier": "oc_supplier: the issuer printed on this brand's OCs (FOG Essentials or Fear of God LLC); "
                            "one reader serves both, so the config says which it accepts"},
     "adidas": {"oc_label": "oc_label: the label printed at the start of this brand's line descriptions (Y-3, "

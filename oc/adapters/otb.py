@@ -165,8 +165,15 @@ def parse(pdf_path):
     out = list(docs.values())
     for d in out:
         d["gender"] = collection_gender(d["collection"])
-        d["label"] = (d["collection"] or "").split()[0] if d["collection"] else None   # "MM" (an oc_label check)
+        d["label"] = doc_label(d)
     return out, problems + gate_problems(out)
+
+
+def doc_label(d):
+    """The label a confirmation is for: its collection's first word ("MM" for Maison Margiela, "MM6" for MM6).
+    Also applied to an AI read of an otb brand, so both readers are held to the same oc_label rule."""
+    words = (d.get("collection") or "").split()
+    return words[0] if words else None
 
 
 def gate_problems(docs):

@@ -54,7 +54,7 @@ SUPPLIER_CHECK = "Order confirmation is from this brand's supplier"
 CURRENCY_CHECK = "Order confirmation is in the brand's cost currency"
 SIZES_CHECK = "Order confirmation prints a quantity under each size"
 NUMBERS_CHECK = "Every number the AI read is a printed amount the tool can parse"
-GROUNDING_CHECK = "Each line's code, colour, size names, price and value are in that line's part of the PDF"
+GROUNDING_CHECK = "Each line's code, colour, price and value are in that line's part of the PDF, its size names near it"
 PAGES_CHECK = "Every page and confirmation is read exactly once"
 TEXT_CHECK = "The PDF has text to check the AI reading against"
 KIND_CHECK = "Document is an order confirmation"
@@ -282,12 +282,13 @@ def parse_int(text):
 
 
 # ---- grounding ------------------------------------------------------------------------
-def pdf_pages(path):
-    """Each page's text layer in pdfplumber's reading order; None when the PDF cannot be opened."""
+def pdf_pages(path, **extract):
+    """Each page's text layer in pdfplumber's reading order; None when the PDF cannot be opened. `extract` goes to
+    extract_text (x_tolerance=1 keeps words apart that the default runs together)."""
     try:
         import pdfplumber
         with pdfplumber.open(path) as pdf:
-            return [p.extract_text() or "" for p in pdf.pages]
+            return [p.extract_text(**extract) or "" for p in pdf.pages]
     except Exception:
         return None
 
@@ -322,24 +323,74 @@ class Haystack:
         return bool(n) and any(n in h for h in self.hays)
 
 
-class Pages:
-    """The PDF's text, page by page, flattened (no whitespace, case-folded), as printed and with doubled bold
-    glyphs collapsed. Block grounding runs on each variant and a line passes if it passes on either."""
+def _run_end(toks, i, flat):
+    """End index of the run of words from toks[i] whose concatenation is `flat`, else -1."""
+    acc = ""
+    for j in range(i, len(toks)):
+        acc += toks[j]
+        if acc == flat:
+            return j + 1
+        if not flat.startswith(acc):
+            return -1
+    return -1
 
-    def __init__(self, pages):
+
+def find_run(toks, value, lo, hi):
+    """First index in [lo, hi) where whole words spell `value` (spaces between them ignored), else -1. Never a
+    part of a word: '101' is not in '510 15/10/2026'."""
+    flat = _flat(value)
+    if not flat:
+        return -1
+    return next((i for i in range(max(lo, 0), min(hi, len(toks))) if _run_end(toks, i, flat) > 0), -1)
+
+
+def has_words(toks, value):
+    """`value` as whole words of toks: one run of adjacent words; or, for a value with five or more letters, whole
+    words in order that spell it with other words between them (a table cell wrapped over lines, even mid-word:
+    'VINTAG' ... 'E BLACK'). A short code such as '101' must be one run, never pieced together."""
+    flat = _flat(value)
+    if not flat:
+        return False
+    if find_run(toks, value, 0, len(toks)) >= 0:
+        return True
+    if sum(c.isalpha() for c in flat) < 5:
+        return False
+    reach = {0}
+    for t in toks:
+        reach |= {k + len(t) for k in reach if flat.startswith(t, k)}
+        if len(flat) in reach:
+            return True
+    return False
+
+
+def has_size(toks, label):
+    """A size name as a whole word, or as the head of a size/quantity cell ('S/3' holds S)."""
+    lab = _flat(label)
+    cell = re.compile(re.escape(lab) + r"/\d+")
+    return bool(lab) and (any(t == lab or cell.fullmatch(t) for t in toks) or find_run(toks, label, 0, len(toks)) >= 0)
+
+
+class Pages:
+    """The PDF's words page by page, case-folded: from pdfplumber's default extraction and, when given, a tight
+    one (x_tolerance=1, which keeps words apart where the default runs them together), each as printed and with
+    doubled bold glyphs collapsed. Codes, colours and size names must be whole words or whole runs of words;
+    amounts are matched with the spaces of their part removed ('€ 1,488.60'). Each line is judged on the variant
+    that misses least overall."""
+
+    def __init__(self, pages, tight=None):
         self.n = len(pages)
         self.variants = []
-        for tidy in (lambda t: t, undouble):
-            flats = [_flat(tidy(t)) for t in pages]
-            starts, pos = [], 0
-            for f in flats:
-                starts.append(pos)
-                pos += len(f)
-            self.variants.append(("".join(flats), starts + [pos]))
+        for texts in [pages] + ([tight] if tight and len(tight) == len(pages) else []):
+            for tidy in (lambda t: t, undouble):
+                toks, starts = [], []
+                for t in texts:
+                    starts.append(len(toks))
+                    toks += tidy(t).casefold().split()
+                self.variants.append((toks, starts + [len(toks)]))
 
-    def page_text(self, v, page):
-        text, starts = self.variants[v]
-        return text[starts[page - 1]:starts[page]] if 1 <= page <= self.n else ""
+    def page_tokens(self, v, page):
+        toks, starts = self.variants[v]
+        return toks[starts[page - 1]:starts[page]] if 1 <= page <= self.n else []
 
     def misses(self, raw):
         """Per line (document order), what is not where it should be, on the variant that misses least."""
@@ -352,37 +403,110 @@ class Pages:
         return lines, best
 
     def _misses(self, v, lines):
-        text, starts = self.variants[v]
+        toks, starts = self.variants[v]
         pos, found = 0, []
         for d, i, l in lines:
-            page, style = l["page"], _flat(l["style"])
-            j = -1
-            if style and 1 <= page <= self.n:
-                j = text.find(style, max(pos, starts[page - 1]), starts[page])
+            page, j = l["page"], -1
+            if 1 <= page <= self.n:
+                j = find_run(toks, l["style"], max(pos, starts[page - 1]), starts[page])
             found.append(j)
             if j >= 0:
-                pos = j + len(style)
+                pos = j + 1
         out = []
         for k, ((d, i, l), j) in enumerate(zip(lines, found)):
             miss = []
             if j < 0:
                 out.append([f"style '{l['style']}' is not on page {l['page']} after the previous line"])
                 continue
-            end = next((x for x in found[k + 1:] if x >= 0), len(text))
-            block = text[j:end]
-            for field, amount in (("price_text", True), ("line_value_text", True), ("fabric", False), ("colour", False)):
-                val = l[field]
-                if val is not None and _flat(_bare(val) if amount else val) not in block:
-                    miss.append(f"{field.replace('_text', '').replace('_', ' ')} '{val}'")
+            end = next((x for x in found[k + 1:] if x >= 0), len(toks))
+            block = toks[j:end]
+            joined = "".join(block)
+            for field in ("price_text", "line_value_text"):
+                if l[field] is not None and _flat(_bare(l[field])) not in joined:
+                    miss.append(f"{field.replace('_text', '').replace('_', ' ')} '{l[field]}'")
+            for field in ("fabric", "colour"):
+                if l[field] is not None and not has_words(block, l[field]):
+                    miss.append(f"{field} '{l[field]}'")
             page_start = starts[l["page"] - 1]
             first = min([x for x in found if page_start <= x < starts[l["page"]]] or [j])
             prev = max([x for x in found[:k] if x >= 0] or [page_start])
-            region = text[min(prev, j):end] + text[page_start:first]
+            near = toks[min(prev, j):end] + toks[page_start:first]
             for sz in l["sizes"]:
-                if _flat(sz["size"]) not in region:
-                    miss.append(f"size '{sz['size']}'")
+                if not has_size(near, sz["size"]):
+                    miss.append(f"size '{sz['size']}' (not near the line)")
             out.append(miss)
         return out
+
+
+def _shape(text, exact_digits=False):
+    r"""A regex for text of the same shape: digit runs as digits, letters as letters of their case, spaces as
+    spaces, anything else as itself. 'SS - 2027/01-62-3009' -> 'SS\s+-\s+\d+/\d+-\d+-\d+'."""
+    out = []
+    for run in re.findall(r"\d+|[A-Z]+|[a-z]+|\s+|.", str(text)):
+        if run.isdigit():
+            out.append(rf"\d{{{len(run)}}}" if exact_digits else r"\d+")
+        elif run.isspace():
+            out.append(r"\s+")
+        elif run.isalpha() and exact_digits:
+            out.append(rf"[A-Z]{{{len(run)}}}" if run.isupper() else rf"[a-z]{{{len(run)}}}")
+        else:
+            out.append(re.escape(run))
+    return "".join(out)
+
+
+def _money_shape(raw):
+    """The confirmation's amount format, from the amounts the AI returned: '1.446,00' -> dot thousands, comma
+    decimals."""
+    import collections
+    marks = collections.Counter()
+    for d in raw:
+        for l in d["lines"]:
+            for v in (l["price_text"], l["line_value_text"]):
+                m = re.fullmatch(r"([\d.,'’]*?)([.,])\d{2}", _bare(v or ""))
+                if m:
+                    groups = set(re.findall(r"[.,'’]", m.group(1)))
+                    marks[(m.group(2), next(iter(groups)) if groups else None)] += 1
+    if not marks:
+        return None
+    dec = collections.Counter(d for d, _ in marks.elements()).most_common(1)[0][0]
+    grp = next((g for (d, g) in marks if d == dec and g), None)
+    body = rf"(?:\d{{1,3}}(?:{re.escape(grp)}\d{{3}})+|\d+)" if grp else r"\d+"
+    return re.compile(body + re.escape(dec) + r"\d{2}")
+
+
+def unclaimed_problems(data, pages):
+    """Each page the AI declared to have no order lines, checked on its own against the PDF text: it must not
+    print a confirmation number (shaped like a returned one, after the same words) that was not returned, nor a
+    style-shaped code with two or more amounts in the confirmation's money format."""
+    raw, out = data["documents"], []
+    returned = {_flat(d["number"]) for d in raw}
+    numbers = set()
+    for d in raw:
+        exact = r"\s*".join(re.escape(c) for c in _flat(d["number"]))
+        for p in sorted(set(d["pages"])):
+            m = re.search(exact, pages[p - 1], re.I) if 1 <= p <= len(pages) and exact else None
+            if m:
+                ctx = pages[p - 1][:m.start()].split()[-2:]
+                numbers.add("".join(_shape(w) + r"\s+" for w in ctx) + "(?P<num>" + _shape(d["number"]) + r")(?!\w)")
+                break
+    styles = {_shape(l["style"], exact_digits=True) for d in raw for l in d["lines"] if l["style"]}
+    money = _money_shape(raw)
+    for p in sorted(set(data.get("pages_without_lines") or [])):
+        if not 1 <= p <= len(pages):
+            continue
+        text = pages[p - 1]
+        for pat in numbers:
+            for m in re.finditer(pat, text, re.I):
+                if _flat(m.group("num")) not in returned:
+                    out.append(f"page {p} prints confirmation number '{m.group('num')}', which was not returned "
+                               "(it was listed as a page with no order lines)")
+        words = text.split()
+        code = next((w for w in words if any(re.fullmatch(s, w) for s in styles)), None)
+        amounts = [w for w in words if money and money.fullmatch(_bare(w))]
+        if code and len(amounts) >= 2:
+            out.append(f"page {p} prints order lines (code '{code}' and {len(amounts)} amounts) but was listed as "
+                       "having none")
+    return out
 
 
 # ---- reading ------------------------------------------------------------------------------
@@ -414,18 +538,20 @@ def page_problems(data, pages):
         if off:
             out.append(f"{d['number']}: lines on page(s) {off}, which are not among its pages {d['pages']}")
         keys = collections.Counter((l["style"], l["fabric"], l["colour"]) for l in d["lines"])
-        doc_text = "".join(pages.page_text(0, p) for p in sorted(set(d["pages"])))
+        doc_toks = [t for p in sorted(set(d["pages"])) for t in pages.page_tokens(0, p)]
         for (style, fabric, colour), c in keys.items():
-            printed = doc_text.count(_flat(style)) if _flat(style) else 0
+            flat = _flat(style)
+            printed = sum(1 for i in range(len(doc_toks)) if flat and _run_end(doc_toks, i, flat) > 0)
             if c > 1 and printed < c:
                 out.append(f"{d['number']}: line {style} {fabric or ''} {colour or ''} returned {c} times but its "
                            f"style is printed {printed} time(s)")
     return out
 
 
-def interpret(data, brand_cfg, pages):
+def interpret(data, brand_cfg, pages, tight=None):
     """Model JSON -> (docs, fails, warns). docs have the otb shape plus reader='ai' on every line.
-    `pages` is the PDF's text page by page (a single string counts as one page)."""
+    `pages` is the PDF's text page by page (a single string counts as one page); `tight` the same with words kept
+    apart (pdfplumber x_tolerance=1)."""
     if isinstance(pages, str):
         pages = [pages]
     fails, warns = [], []
@@ -508,16 +634,20 @@ def interpret(data, brand_cfg, pages):
         fails.append(_check(CURRENCY_CHECK, "FAIL", f"{'; '.join(off)}, but the brand's cost currency is {want}. "
                                                     "Check you picked the right brand and document."))
 
-    pg = Pages(pages)
-    dup = page_problems(data, pg)
+    pg = Pages(pages, tight)
+    dup = page_problems(data, pg) + unclaimed_problems(data, pages)
     if dup:
         fails.append(_check(PAGES_CHECK, "FAIL", "; ".join(dup[:10])))
     missing = []
+    empty = set(data.get("pages_without_lines") or [])
     for d in raw:
         doc_hay = Haystack("\n".join(pages[p - 1] for p in sorted(set(d["pages"])) if 1 <= p <= pg.n))
         if not doc_hay.has(d["number"]):
             missing.append(f"{d['number']}: document number not on its pages")
-        if d["net_total_text"] is not None and not doc_hay.has(d["net_total_text"], amount=True):
+        # a totals page with no order lines may be declared empty: the net total may be there, never on another
+        # confirmation's pages (the gates check it by arithmetic as well)
+        total_hay = Haystack("\n".join(pages[p - 1] for p in sorted(set(d["pages"]) | empty) if 1 <= p <= pg.n))
+        if d["net_total_text"] is not None and not total_hay.has(d["net_total_text"], amount=True):
             missing.append(f"{d['number']}: net total '{d['net_total_text']}' not on its pages")
     lines, misses = pg.misses(raw)
     for (d, i, l), miss in zip(lines, misses):
@@ -577,7 +707,7 @@ def read(pdf_path, brand_cfg, factory=None):
     info.update(raw=data, supplier=data.get("supplier") if isinstance(data, dict) else None,
                 document_kind=data.get("document_kind") if isinstance(data, dict) else None)
     try:
-        docs, fails, warns = interpret(data, brand_cfg, pages)
+        docs, fails, warns = interpret(data, brand_cfg, pages, pdf_pages(pdf_path, x_tolerance=1))
     except (KeyError, TypeError, AttributeError) as e:
         raise ReadRefused([_check(READ_CHECK, "FAIL", f"the AI's answer did not have the expected shape "
                                                       f"({type(e).__name__}: {e}); nothing from it was used")],
@@ -605,6 +735,7 @@ def reader_check(info, refused=False):
                                                    "was used; the request is still paid for.")
     return _check(READER_CHECK, "WARN", head + (
         "Every quantity, size and price came from an AI reading. It passed the same gates as the built-in reader. "
-        "Each line's code, colour, size names, price and line value were found in that line's part of the PDF "
-        "text; quantities and totals are too short to look up, so they were checked by arithmetic only. "
+        "Each line's code, colour, price and line value were found in that line's part of the PDF text, and its "
+        "size names near the line; quantities and totals are too short to look up, so they were checked by "
+        "arithmetic only. "
         + CHECK_EVERY_LINE))

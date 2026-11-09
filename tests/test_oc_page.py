@@ -65,7 +65,7 @@ def _page_with_brand(tmp_path, monkeypatch, extra):
 
 @pytest.mark.parametrize("name", ["otb", "admilano", "adidas", "fog"])
 def test_a_fixed_reader_brand_offers_the_ai_reader_off_by_default(tmp_path, monkeypatch, name):
-    who = "oc_label: Y-3\n" if name == "adidas" else ""
+    who = {"adidas": "oc_label: Y-3\n", "otb": "oc_label: MM\n"}.get(name, "")
     at = _page_with_brand(tmp_path, monkeypatch, f"adapter: {name}\noc_supplier: X Ltd\n{who}")
     (box,) = [c for c in at.checkbox if c.label == "Read the OC with AI (for a layout the tool does not know)"]
     assert box.value is False and "no order confirmations found" in box.help
@@ -79,7 +79,7 @@ def test_an_ai_brand_says_its_ocs_are_always_read_by_ai(tmp_path, monkeypatch):
 
 
 def test_the_brand_not_listed_expander_says_what_a_config_holds(tmp_path, monkeypatch):
-    at = _page_with_brand(tmp_path, monkeypatch, "adapter: otb\n")
+    at = _page_with_brand(tmp_path, monkeypatch, "adapter: otb\noc_label: MM\n")
     (exp,) = [e for e in at.expander if e.label == "My brand is not in the list"]
     text = " ".join(m.value for m in exp.markdown)
     for needle in ("needs a brand config before it can read", "Colwyn makes it from example.yaml",
@@ -89,7 +89,7 @@ def test_the_brand_not_listed_expander_says_what_a_config_holds(tmp_path, monkey
 
 
 def test_after_a_draft_the_page_says_which_reader_was_used(tmp_path, monkeypatch):
-    at = _page_with_brand(tmp_path, monkeypatch, "adapter: otb\n")
+    at = _page_with_brand(tmp_path, monkeypatch, "adapter: otb\noc_label: MM\n")
     ai_row = dict(Check="Order confirmation reader", Result="WARN",
                   Detail="read by AI (claude-opus-5-5) in 40 s, about US$0.50. A quantity read under the wrong size "
                          "passes every gate, so check each line's sizes against the PDF.")
@@ -107,7 +107,7 @@ def test_after_a_draft_the_page_says_which_reader_was_used(tmp_path, monkeypatch
 
 
 def test_the_ai_box_is_off_for_a_brand_with_no_oc_supplier(tmp_path, monkeypatch):
-    at = _page_with_brand(tmp_path, monkeypatch, "adapter: otb\n")
+    at = _page_with_brand(tmp_path, monkeypatch, "adapter: otb\noc_label: MM\n")
     (box,) = [c for c in at.checkbox if c.label == "Read the OC with AI (for a layout the tool does not know)"]
     assert box.disabled
     assert any(c.value == "The AI reader is off for this brand: ask Colwyn to add oc_supplier to this brand's config."
@@ -130,7 +130,7 @@ CAP = "This browser session has used its 10 AI reads. Each one is paid for; ask 
 
 
 def test_after_ten_ai_reads_the_ai_box_is_off(tmp_path, monkeypatch):
-    at = _capped(tmp_path, monkeypatch, "adapter: otb\noc_supplier: X Ltd\n")
+    at = _capped(tmp_path, monkeypatch, "adapter: otb\noc_label: MM\noc_supplier: X Ltd\n")
     (box,) = [c for c in at.checkbox if c.label.startswith("Read the OC with AI")]
     assert box.disabled and any(c.value == CAP for c in at.caption)
     (build,) = [b for b in at.button if b.label == "Build draft PO"]
@@ -150,7 +150,7 @@ def test_below_the_cap_an_ai_brand_shows_no_cap_message(tmp_path, monkeypatch):
 
 
 def test_the_expander_names_the_built_in_readers_before_ai(tmp_path, monkeypatch):
-    at = _page_with_brand(tmp_path, monkeypatch, "adapter: otb\n")
+    at = _page_with_brand(tmp_path, monkeypatch, "adapter: otb\noc_label: MM\n")
     (exp,) = [e for e in at.expander if e.label == "My brand is not in the list"]
     text = " ".join(m.value for m in exp.markdown)
     assert ("the built-in one if the brand's OCs are one of the known layouts (Margiela/MM6, AD Milano, adidas, "

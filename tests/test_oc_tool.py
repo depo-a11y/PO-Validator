@@ -14,7 +14,7 @@ from oc.resolve import Resolver
 from oc.util import norm_size, join_key, sort_sizes
 
 BRAND = dict(
-    vendor="MAISON MARGIELA", adapter="otb", season="S/S 27", sku_prefix="MMSS27", sku_digits=3,
+    vendor="MAISON MARGIELA", adapter="otb", oc_label="MM", season="S/S 27", sku_prefix="MMSS27", sku_digits=3,
     cost_currency="EUR", cost_multiplier=1.5, margin_floor=2.25, price_round=50, status="Active",
     published_new=False, published_merge=True, new_sale="NEW", option1_name="Colour", option2_name="Size",
     title_tag="{vendor} - {title} |MARAIS",
@@ -50,13 +50,13 @@ def catalog_path(tmp_path):
     rows = []
     for i, size in enumerate(["40", "41", "42"]):
         rows.append(_variant("1", "Replica Sneaker in White", "MEN SHOES SNEAKERS", "Active", "S99WS0001P0001 101",
-                             "WHITE", size, f"MMFW26{100 + i}", "800.00", "800.00", "310.00", i == 0, new_sale="CORE"))
+                             "WHITE", size, f"ZXFW26{100 + i}", "800.00", "800.00", "310.00", i == 0, new_sale="CORE"))
     for i, size in enumerate(["40", "41"]):
         rows.append(_variant("2", "Replica Sneaker in White", "MEN SHOES SNEAKERS", "Archived", "S99WS0001P0001 101",
                              "WHITE", size, f"MMSS25{100 + i}", "900.00", "900.00", "400.00", i == 0))
     for i, size in enumerate(["S", "M"]):
         rows.append(_variant("3", "Logo Tee in Black", "MEN CLOTHING T-SHIRTS SHORT SLEEVE", "Active", "S98GC0003S00003 900",
-                             "BLACK", size, f"MMFW26{200 + i}", "560.00", "800.00", "250.00", i == 0))
+                             "BLACK", size, f"ZXFW26{200 + i}", "560.00", "800.00", "250.00", i == 0))
     p = tmp_path / "catalog.csv"
     with open(p, "w", encoding="utf-8-sig", newline="") as fh:
         w = csv.DictWriter(fh, fieldnames=CAT_COLS)
@@ -67,7 +67,7 @@ def catalog_path(tmp_path):
 
 def _docs():
     return [dict(doc="SS - 1", collection="MM MALE SHOES AVP", gender="MEN", total_qty=6, net=1200.0,
-                 currency="European Euro", lines=[
+                 currency="European Euro", label="MM", lines=[
         dict(line_no=1, style="S99WS0001", fabric="P0001", colour="101", product_class="SNEAKERS",
              sizes={"41": 1, "43": 1}, qty=2, price=200.0, line_value=400.0),
         dict(line_no=2, style="S99WS0001", fabric="P0001", colour="900", product_class="SNEAKERS",
@@ -120,7 +120,7 @@ def test_draft_merge_and_new(catalog_path):
     new = [r for r in rows if r["Command"] == "NEW"]
     assert {r["Option2 Value"] for r in merge} == {"40", "41", "42", "43"}
     assert next(r for r in merge if r["Option2 Value"] == "43")["Variant SKU"].startswith("MMSS27")
-    assert next(r for r in merge if r["Option2 Value"] == "41")["Variant SKU"] == "MMFW26101"
+    assert next(r for r in merge if r["Option2 Value"] == "41")["Variant SKU"] == "ZXFW26101"
     assert {r["Title"] for r in new} == {"Replica Sneaker in 900"}
     assert new[0]["Type"] == "MEN SHOES SNEAKERS"
     assert new[0]["Variant Price"] == 800
@@ -195,7 +195,7 @@ def test_complete_keeps_human_cells_and_finalize_is_safe(catalog_path, tmp_path)
                   **{"Option1 Value": "WHITE", "Option2 Value": s, "Variant SKU": sku, "Variant Price": 800.0,
                      poxlsx.CODE: "S99WS0001P0001 101", "Order Qty": q, "Total Order": q * 200.0,
                      poxlsx.MADE_IN: "-"})
-             for s, sku, q in (("41", "MMFW26101", 1), ("43", None, 1))]
+             for s, sku, q in (("41", "ZXFW26101", 1), ("43", None, 1))]
     new = [dict(base, Command="NEW", Title="Replica Sneaker in Black", Type="MEN SHOES SNEAKERS", Published=False,
                 **{"Option1 Value": "BLACK", "Option2 Value": float(s), poxlsx.CODE: "S99WS0001P0001 900",
                    "Order Qty": q, "Total Order": q * 200.0, poxlsx.MADE_IN: "-", "Body HTML": "<p>hand</p>",
@@ -212,7 +212,7 @@ def test_complete_keeps_human_cells_and_finalize_is_safe(catalog_path, tmp_path)
     assert by[("NEW", "41")]["Variant Price"] == 800
     assert by[("NEW", "41")]["_raw"]["Variant Compare At Price"].startswith("=P")
     assert by[("MERGE", "43")]["Variant SKU"].startswith("MMSS27")
-    assert by[("MERGE", "41")]["Variant SKU"] == "MMFW26101"
+    assert by[("MERGE", "41")]["Variant SKU"] == "ZXFW26101"
     assert by[("MERGE", "41")][poxlsx.MADE_IN] == "Italy"
     review = openpyxl.load_workbook(out)["Review"]
     assert review.max_row > 1
@@ -295,7 +295,7 @@ def test_raw_code_in_title():
 
 def test_brand_config_lookup_order(tmp_path, monkeypatch):
     from oc import brand as brandm
-    body = "\n".join(f"{k}: {v}" for k, v in dict(vendor="X", adapter="otb", season="S/S 27", sku_prefix="XX",
+    body = "\n".join(f"{k}: {v}" for k, v in dict(vendor="X", adapter="otb", oc_label="MM", season="S/S 27", sku_prefix="XX",
                                                     cost_multiplier=1.5, cost_currency="EUR", margin_floor=2.5).items())
     d = tmp_path / "brands"
     d.mkdir()
@@ -319,12 +319,12 @@ def _split_rows():
     rows = []
     for i, (size, (cost, qty)) in enumerate(LIVE_COSTS.items()):
         r = _variant("1", "Replica Sneaker in White", "MEN SHOES SNEAKERS", "Active", "S99WS0001P0001 101",
-                     "WHITE", size, f"MMFW26{100 + i}", "800.00", "800.00", cost, i == 0)
+                     "WHITE", size, f"ZXFW26{100 + i}", "800.00", "800.00", cost, i == 0)
         r[catm.AVAILABLE] = qty
         rows.append(r)
     for i, size in enumerate(["S", "M"]):
         rows.append(_variant("3", "Logo Tee in Black", "MEN CLOTHING T-SHIRTS SHORT SLEEVE", "Active", "S98GC0003S00003 900",
-                             "BLACK", size, f"MMFW26{200 + i}", "560.00", "800.00", "250.00", i == 0))
+                             "BLACK", size, f"ZXFW26{200 + i}", "560.00", "800.00", "250.00", i == 0))
     return rows
 
 
@@ -348,7 +348,7 @@ def _merge_po(tmp_path, po_cost=300.0, cost_price="EUR 200"):
             poxlsx.MADE_IN: "Italy", "Variant Price": 800.0, "Variant Compare At Price": 800.0,
             "Wholesale Price": 200.0, "Variant Cost": po_cost, poxlsx.COST_PRICE: cost_price, "Order Qty": 1,
             "Total Order": 200.0}
-    rows = [dict(base, **{"Option2 Value": s, "Variant SKU": sku}) for s, sku in (("41", "MMFW26101"), ("43", "MMSS27001"))]
+    rows = [dict(base, **{"Option2 Value": s, "Variant SKU": sku}) for s, sku in (("41", "ZXFW26101"), ("43", "MMSS27001"))]
     po = tmp_path / "merge-po.xlsx"
     _hand_po(po, rows)
     return str(po)
@@ -556,7 +556,7 @@ def _edited_merge_po(tmp_path):
     rows = [{k: v for k, v in r.items() if not k.startswith("_")} for r in rows]
     tee = dict(rows[0], **{"Title": "Logo Tee in Black", "Type": "MEN CLOTHING T-SHIRTS SHORT SLEEVE",
                            "Option1 Value": "BLACK", poxlsx.CODE: "S98GC0003S00003 900", "Option2 Value": "M",
-                           "Variant SKU": "MMFW26201", "Variant Price": 560.0, "Variant Compare At Price": 800.0,
+                           "Variant SKU": "ZXFW26201", "Variant Price": 560.0, "Variant Compare At Price": 800.0,
                            "Wholesale Price": 150.0, "Variant Cost": 225.0, "Total Order": 150.0})
     po = tmp_path / "edited-po.xlsx"
     _hand_po(po, rows + [tee])

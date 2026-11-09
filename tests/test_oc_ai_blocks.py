@@ -265,11 +265,11 @@ TOTAL PRICE $2,269.50"""], RAW("Example Atelier Ltd", "TC-P0001", [
 
 
 LAYOUTS["one style in two colours (a real fog order and Margiela both have one)"] = (["""ORDER # SO9000002
-1 RW00433 FLEECE 0001 BLACK S M 2 1 1 $60.00 $120.00
-2 RW00433 FLEECE 0002 GREY S M 2 1 1 $70.00 $140.00
+1 ZZ90433 FLEECE 0001 BLACK S M 2 1 1 $60.00 $120.00
+2 ZZ90433 FLEECE 0002 GREY S M 2 1 1 $70.00 $140.00
 Total Units: 4 Total Amount: $260.00"""], RAW("Example Atelier Ltd", "SO9000002", [
-    L("RW00433", "FLEECE", "0001", [("S", "1"), ("M", "1")], "2", "$60.00", "$120.00"),
-    L("RW00433", "FLEECE", "0002", [("S", "1"), ("M", "1")], "2", "$70.00", "$140.00")], "4", "$260.00", cur="USD"))
+    L("ZZ90433", "FLEECE", "0001", [("S", "1"), ("M", "1")], "2", "$60.00", "$120.00"),
+    L("ZZ90433", "FLEECE", "0002", [("S", "1"), ("M", "1")], "2", "$70.00", "$140.00")], "4", "$260.00", cur="USD"))
 
 
 def _layout_cfg(raw):
@@ -298,7 +298,7 @@ def test_each_real_layout_refuses_numbers_swapped_between_its_lines(name):
 # ---- an AI-read size the live product does not have is red ----------------------------------------
 def _catalog(tmp_path):
     rows = [base._variant("1", "Replica Sneaker in White", "MEN SHOES SNEAKERS", "Active", "S99WS0001P0001 101",
-                          "WHITE", s, f"MMFW26{100 + i}", "800.00", "800.00", "310.00", i == 0)
+                          "WHITE", s, f"ZXFW26{100 + i}", "800.00", "800.00", "310.00", i == 0)
             for i, s in enumerate(["40", "41", "42"])]
     return base._write_catalog(tmp_path / "catalog.csv", rows, base.CAT_COLS)
 
@@ -322,7 +322,7 @@ def test_an_ordered_size_the_live_product_lacks(tmp_path, ai_read, source, colou
 # ---- the brand's issuer and label, every reader --------------------------------------------------------
 def test_fog_refuses_the_other_issuer(tmp_path):
     pdf = oc_synth.fog_pdf(str(tmp_path / "fog.pdf"))
-    cfg = dict(base.BRAND, adapter="fog", cost_currency="USD", vendor="EXAMPLE OF GOD", _name="eg")
+    cfg = dict(base.BRAND, adapter="fog", cost_currency="USD", vendor="EXAMPLE OF GOD", _name="eg", oc_label=None)
     docs, checks, _ = service.read_oc(pdf, dict(cfg, oc_supplier=["TEST of God LLC"]))
     (f,) = service.fails(checks)
     assert docs is None and f["Check"] == service.IDENTITY_CHECK
@@ -348,7 +348,7 @@ def test_adidas_label_comes_from_the_line_descriptions(descs, label):
 
 def test_admilano_checks_issuer_and_label_only_when_set(tmp_path):
     pdf = oc_synth.admilano_pdf(str(tmp_path / "ad.pdf"))
-    cfg = dict(base.BRAND, adapter="admilano")
+    cfg = dict(base.BRAND, adapter="admilano", oc_label=None)
     assert service.read_oc(pdf, cfg)[0]
     assert service.read_oc(pdf, dict(cfg, oc_supplier=["AD Milano Srl"], oc_label=["Test Label"]))[0]
     _, checks, _ = service.read_oc(pdf, dict(cfg, oc_supplier=["Other Srl"]))
@@ -375,12 +375,12 @@ def test_the_ai_reader_is_held_to_the_label_too(pdf, key):
     assert service.read_oc(pdf, cfg, ai_factory=FakeClient(message(labelled)).factory)[0]
 
 
-@pytest.mark.parametrize("name,missing", [("fog", "oc_supplier"), ("adidas", "oc_label")])
+@pytest.mark.parametrize("name,missing", [("fog", "oc_supplier"), ("adidas", "oc_label"), ("otb", "oc_label")])
 def test_fog_and_adidas_configs_must_say_which_brand_they_accept(name, missing):
     with pytest.raises(brandm.BrandError, match=f"adapter: {name} needs {missing}. Add {missing}: "):
-        brandm.from_mapping(dict(base.BRAND, adapter=name), "t")
-    for ok in ("otb", "admilano"):
-        brandm.from_mapping(dict(base.BRAND, adapter=ok), "t")
+        brandm.from_mapping(dict(base.BRAND, adapter=name, oc_label=None), "t")
+    brandm.from_mapping(dict(base.BRAND, adapter="admilano", oc_label=None), "t")
+    assert brandm.from_mapping(dict(base.BRAND, adapter="otb"), "t")["oc_label"] == ["MM"]
     cfg = brandm.from_mapping(dict(base.BRAND, adapter="adidas", oc_label="Y-3"), "t")
     assert cfg["oc_label"] == ["Y-3"]
     with pytest.raises(brandm.BrandError, match="oc_label is a label name or a list"):
@@ -416,3 +416,121 @@ def test_read_without_a_brand_is_a_usage_error(capsys):
     with pytest.raises(SystemExit) as e:
         cli.main(["read", "x.pdf"])
     assert e.value.code == 2 and "give the brand: --brand-config <file.yaml> or --brand <name>" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("collection,ok", [("MM MALE RTW AVP", True), ("MM6 FEMALE RTW", False), (None, False)])
+def test_an_ai_read_of_an_otb_brand_is_held_to_otbs_label_rule(pdf, key, collection, ok):
+    """The AI's own free-text label is not used for an otb brand: the collection's first word is, as for otb."""
+    cfg = _cfg(adapter="otb", join_key=None, colour_codes={}, oc_label="MM")
+    read = copy.deepcopy(RESPONSE)
+    read["documents"][0].update(collection=collection, label="Maison Margiela")
+    docs, checks, _ = service.read_oc(pdf, cfg, reader="ai", ai_factory=FakeClient(message(read)).factory)
+    assert (docs is not None) == ok, checks
+    if not ok:
+        assert "not MM" in service.fails(checks)[0]["Detail"]
+
+
+def test_an_ai_read_of_an_adidas_brand_uses_the_description_prefixes(pdf, key):
+    cfg = _cfg(adapter="adidas", join_key=None, colour_codes={}, oc_label="Y-3")
+    read = copy.deepcopy(RESPONSE)
+    for l in read["documents"][0]["lines"]:
+        l["description"] = "Y-3 " + l["description"]
+    assert service.read_oc(pdf, cfg, reader="ai", ai_factory=FakeClient(message(read)).factory)[0]
+    plain = service.read_oc(pdf, cfg, reader="ai", ai_factory=FakeClient(message(RESPONSE)).factory)
+    assert plain[0] is None and "is for label 'none the reader could find', not Y-3" in service.fails(plain[1])[0]["Detail"]
+
+
+# ---- a confirmation dropped, its pages declared as having no order lines ----------------------------------
+SECOND = [l.replace("SO-90001", "SO-90002").replace("EXJK01", "EXJK11").replace("EXTS02", "EXTS12")
+          .replace("EXCP03", "EXCP13") for l in PDF_LINES]
+
+
+@pytest.fixture
+def two_confirmations(tmp_path):
+    return make_pages_pdf(tmp_path / "two-ocs.pdf", [PDF_LINES, SECOND, TERMS])
+
+
+def test_both_confirmations_read_pass(two_confirmations, key):
+    both = copy.deepcopy(RESPONSE)
+    second = copy.deepcopy(both["documents"][0])
+    second.update(number="SO-90002", pages=[2])
+    for l, s in zip(second["lines"], ("EXJK11", "EXTS12", "EXCP13")):
+        l.update(style=s, page=2)
+    both["documents"].append(second)
+    both["pages_without_lines"] = [3]
+    docs, warns, _ = ai.read(two_confirmations, _cfg(), factory=FakeClient(message(both)).factory)
+    assert [d["doc"] for d in docs] == ["SO-90001", "SO-90002"]
+
+
+def test_a_dropped_confirmation_is_refused_by_the_page_it_left_behind(two_confirmations, key):
+    one = copy.deepcopy(RESPONSE)
+    one["pages_without_lines"] = [2, 3]
+    e = _refused(two_confirmations, one)
+    got = _fails(e, ai.PAGES_CHECK)[0]
+    assert "page 2 prints confirmation number 'SO-90002', which was not returned" in got
+    assert "page 2 prints order lines (code 'EXJK11' and 7 amounts) but was listed as having none" in got
+    assert "page 3" not in got
+
+
+def test_a_page_of_lines_with_no_number_declared_empty_is_refused(tmp_path, key):
+    rest = [l for l in SECOND if "SO-90002" not in l and "ORDER CONFIRMATION" not in l]
+    pdf = make_pages_pdf(tmp_path / "cont.pdf", [PDF_LINES, rest, TERMS])
+    one = copy.deepcopy(RESPONSE)
+    one["pages_without_lines"] = [2, 3]
+    got = _fails(_refused(pdf, one), ai.PAGES_CHECK)[0]
+    assert "page 2 prints order lines (code 'EXJK11'" in got and "confirmation number" not in got
+
+
+@pytest.mark.parametrize("terms", [
+    ["Clause SO-12 of our terms applies to EUR 1.000,00 claims"],
+    ["Ref EXJK99 applies above EUR 1.000,00"],
+    ["Document Number: SO-90001 terms continued", "Penalty EUR 1.000,00 and EUR 2.000,00"],
+])
+def test_a_terms_page_is_not_mistaken_for_order_lines(tmp_path, key, terms):
+    """A number of the same shape after other words, one code with one amount, or the returned confirmation's own
+    header with amounts but no code: none is a dropped confirmation."""
+    pdf = make_pages_pdf(tmp_path / "terms.pdf", [PDF_LINES, terms])
+    one = copy.deepcopy(RESPONSE)
+    one["pages_without_lines"] = [2]
+    assert ai.read(pdf, _cfg(), factory=FakeClient(message(one)).factory)[0]
+
+
+# ---- whole words, not parts of run-together text ---------------------------------------------------------
+def test_a_colour_found_only_inside_other_words_is_refused():
+    """'510 15/10/2026' holds '101' once spaces go, never as a word."""
+    text = """Order confirmation SS - 2027/99-01 Of 01/07/2026
+1 S99ZZ0001 P0001 510 15/10/2026 15/02/2027 JACKET
+40 42 Tot. Qty Price Line value
+1 1 2 100,00 200,00
+Total order q.ty 2 Total net value 200,00 Example Atelier Ltd"""
+    raw = RAW("Example Atelier Ltd", "SS - 2027/99-01",
+              [L("S99ZZ0001", "P0001", "101", [("40", "1"), ("42", "1")], "2", "100,00", "200,00")], "2", "200,00")
+    _, fails, _ = ai.interpret(raw, _layout_cfg(raw), [text])
+    assert any("colour '101'" in f["Detail"] for f in fails if f["Check"] == ai.GROUNDING_CHECK)
+    raw["documents"][0]["lines"][0]["colour"] = "510"
+    assert ai.interpret(raw, _layout_cfg(raw), [text])[1] == []
+
+
+@pytest.mark.parametrize("value,ok", [("VINTAGE BLACK", True), ("BLACK/CREAM LOGO", True), ("VINTAGE GREY", False),
+                                      ("101", False), ("0031", True), ("20%", True)])
+def test_a_wrapped_cell_is_spelled_from_whole_words_but_a_short_code_never_is(value, ok):
+    block = ("rw01614 80% 0031 : 4 4 2 10 $85.00 $850.00 cotton, vintag 20% e black polyester "
+             "nylon, black/ 13% cream elastane logo 1 x 01").split()
+    assert ai.has_words(block, value) is ok
+
+
+@pytest.mark.parametrize("label,ok", [("S", True), ("OSFM", True), ("15", False), ("XL", False), ("7.5/9", True)])
+def test_a_size_is_a_word_or_the_head_of_a_size_cell(label, ok):
+    words = "1 in2391 osfm/4 s/3 m/3 15/10/2026 7.5/9 8/9.5".split()
+    assert ai.has_size(words, label) is ok
+
+
+def test_words_run_together_by_the_default_extraction_are_read_from_the_tight_one():
+    """adidas: the default extraction prints 'Y-3DADCAPBLACK', the tight one 'Y-3 DAD CAP BLACK'."""
+    loose = "Example Atelier Ltd Order Number : 900000001\n1 ZZ0001 Y-3DADCAPBLACK 4 OSFM/4 30.00 120.00\n" \
+            "Quantity 4 Order Value 120.00"
+    tight = loose.replace("Y-3DADCAPBLACK", "Y-3 DAD CAP BLACK")
+    raw = RAW("Example Atelier Ltd", "900000001", [L("ZZ0001", None, "BLACK", [("OSFM", "4")], "4", "30.00", "120.00")],
+              "4", "120.00", cur="USD")
+    assert ai.interpret(copy.deepcopy(raw), _layout_cfg(raw), [loose])[1] != []
+    assert ai.interpret(copy.deepcopy(raw), _layout_cfg(raw), [loose], [tight])[1] == []
