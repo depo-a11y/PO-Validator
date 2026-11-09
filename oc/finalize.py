@@ -8,19 +8,29 @@ leave a half set of importable files behind.
 PU-new   NEW rows through validator_core.run_gate, the same gate as app.py, plus
          blocks on a Title still holding a raw colour/fabric/style code and on a
          blank Option1 (what an unreviewed draft leaves behind).
-PU-merge carryover, keyed on known product IDs, so Command = UPDATE (MERGE would
-         create a product if an ID went missing). NOT co_stock's full column
-         battery: a blank cell clears that field on import, and the PO leaves Body
-         HTML, title_tag, HS code, GTIN and the variant metafields blank on MERGE
-         rows. So the sheet carries only what this buy changes on a live product
-         (the season metafield and season tag). New sizes on live products go in a
-         separate file (Command UPDATE, Variant Command MERGE), with the product's
-         live cost so one product keeps one cost. A rollback file restores the
-         previous season and removes the tag where this run added it.
+PU-merge carryover, keyed on known product and variant IDs, so Command = UPDATE and
+         Variant Command = UPDATE (both fail on a missing ID instead of creating).
+         NOT co_stock's full column battery: a blank cell clears that field on
+         import, and the PO leaves Body HTML, title_tag, HS code, GTIN and the
+         variant metafields blank on MERGE rows. So the sheet carries only what
+         this buy changes on a live product: the season metafield and season tag
+         (on the product's first row) and the unit cost (every row).
+         Cost rule (Colwyn, 2026-11-09): "OC should overwrite old season cost
+         prices", on all sizes. A re-bought product gets Variant Cost = the OC's
+         Wholesale Price x the brand's cost_multiplier on EVERY live variant,
+         sizes not on the OC included, so it ends with one cost. A PO Variant Cost
+         that disagrees with that is a FAIL. The Variant.cost_price metafield is
+         not written on existing variants: the catalog export carries no variant
+         metafields, so a rollback could not restore it.
+         New sizes on live products go in a separate file (Command UPDATE, Variant
+         Command MERGE) at the same OC cost. A rollback file restores the previous
+         season, removes the tag where this run added it, and puts back each
+         touched variant's prior Variant Cost from the catalog export.
 Delivery the brand delivery workbook shape, with a Total Delivered roll-up that
          absorbs future tranche columns and Remaining = Order Qty - Total Delivered.
 """
 import collections
+import itertools
 import os
 import re
 import sys
@@ -46,8 +56,10 @@ DELIVERY_HEADER = [
 ]
 
 ID_COMMAND = "UPDATE"
+VARIANT_COMMAND = "UPDATE"
 MERGE_PRODUCT_COLS = ["ID", "Command", "Tags Command", "Tags", SEASON]
 ROLLBACK_COLS = ["ID", "Command", "Tags Command", "Tags", SEASON]
+VARIANT_COST_COLS = ["Variant ID", "Variant Command", "Variant Cost"]
 NEW_SIZE_COLS = ["ID", "Command", "Variant Command", "Option1 Name", "Option1 Value", "Option2 Name",
                  "Option2 Value", "Variant SKU", "Variant Barcode", "Variant Price", "Variant Compare At Price",
                  "Variant Cost", "Variant Inventory Tracker", "Variant HS Code", "Variant Country of Origin",
@@ -231,101 +243,184 @@ def _pu_merge(merge, brand, catalog, core, out_prefix):
                     Detail=f"{len(merge)} rows" + (f"; invalid: {bad}" if bad else "")))
     if not merge:
         return out, writers
-    products, new_sizes, problems = collections.OrderedDict(), [], []
-    restate = collections.Counter()
+    mult = brand["cost_multiplier"]
+    products, new_sizes, problems, po_off = collections.OrderedDict(), [], [], []
+    oc_costs = collections.defaultdict(set)
     for r in merge:
         code = norm_code(r[CODE])
+        size = norm_size(r["Option2 Value"])
+        eur = money(r.get("Wholesale Price"))
+        cost = None if eur is None else round(eur * mult, 2)
+        po = _r2(r.get("Variant Cost"))
+        if cost is None or po is None or abs(po - cost) > 0.005:
+            po_off.append(f"row {r['_row']} {code} size {size}: PO A${po} vs EUR {eur} x {mult} = A${cost}")
         p, note, _ = catalog.match(code)
         if p is None:
             problems.append(f"row {r['_row']} {code}: {note or 'no live product'}")
             continue
         products.setdefault(p["id"], (p, r))
-        v = next((v for v in p["variants"] if v["size"] == norm_size(r["Option2 Value"])), None)
-        if v is None:
-            sib = p["variants"]
-            price = collections.Counter(x["price"] for x in sib).most_common(1)[0][0]
-            cmp_ = collections.Counter(x["compare_at"] for x in sib).most_common(1)[0][0]
-            costs = collections.Counter(round(x["cost"], 2) for x in sib if x["cost"] is not None)
-            hs = collections.Counter(x["hs"] for x in sib if x["hs"]).most_common(1)
-            cty = collections.Counter(x["country"] for x in sib if x["country"]).most_common(1)
-            names = p["option_names"]
-            colour = collections.Counter(x["colour"] for x in sib if x["colour"]).most_common(1)[0][0]
-            size = norm_size(r["Option2 Value"])
-            vals = {n.lower(): (colour if n.lower() in ("colour", "color") else size) for n in names}
-            if len(costs) != 1:
-                problems.append(f"{p['title']}: live sizes carry {len(costs)} different costs {dict(costs)}")
-            new_sizes.append({
-                "ID": p["id"], "Command": ID_COMMAND, "Variant Command": "MERGE",
-                "Option1 Name": names[0], "Option1 Value": vals[names[0].lower()],
-                "Option2 Name": names[1], "Option2 Value": vals[names[1].lower()],
-                "Variant SKU": _s(r["Variant SKU"]), "Variant Barcode": _s(r["Variant SKU"]),
-                "Variant Price": price, "Variant Compare At Price": cmp_,
-                "Variant Cost": costs.most_common(1)[0][0] if costs else None, "Variant Inventory Tracker": "shopify",
-                "Variant HS Code": hs[0][0] if hs else "", "Variant Country of Origin": cty[0][0] if cty else "",
-                "Variant Metafield:custom.manufacture_code[single_line_text_field]": p["raw_code"].strip(),
-                "Variant Metafield: custom.season [single_line_text_field]": _s(r.get(SEASON)),
-                "Variant Metafield: custom.new_sale [single_line_text_field]": p["new_sale"] or _s(r.get(NEW_SALE)),
-                COST_PRICE: _s(r.get(COST_PRICE)),
-                "_po_cost": _r2(r["Variant Cost"]), "_title": p["title"],
-            })
-        else:
-            delta = (money(r["Variant Cost"]) or 0) - (v["cost"] or 0)
-            restate["variants"] += 1
-            restate["changed"] += abs(delta) > 0.005
-            restate["units"] += v["on_hand"]
-            restate["value"] += delta * v["on_hand"]
-    out.append(dict(Check="Every MERGE row resolves to one live (non-archived) product, one live cost per product",
+        oc_costs[p["id"]].add(cost)
+        if any(v["size"] == size for v in p["variants"]):
+            continue
+        sib = p["variants"]
+        price = collections.Counter(x["price"] for x in sib).most_common(1)[0][0]
+        cmp_ = collections.Counter(x["compare_at"] for x in sib).most_common(1)[0][0]
+        hs = collections.Counter(x["hs"] for x in sib if x["hs"]).most_common(1)
+        cty = collections.Counter(x["country"] for x in sib if x["country"]).most_common(1)
+        names = p["option_names"]
+        colour = collections.Counter(x["colour"] for x in sib if x["colour"]).most_common(1)[0][0]
+        vals = {n.lower(): (colour if n.lower() in ("colour", "color") else size) for n in names}
+        new_sizes.append({
+            "ID": p["id"], "Command": ID_COMMAND, "Variant Command": "MERGE",
+            "Option1 Name": names[0], "Option1 Value": vals[names[0].lower()],
+            "Option2 Name": names[1], "Option2 Value": vals[names[1].lower()],
+            "Variant SKU": _s(r["Variant SKU"]), "Variant Barcode": _s(r["Variant SKU"]),
+            "Variant Price": price, "Variant Compare At Price": cmp_,
+            "Variant Inventory Tracker": "shopify",
+            "Variant HS Code": hs[0][0] if hs else "", "Variant Country of Origin": cty[0][0] if cty else "",
+            "Variant Metafield:custom.manufacture_code[single_line_text_field]": p["raw_code"].strip(),
+            "Variant Metafield: custom.season [single_line_text_field]": _s(r.get(SEASON)),
+            "Variant Metafield: custom.new_sale [single_line_text_field]": p["new_sale"] or _s(r.get(NEW_SALE)),
+            COST_PRICE: _s(r.get(COST_PRICE)), "_title": p["title"],
+        })
+    new_cost = {pid: next(iter(c)) for pid, c in oc_costs.items() if len(c) == 1 and None not in c}
+    for n in new_sizes:
+        n["Variant Cost"] = new_cost.get(n["ID"])
+
+    out.append(dict(Check="Every MERGE row resolves to one live (non-archived) product",
                     Result="FAIL" if problems else "PASS", Detail="; ".join(problems) or f"{len(products)} products"))
+    out.append(dict(Check=f"PO Variant Cost = Wholesale x {mult} on every MERGE row (the reviewed PO agrees with the OC cost)",
+                    Result="FAIL" if po_off else "PASS",
+                    Detail=f"{len(po_off)} rows: " + "; ".join(po_off) if po_off else f"{len(merge)} rows"))
+    split_oc = [f"{products[pid][0]['title']} {sorted(c, key=str)}" for pid, c in oc_costs.items() if len(c) != 1]
+    out.append(dict(Check="One OC cost per re-bought product", Result="FAIL" if split_oc else "PASS",
+                    Detail="; ".join(split_oc) or f"{len(new_cost)} products"))
     archived = [p["id"] for p, _ in products.values() if p["status"].upper() == "ARCHIVED"]
     out.append(dict(Check="No MERGE target is ARCHIVED", Result="FAIL" if archived else "PASS", Detail=str(archived or "none")))
+    split_live = [f"{p['title']} {sorted({round(v['cost'], 2) for v in p['variants'] if v['cost'] is not None})}"
+                  for p, _ in products.values() if len({round(v["cost"], 2) for v in p["variants"] if v["cost"] is not None}) > 1]
+    out.append(dict(Check="Re-bought products whose live sizes carry different costs today (the overwrite unifies them)",
+                    Result="INFO", Detail=f"{len(split_live)}: " + "; ".join(split_live) if split_live else "none"))
 
     season = brand["season"]
-    rows = [{"ID": p["id"], "Command": ID_COMMAND, "Tags Command": "MERGE", "Tags": season, SEASON: season}
-            for p, _ in products.values()]
-    ok = all(r["ID"] for r in rows) and all(r["Command"] == "UPDATE" for r in rows) \
+    rows, rb = [], []
+    for pid, (p, _) in products.items():
+        tagged = season in [t.strip() for t in p["tags"].split(",")]
+        for i, v in enumerate(p["variants"]):
+            row = {"ID": pid, "Command": ID_COMMAND, "Variant ID": v["variant_id"], "Variant Command": VARIANT_COMMAND}
+            back = dict(row)
+            if i == 0:
+                row.update({"Tags Command": "MERGE", "Tags": season, SEASON: season})
+                back.update({"Tags Command": "MERGE" if tagged else "DELETE", "Tags": "" if tagged else season,
+                             SEASON: p["season"]})
+            row["Variant Cost"] = new_cost.get(pid)
+            back["Variant Cost"] = v["cost"]
+            rows.append(row)
+            rb.append(back)
+
+    blocks = [k for k, _ in itertools.groupby(x["ID"] for x in rows)]
+    ok = all(x["ID"] and x["Variant ID"] and x["Command"] == "UPDATE" and x["Variant Command"] == "UPDATE"
+             for x in rows + rb) \
+        and len(blocks) == len(set(blocks)) \
         and all(r["ID"] for r in new_sizes) and all(r["Command"] == "UPDATE" and r["Variant Command"] == "MERGE" for r in new_sizes)
-    out.append(dict(Check="ID-keyed sheets: ID on every row, Command UPDATE (fails on a missing ID instead of "
-                          "creating), new sizes Variant Command MERGE", Result="PASS" if ok else "FAIL",
-                    Detail=f"PU-merge {len(rows)} rows, new sizes {len(new_sizes)} rows"))
+    out.append(dict(Check="ID-keyed sheets: ID + Variant ID on every row, Command and Variant Command UPDATE (fail on a "
+                          "missing ID instead of creating), one block of rows per product, new sizes Variant Command MERGE",
+                    Result="PASS" if ok else "FAIL",
+                    Detail=f"PU-merge {len(rows)} rows on {len(blocks)} products, rollback {len(rb)} rows, "
+                           f"new sizes {len(new_sizes)} rows"))
+
+    out.append(_cost_overwrite_check(merge, mult, catalog, products, rows, new_sizes))
+
+    nocost = [(p["title"], v["variant_id"]) for p, _ in products.values() for v in p["variants"] if v["cost"] is None]
+    per = []
+    for pid, (p, _) in products.items():
+        if pid in new_cost:
+            per.append((sum(v["on_hand"] * (new_cost[pid] - v["cost"]) for v in p["variants"] if v["cost"] is not None),
+                        sum(v["on_hand"] for v in p["variants"]), p["title"]))
+    out.append(dict(Check="Cost restatement on hand (information: on-hand units x (OC cost - old cost))", Result="INFO",
+                    Detail=f"{sum(u for _, u, _ in per):g} units on {len(per)} products restate by "
+                           f"A${sum(x for x, _, _ in per):,.2f}"
+                           + (f"; {len(nocost)} variants had no cost before, not counted" if nocost else "") + ": "
+                           + "; ".join(f"{t} {u:g}u A${x:,.2f}" for x, u, t in sorted(per, key=lambda e: -abs(e[0])))))
+
     already = sum(1 for p, _ in products.values() if p["season"] == season)
     tagged = [p for p, _ in products.values() if season in [t.strip() for t in p["tags"].split(",")]]
-    note = (f"{len(rows)} products; sets custom.product_season = {season} ({len(rows) - already} change) and adds the "
-            f"'{season}' tag (Tags Command MERGE keeps every existing tag). No Title, Handle, Body HTML, price, cost or "
-            "variant column.")
-    frame = pd.DataFrame(rows, columns=MERGE_PRODUCT_COLS)
+    note = (f"{len(rows)} variant rows on {len(blocks)} products; sets custom.product_season = {season} "
+            f"({len(blocks) - already} change) and adds the '{season}' tag (Tags Command MERGE keeps every existing tag) "
+            f"on each product's first row, and Variant Cost = the OC cost on every variant. No Title, Handle, Body HTML, "
+            f"price or variant metafield column.")
+    frame = pd.DataFrame(rows, columns=MERGE_PRODUCT_COLS + VARIANT_COST_COLS)
     writers.append((f"{out_prefix}PU-merge.xlsx", lambda p: frame.to_excel(p, index=False, sheet_name="Products"), note))
 
-    tagged_ids = {p["id"] for p in tagged}
-    rb = [{"ID": p["id"], "Command": ID_COMMAND,
-           "Tags Command": "MERGE" if p["id"] in tagged_ids else "DELETE",
-           "Tags": "" if p["id"] in tagged_ids else season, SEASON: p["season"]}
-          for p, _ in products.values()]
-    rb_frame = pd.DataFrame(rb, columns=ROLLBACK_COLS)
+    rb_frame = pd.DataFrame(rb, columns=ROLLBACK_COLS + VARIANT_COST_COLS)
     out.append(dict(Check="Rollback for PU-merge", Result="INFO",
                     Detail=f"restores each product's previous custom.product_season from the catalog export "
-                           f"({collections.Counter(p['season'] for p, _ in products.values()).most_common()}) and deletes the "
-                           f"'{season}' tag on {len(rb) - len(tagged)} products; already carried it before this run: "
-                           + (", ".join(p["title"] for p in tagged) or "none")))
+                           f"({collections.Counter(p['season'] for p, _ in products.values()).most_common()}), deletes the "
+                           f"'{season}' tag on {len(blocks) - len(tagged)} products (already carried it before this run: "
+                           + (", ".join(p["title"] for p in tagged) or "none")
+                           + f") and puts back the prior Variant Cost on {len(rb)} variants"
+                           + (f"; {len(nocost)} had no cost, so their rollback cell is blank (a blank Variant Cost "
+                              f"cell clears the cost): " + ", ".join(f"{t} {vid}" for t, vid in nocost) if nocost else "")
+                           + ". It does not remove the variants PU-merge-new-sizes adds."))
     writers.append((f"{out_prefix}PU-merge-ROLLBACK.xlsx",
                     lambda p: rb_frame.to_excel(p, index=False, sheet_name="Products"),
-                    f"{len(rb)} products, Command UPDATE"))
+                    f"{len(rb)} variant rows on {len(blocks)} products, Command UPDATE, Variant Command UPDATE"))
 
     if new_sizes:
         clash = [n["Variant SKU"] for n in new_sizes if n["Variant SKU"] in catalog.skus or not n["Variant SKU"]]
         out.append(dict(Check="New sizes on live products", Result="FAIL" if clash else "PASS",
                         Detail=f"{len(new_sizes)} variants on {len({n['ID'] for n in new_sizes})} products: "
-                               + ", ".join(f"{n['Variant SKU']} {n['_title']} size {n['Option2 Value']} at live cost "
-                                           f"A${n['Variant Cost']:g} (PO A${n['_po_cost']:g})" for n in new_sizes)
+                               + ", ".join(f"{n['Variant SKU']} {n['_title']} size {n['Option2 Value']} at OC cost "
+                                           f"A${n['Variant Cost']}" for n in new_sizes)
                                + (f"; SKU problem: {clash}" if clash else "")))
         ns_frame = pd.DataFrame(new_sizes, columns=NEW_SIZE_COLS)
         writers.append((f"{out_prefix}PU-merge-new-sizes.xlsx",
                         lambda p: ns_frame.to_excel(p, index=False, sheet_name="Products"),
                         f"{len(new_sizes)} variants, Command UPDATE, Variant Command MERGE"))
-    out.append(dict(Check="Carryover unit cost (decision, not written)", Result="WARN",
-                    Detail=f"the PO's Variant Cost differs from live on {restate['changed']} of {restate['variants']} existing "
-                           f"variants; writing it would restate {restate['units']:g} units on hand by A${restate['value']:,.2f}. "
-                           "PU-merge leaves live cost alone and new sizes take the product's live cost."))
     return out, writers
+
+
+def _cost_overwrite_check(merge, mult, catalog, products, rows, new_sizes):
+    """Recomputed from the PO rows and the built sheets, not from the cost the builder chose."""
+    want = collections.defaultdict(set)
+    for r in merge:
+        p, _, _ = catalog.match(norm_code(r[CODE]))
+        eur = money(r.get("Wholesale Price"))
+        if p is not None:
+            want[p["id"]].add(None if eur is None else round(eur * mult, 2))
+    owner = {v["variant_id"]: pid for pid, p in catalog.products.items() for v in p["variants"]}
+    wrote = collections.defaultdict(collections.Counter)
+    bad = []
+
+    def off(pid, c):
+        w = want.get(pid, set())
+        return len(w) != 1 or None in w or c is None or abs(c - next(iter(w))) > 0.005
+
+    for x in rows:
+        if owner.get(x["Variant ID"]) != x["ID"]:
+            bad.append(f"variant {x['Variant ID']} is not a variant of product {x['ID']}")
+        wrote[x["ID"]][x["Variant ID"]] += 1
+        if off(x["ID"], x["Variant Cost"]):
+            bad.append(f"product {x['ID']} variant {x['Variant ID']} cost {x['Variant Cost']} vs OC {sorted(want.get(x['ID'], set()), key=str)}")
+    for n in new_sizes:
+        if off(n["ID"], n["Variant Cost"]):
+            bad.append(f"new size {n['Variant SKU']} cost {n['Variant Cost']} vs OC {sorted(want.get(n['ID'], set()), key=str)}")
+    for pid, (p, _) in products.items():
+        live = {v["variant_id"] for v in p["variants"]}
+        missing = live - set(wrote[pid])
+        if missing:
+            bad.append(f"{p['title']}: {len(missing)} live variants not in PU-merge")
+        dup = [vid for vid, k in wrote[pid].items() if k > 1]
+        if dup:
+            bad.append(f"{p['title']}: variants written twice {dup}")
+    stray = (set(wrote) | {n["ID"] for n in new_sizes}) - set(products)
+    if stray:
+        bad.append(f"products not re-bought are touched: {sorted(stray)}")
+    n_var = sum(len(p["variants"]) for p, _ in products.values())
+    return dict(Check="OC cost on every live variant of each re-bought product (PU-merge) and on each new size; "
+                      "no other product touched", Result="FAIL" if bad else "PASS",
+                Detail=f"{len(bad)}: " + "; ".join(bad[:20]) if bad else
+                f"{n_var} variants on {len(products)} products + {len(new_sizes)} new sizes at the OC cost")
 
 
 # ---- delivery ------------------------------------------------------------------

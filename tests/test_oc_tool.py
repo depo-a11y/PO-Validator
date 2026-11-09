@@ -28,6 +28,8 @@ CAT_COLS = list(catm.REQUIRED) + ["Body HTML", "Variant Barcodes", "Variant Inve
                                   "Variant Country of Origin", "Variant HS Code", catm.MADE_IN, catm.SEASON,
                                   catm.NEW_SALE, "Created At"]
 
+MERGE_SHEET_COLS = ["ID", "Command", "Tags Command", "Tags", poxlsx.SEASON, "Variant ID", "Variant Command", "Variant Cost"]
+
 
 def _variant(pid, title, ptype, status, code, colour, size, sku, price, cmp_, cost, top, **kw):
     r = {c: "" for c in CAT_COLS}
@@ -215,19 +217,20 @@ def test_complete_keeps_human_cells_and_finalize_is_safe(catalog_path, tmp_path)
     prefix = str(tmp_path / "x-")
     fchecks = finalize.run(str(out), BRAND, cat, prefix)
     assert not [c for c in fchecks if c["Result"] == "FAIL"], fchecks
-    pu_merge = pd.read_excel(prefix + "PU-merge.xlsx")
-    assert list(pu_merge.columns) == finalize.MERGE_PRODUCT_COLS
+    pu_merge = pd.read_excel(prefix + "PU-merge.xlsx", dtype=str)
+    assert list(pu_merge.columns) == MERGE_SHEET_COLS
     assert set(pu_merge["Command"]) == {"UPDATE"} and pu_merge["ID"].notna().all()
-    assert set(pu_merge["Tags Command"]) == {"MERGE"}
-    rb = pd.read_excel(prefix + "PU-merge-ROLLBACK.xlsx", dtype=str)
-    assert list(rb["Command"]) == ["UPDATE"] and list(rb["Tags Command"]) == ["DELETE"] and list(rb["Tags"]) == ["S/S 27"]
-    assert list(rb[poxlsx.SEASON]) == ["F/W 26"]
-    for forbidden in ("Title", "Handle", "Body HTML", "Variant Price", "Variant Cost", "Metafield: title_tag"):
-        assert forbidden not in pu_merge.columns
+    assert list(pu_merge["Tags Command"].fillna("")) == ["MERGE", "", ""]
+    rb = pd.read_excel(prefix + "PU-merge-ROLLBACK.xlsx", dtype=str).fillna("")
+    assert list(rb["Command"]) == ["UPDATE"] * 3 and list(rb["Tags Command"]) == ["DELETE", "", ""]
+    assert list(rb["Tags"]) == ["S/S 27", "", ""] and list(rb[poxlsx.SEASON]) == ["F/W 26", "", ""]
+    for forbidden in ("Title", "Handle", "Body HTML", "Variant Price", "Variant SKU", poxlsx.COST_PRICE,
+                      "Metafield: title_tag"):
+        assert forbidden not in pu_merge.columns and forbidden not in rb.columns
     sizes = pd.read_excel(prefix + "PU-merge-new-sizes.xlsx", dtype=str)
     assert list(sizes["Option2 Value"]) == ["43"] and sizes["Variant SKU"][0].startswith("MMSS27")
     assert list(sizes["Command"]) == ["UPDATE"] and list(sizes["Variant Command"]) == ["MERGE"]
-    assert list(sizes["Variant Cost"]) == ["310"]  # the product's live cost, not the PO's 300
+    assert list(sizes["Variant Cost"]) == ["300"]  # the OC cost (EUR 200 x 1.5), not the siblings' live 310
     pu_new = pd.read_excel(prefix + "PU-new.xlsx", dtype=str)
     assert list(pu_new.columns) == core.COLUMNS_IN_ORDER
     assert list(pu_new["Option2 Value"]) == ["41", "42"]
@@ -302,3 +305,103 @@ def test_brand_config_lookup_order(tmp_path, monkeypatch):
     monkeypatch.delenv("OC_BRAND_DIR")
     with pytest.raises(brandm.BrandError):
         brandm.load("zzbrand")
+
+
+# ---- carryover cost: the OC overwrites the old season cost on every size (Colwyn, 2026-11-09) ----
+LIVE_COSTS = {"40": ("310.00", "2"), "41": ("305.50", "1"), "42": ("312.25", "3")}
+
+
+@pytest.fixture
+def split_catalog_path(tmp_path):
+    """Product 1's live sizes carry three different costs and on-hand counts; product 3 is not re-bought."""
+    rows = []
+    for i, (size, (cost, qty)) in enumerate(LIVE_COSTS.items()):
+        r = _variant("1", "Replica Sneaker in White", "MEN SHOES SNEAKERS", "Active", "S99WS0001P0001 101",
+                     "WHITE", size, f"MMFW26{100 + i}", "800.00", "800.00", cost, i == 0)
+        r["Variant Inventory Qty"] = qty
+        rows.append(r)
+    for i, size in enumerate(["S", "M"]):
+        rows.append(_variant("3", "Logo Tee in Black", "MEN CLOTHING T-SHIRTS SHORT SLEEVE", "Active", "S98GC0003S00003 900",
+                             "BLACK", size, f"MMFW26{200 + i}", "560.00", "800.00", "250.00", i == 0))
+    p = tmp_path / "split.csv"
+    with open(p, "w", encoding="utf-8-sig", newline="") as fh:
+        w = csv.DictWriter(fh, fieldnames=CAT_COLS)
+        w.writeheader()
+        w.writerows(rows)
+    return str(p)
+
+
+def _merge_po(tmp_path, po_cost=300.0):
+    base = {"Command": "MERGE", "Vendor": "MAISON MARGIELA", "Status": "Active", "Title": "Replica Sneaker in White",
+            "Type": "MEN SHOES SNEAKERS", "Published": True, "Option1 Name": "Colour", "Option1 Value": "WHITE",
+            "Option2 Name": "Size", poxlsx.CODE: "S99WS0001P0001 101", poxlsx.SEASON: "S/S 27", poxlsx.NEW_SALE: "CORE",
+            poxlsx.MADE_IN: "Italy", "Variant Price": 800.0, "Variant Compare At Price": 800.0,
+            "Wholesale Price": 200.0, "Variant Cost": po_cost, poxlsx.COST_PRICE: "EUR 200", "Order Qty": 1,
+            "Total Order": 200.0}
+    rows = [dict(base, **{"Option2 Value": s, "Variant SKU": sku}) for s, sku in (("41", "MMFW26101"), ("43", "MMSS27001"))]
+    po = tmp_path / "merge-po.xlsx"
+    _hand_po(po, rows)
+    return str(po)
+
+
+def test_oc_cost_overwrites_every_variant_of_a_rebought_product(split_catalog_path, tmp_path):
+    cat = catm.load(split_catalog_path)
+    prefix = str(tmp_path / "x-")
+    checks = finalize.run(_merge_po(tmp_path), BRAND, cat, prefix)
+    assert not [c for c in checks if c["Result"] == "FAIL"], checks
+    by = {c["Check"]: c for c in checks}
+
+    m = pd.read_excel(prefix + "PU-merge.xlsx", dtype=str).fillna("")
+    assert list(m.columns) == MERGE_SHEET_COLS
+    assert list(m["ID"]) == ["1", "1", "1"]
+    assert list(m["Variant ID"]) == ["140", "141", "142"]  # 40 and 42 are not on the OC and still take its cost
+    assert list(m["Variant Cost"]) == ["300", "300", "300"]  # EUR 200 x 1.5
+    assert list(m["Command"]) == ["UPDATE"] * 3 and list(m["Variant Command"]) == ["UPDATE"] * 3
+    assert list(m["Tags"]) == ["S/S 27", "", ""] and list(m[poxlsx.SEASON]) == ["S/S 27", "", ""]
+    assert not {"3", "2"} & set(m["ID"]) and not {"3S", "3M"} & set(m["Variant ID"])
+
+    sizes = pd.read_excel(prefix + "PU-merge-new-sizes.xlsx", dtype=str)
+    assert list(sizes["Option2 Value"]) == ["43"] and list(sizes["Variant Cost"]) == ["300"]
+
+    rb = pd.read_excel(prefix + "PU-merge-ROLLBACK.xlsx").fillna("")
+    assert list(rb.columns) == MERGE_SHEET_COLS
+    assert [str(x) for x in rb["Variant ID"]] == ["140", "141", "142"]
+    assert list(rb["Variant Cost"]) == [310.0, 305.5, 312.25]  # each variant's own prior cost
+    assert list(rb["Variant Command"]) == ["UPDATE"] * 3 and list(rb[poxlsx.SEASON]) == ["F/W 26", "", ""]
+    assert not {3, "3"} & set(rb["ID"])
+
+    overwrite = next(c for k, c in by.items() if k.startswith("OC cost on every live variant"))
+    assert overwrite["Result"] == "PASS"
+    split = next(c for k, c in by.items() if "carry different costs" in k)
+    assert split["Result"] == "INFO" and "Replica Sneaker in White" in split["Detail"]
+    restate = next(c for k, c in by.items() if k.startswith("Cost restatement"))
+    assert restate["Result"] == "INFO" and restate["Detail"].startswith("6 units on 1 products restate by A$-62.25")
+    assert not [c for c in checks if c["Result"] == "WARN"], [c for c in checks if c["Result"] == "WARN"]
+
+
+def test_po_cost_that_disagrees_with_wholesale_x_multiplier_fails(split_catalog_path, tmp_path):
+    cat = catm.load(split_catalog_path)
+    prefix = str(tmp_path / "x-")
+    checks = finalize.run(_merge_po(tmp_path, po_cost=310.0), BRAND, cat, prefix)
+    fails = [c["Check"] for c in checks if c["Result"] == "FAIL"]
+    assert any(f.startswith("PO Variant Cost = Wholesale x 1.5") for f in fails), fails
+    assert not any(os.path.exists(prefix + n) for n in finalize.OUTPUTS)
+
+
+def test_cost_overwrite_check_names_each_failure(split_catalog_path):
+    cat = catm.load(split_catalog_path)
+    merge = [{poxlsx.CODE: "S99WS0001P0001 101", "Wholesale Price": 200.0}]
+    products = {"1": (cat.products["1"], None)}
+
+    def rows(costs, ids=("140", "141", "142"), pid="1"):
+        return [{"ID": pid, "Variant ID": v, "Variant Cost": c} for v, c in zip(ids, costs)]
+
+    def result(r, new=()):
+        return finalize._cost_overwrite_check(merge, 1.5, cat, products, r, list(new))
+
+    assert result(rows([300.0] * 3))["Result"] == "PASS"
+    assert "not in PU-merge" in result(rows([300.0] * 2, ("140", "141")))["Detail"]
+    assert "cost 310.0" in result(rows([300.0, 310.0, 300.0]))["Detail"]
+    assert "not a variant of product 1" in result(rows([300.0] * 3) + rows([300.0], ("3S",)))["Detail"]
+    assert "not re-bought are touched: ['3']" in result(rows([300.0] * 3) + rows([300.0], ("3S",), "3"))["Detail"]
+    assert "new size MMSS27001" in result(rows([300.0] * 3), [{"ID": "1", "Variant SKU": "MMSS27001", "Variant Cost": 310.0}])["Detail"]
