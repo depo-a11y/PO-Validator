@@ -267,7 +267,6 @@ def test_a_config_from_text_never_opens_its_history_paths(tmp_path, oc_stub, mon
     server_file = _past_po(tmp_path / "server_file.xlsx", "F/W 26")  # stands in for any file on the host
     text = yaml.safe_dump(dict(base.BRAND, history=[{"label": "F/W 26", "path": server_file}]))
     cfg = brandm.from_text(text, "uploaded file x.yaml", "mm")
-    assert cfg["history"] == [] and cfg["history_files"] == [{"label": "F/W 26", "file": "server_file.xlsx"}]
     touched = []
     real_open, real_exists = openpyxl.load_workbook, os.path.exists
     monkeypatch.setattr(openpyxl, "load_workbook", lambda p, *a, **k: (touched.append(str(p)), real_open(p, *a, **k))[1])
@@ -275,6 +274,7 @@ def test_a_config_from_text_never_opens_its_history_paths(tmp_path, oc_stub, mon
     po, _, checks = service.draft("oc.pdf", _catalog(tmp_path), cfg)
     assert server_file not in touched and po is not None
     assert checks[0]["Result"] == "WARN" and "never opens files" in checks[0]["Detail"]
+    assert cfg["history"] == [] and cfg["history_files"] == [{"label": "F/W 26", "file": "server_file.xlsx"}]
     upload = tmp_path / "up"
     upload.mkdir()
     same_name = _past_po(upload / "server_file.xlsx", None)  # uploaded on the page: labelled from the config
