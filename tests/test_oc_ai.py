@@ -244,6 +244,7 @@ CORRUPT = {
     "a line with empty sizes": (lambda d, doc, ls: ls[0].update(sizes=[]), ai.SIZES_CHECK),
     "no size breakdown": (lambda d, doc, ls: (d.update(has_size_breakdown=False), [l.update(sizes=[]) for l in ls]),
                           ai.SIZES_CHECK),
+    "says no size grid yet lists sizes": (lambda d, doc, ls: d.update(has_size_breakdown=False), ai.SIZES_CHECK),
     "unparseable price": (lambda d, doc, ls: ls[0].update(price_text="about 120"), ai.NUMBERS_CHECK),
     "ambiguous line value": (lambda d, doc, ls: ls[0].update(line_value_text="480,0"), ai.NUMBERS_CHECK),
     "price not printed": (lambda d, doc, ls: ls[0].update(price_text=None), ai.NUMBERS_CHECK),
