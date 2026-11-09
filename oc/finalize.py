@@ -1,18 +1,28 @@
-"""`oc finalize`: a reviewed PO -> PU-new, PU-merge (+ new sizes) and the delivery file.
+"""`oc finalize`: a reviewed PO -> PU-new, PU-merge (+ new sizes, + rollback) and the delivery file.
 
-PU-new   NEW rows through validator_core.run_gate, the same gate as app.py.
-PU-merge carryover, under the co_stock rule (Command MERGE on every row, IDs
-         present) but NOT co_stock's full column battery: a blank cell clears that
-         field on import, and the PO leaves Body HTML, title_tag, HS code, GTIN and
-         the variant metafields blank on MERGE rows. So the sheet carries only what
-         this buy changes on a live product (the season metafield and season tag)
-         and never Title, Handle, price or cost. New sizes on live products go in a
-         separate file, because they need variant columns the other rows must not carry.
+All or nothing: every check runs first, in memory. If any check FAILs, no upload
+or delivery file is written (stale ones from an earlier run at the same prefix
+are removed) and only the checks workbook is saved, so a failed gate can never
+leave a half set of importable files behind.
+
+PU-new   NEW rows through validator_core.run_gate, the same gate as app.py, plus
+         blocks on a Title still holding a raw colour/fabric/style code and on a
+         blank Option1 (what an unreviewed draft leaves behind).
+PU-merge carryover, keyed on known product IDs, so Command = UPDATE (MERGE would
+         create a product if an ID went missing). NOT co_stock's full column
+         battery: a blank cell clears that field on import, and the PO leaves Body
+         HTML, title_tag, HS code, GTIN and the variant metafields blank on MERGE
+         rows. So the sheet carries only what this buy changes on a live product
+         (the season metafield and season tag). New sizes on live products go in a
+         separate file (Command UPDATE, Variant Command MERGE), with the product's
+         live cost so one product keeps one cost. A rollback file restores the
+         previous season and removes the tag where this run added it.
 Delivery the brand delivery workbook shape, with a Total Delivered roll-up that
          absorbs future tranche columns and Remaining = Order Qty - Total Delivered.
 """
 import collections
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -35,13 +45,17 @@ DELIVERY_HEADER = [
     "Order Qty", "Total Delivered", "Remaining", "1D", "Value", "2D", "Value",
 ]
 
+ID_COMMAND = "UPDATE"
 MERGE_PRODUCT_COLS = ["ID", "Command", "Tags Command", "Tags", SEASON]
+ROLLBACK_COLS = ["ID", "Command", "Tags Command", "Tags", SEASON]
 NEW_SIZE_COLS = ["ID", "Command", "Variant Command", "Option1 Name", "Option1 Value", "Option2 Name",
                  "Option2 Value", "Variant SKU", "Variant Barcode", "Variant Price", "Variant Compare At Price",
                  "Variant Cost", "Variant Inventory Tracker", "Variant HS Code", "Variant Country of Origin",
                  "Variant Metafield:custom.manufacture_code[single_line_text_field]",
                  "Variant Metafield: custom.season [single_line_text_field]",
                  "Variant Metafield: custom.new_sale [single_line_text_field]", COST_PRICE]
+
+OUTPUTS = ["PU-new.xlsx", "PU-merge.xlsx", "PU-merge-new-sizes.xlsx", "PU-merge-ROLLBACK.xlsx", "Delivery.xlsx"]
 
 
 def _s(v):
@@ -52,12 +66,17 @@ def _cmd(r):
     return _s(r.get("Command")).upper()
 
 
+def _r2(v):
+    v = money(v)
+    return None if v is None else round(v, 2)
+
+
 def run(po_path, brand, catalog, out_prefix):
     sys.path.insert(0, str(REPO))
     import validator_core as core
 
     _, rows = read_po(po_path)
-    checks = []
+    checks, writers = [], []
     new = [r for r in rows if _cmd(r) == "NEW"]
     merge = [r for r in rows if _cmd(r) == "MERGE"]
     other = [r for r in rows if _cmd(r) not in ("NEW", "MERGE")]
@@ -65,18 +84,45 @@ def run(po_path, brand, catalog, out_prefix):
         checks.append(dict(Check="Every PO row is NEW or MERGE", Result="FAIL",
                            Detail=f"rows {[r['_row'] for r in other]}"))
 
-    checks += _pu_new(new, brand, catalog, core, out_prefix)
-    checks += _pu_merge(merge, brand, catalog, core, out_prefix)
-    checks += _delivery(rows, out_prefix)
-    write_checks = f"{out_prefix}finalize-checks.xlsx"
+    for build in (_pu_new(new, brand, catalog, core, out_prefix),
+                  _pu_merge(merge, brand, catalog, core, out_prefix),
+                  _delivery(rows, out_prefix)):
+        c, w = build
+        checks += c
+        writers += w
+
+    failed = [c for c in checks if c["Result"] == "FAIL"]
+    if failed:
+        removed = []
+        for name in OUTPUTS:
+            p = f"{out_prefix}{name}"
+            if os.path.exists(p):
+                os.remove(p)
+                removed.append(os.path.basename(p))
+        checks.append(dict(Check="All or nothing: no upload or delivery file written", Result="FAIL",
+                           Detail=f"{len(failed)} check(s) failed"
+                                  + (f"; removed stale {', '.join(removed)}" if removed else "")))
+    else:
+        for path, write, note in writers:
+            write(path)
+            checks.append(dict(Check="Written", Result="INFO", Detail=f"{path}: {note}"))
     wb = openpyxl.Workbook()
     wb.remove(wb.active)
     write_table(wb, "Checks", checks, colour_key="Result")
-    wb.save(write_checks)
+    wb.save(f"{out_prefix}finalize-checks.xlsx")
     return checks
 
 
 # ---- PU-new --------------------------------------------------------------------
+def raw_code_in_title(title, code):
+    """Tokens of the manufacture code (style, style+fabric, fabric, colour) left in a title."""
+    code = norm_code(code)
+    body, _, colour = code.partition(" ")
+    parts = {p for p in (body, body[:9], body[9:], colour) if len(p) >= 2}
+    toks = {t.upper() for t in re.split(r"[\s/,()]+", str(title or "")) if t}
+    return sorted(parts & toks)
+
+
 def _pu_new(new, brand, catalog, core, out_prefix):
     out = []
     recs = []
@@ -87,9 +133,9 @@ def _pu_new(new, brand, catalog, core, out_prefix):
             "Body HTML": _s(r.get("Body HTML")), "Status": _s(r["Status"]), "Published": r["Published"],
             "Option1 Name": _s(r["Option1 Name"]), "Option1 Value": _s(r["Option1 Value"]),
             "Option2 Name": _s(r["Option2 Name"]), "Option2 Value": norm_size(r["Option2 Value"]),
-            "Variant SKU": _s(r["Variant SKU"]), "Variant Price": money(r["Variant Price"]),
-            "Variant Compare At Price": money(r["Variant Compare At Price"]),
-            "Variant Cost": money(r["Variant Cost"]),
+            "Variant SKU": _s(r["Variant SKU"]), "Variant Price": _r2(r["Variant Price"]),
+            "Variant Compare At Price": _r2(r["Variant Compare At Price"]),
+            "Variant Cost": _r2(r["Variant Cost"]),
             "Metafield: my_fields.manufacture_code": norm_code(r[CODE]),
             SEASON: _s(r.get(SEASON)), MADE_IN: "" if made == brand["unknown"] else made,
             NEW_SALE: _s(r.get(NEW_SALE)), COST_PRICE: _s(r.get(COST_PRICE)),
@@ -97,8 +143,19 @@ def _pu_new(new, brand, catalog, core, out_prefix):
             "HS Code": _s(r.get("Variant Metafield: HS Code")),
             "Metafield: title_tag [string]": _s(r.get(TITLE_TAG)),
         })
+    if not recs:
+        return out, []
     df = pd.DataFrame(recs)
     df_in = df.copy()
+
+    raw = sorted({f"'{t}' ({', '.join(raw_code_in_title(t, c))})" for t, c in
+                  zip(df["Title"], df["Metafield: my_fields.manufacture_code"]) if raw_code_in_title(t, c)})
+    out.append(dict(Check="No NEW Title still holds a raw style/fabric/colour code", Result="FAIL" if raw else "PASS",
+                    Detail=f"{len(raw)}: " + "; ".join(raw) if raw else f"{df['Title'].nunique()} titles"))
+    no_opt = sorted({t for t, o in zip(df["Title"], df["Option1 Value"]) if not o})
+    out.append(dict(Check="Every NEW row has an Option1 (colour family)", Result="FAIL" if no_opt else "PASS",
+                    Detail=f"{len(no_opt)} products blank: " + "; ".join(no_opt) if no_opt else "all set"))
+
     report = f"{out_prefix}PU-new-VALIDATION_ERRORS_REPORT.xlsx"
     if os.path.exists(report):
         os.remove(report)
@@ -107,7 +164,7 @@ def _pu_new(new, brand, catalog, core, out_prefix):
     except core.ValidationStop as e:
         out.append(dict(Check="PU-new passes the po-validator gate (validator_core.run_gate)", Result="FAIL",
                         Detail=f"{e} {e.rows[:5]}"))
-        return out
+        return out, []
     out.append(dict(Check="PU-new passes the po-validator gate (validator_core.run_gate)",
                     Result="FAIL" if errors else "PASS",
                     Detail=f"{len(df)} rows; hard stops: none; VALIDATION_ERRORS: {len(errors)}"
@@ -131,6 +188,10 @@ def _pu_new(new, brand, catalog, core, out_prefix):
     off = int((want != df["Tags"]).sum())
     out.append(dict(Check="Tags = expected_tags[Type] + Vendor + Season (catches the shared-list bug)",
                     Result="FAIL" if off else "PASS", Detail=f"{off} rows differ"))
+    sub = "Metafield: custom.sub_category [single_line_text_field]"
+    short = sorted({t for t, s in zip(df["Type"], df[sub]) if s != " ".join(t.split()[2:])})
+    out.append(dict(Check="sub_category = the whole Type after gender and category", Result="FAIL" if short else "PASS",
+                    Detail=", ".join(short) or f"{df[sub].nunique()} values, e.g. " + ", ".join(sorted(df[sub].unique())[:4])))
     by_title = df.groupby("Title")["Metafield: my_fields.manufacture_code"].nunique()
     multi = list(by_title[by_title > 1].index)
     out.append(dict(Check="One manufacture code per Title (Matrixify groups create rows by Title)",
@@ -140,11 +201,6 @@ def _pu_new(new, brand, catalog, core, out_prefix):
                     Detail=", ".join(taken) or "none"))
     inv = df[core.INVENTORY_COLS].astype(float).abs().sum().sum()
     out.append(dict(Check="Every inventory column is zero", Result="PASS" if inv == 0 else "FAIL", Detail=f"sum {inv:g}"))
-    trunc = sorted({f"{t} -> '{s}'" for t, s in zip(df["Type"], df["Metafield: custom.sub_category [single_line_text_field]"])
-                    if len(t.split()) > 4})
-    if trunc:
-        out.append(dict(Check="sub_category from split_t (known bug, not fixed: it does not stop the gate)",
-                        Result="WARN", Detail=f"{len(trunc)} Types truncated: " + "; ".join(trunc)))
     scales = df.groupby("Title")["Metafield: custom.size_scale [single_line_text_field]"].unique()
     mixed = {t: list(v) for t, v in scales.items() if len(v) > 1}
     if mixed:
@@ -153,24 +209,28 @@ def _pu_new(new, brand, catalog, core, out_prefix):
     long_tags = sorted({t for t in df["Metafield: title_tag [string]"] if len(t) > 60})
     out.append(dict(Check="title_tag <= 60 chars (validator check reads the wrong column, so measured here)",
                     Result="WARN" if long_tags else "PASS", Detail=f"{len(long_tags)} over 60"))
+    if (df["Published"].astype(str).str.upper() == "FALSE").any():
+        out.append(dict(Check="Published = FALSE has no Published Scope", Result="WARN",
+                        Detail="Matrixify defaults the scope to global, so check POS visibility after import"))
     blanked = int(((df_in[MADE_IN] == "") & (pd.Series([_s(r.get(MADE_IN)) for r in new]) == brand["unknown"])).sum())
     if blanked:
         out.append(dict(Check="made_in '-' placeholder not written to the store", Result="INFO",
                         Detail=f"{blanked} rows carry '{brand['unknown']}' on the PO; PU-new leaves custom.made_in empty instead"))
-    path = f"{out_prefix}PU-new.xlsx"
-    df[core.COLUMNS_IN_ORDER].to_excel(path, index=False, sheet_name="Products")
-    out.append(dict(Check="PU-new written", Result="INFO", Detail=f"{path}: {len(df)} rows, "
-                    f"{df['Title'].nunique()} products, columns = app.py columns_in_order ({len(core.COLUMNS_IN_ORDER)})"))
-    return out
+    final = df[core.COLUMNS_IN_ORDER]
+    note = (f"{len(df)} rows, {df['Title'].nunique()} products, columns = app.py columns_in_order "
+            f"({len(core.COLUMNS_IN_ORDER)})")
+    return out, [(f"{out_prefix}PU-new.xlsx", lambda p: final.to_excel(p, index=False, sheet_name="Products"), note)]
 
 
 # ---- PU-merge ------------------------------------------------------------------
 def _pu_merge(merge, brand, catalog, core, out_prefix):
-    out = []
+    out, writers = [], []
     mdf = pd.DataFrame([{"Command": r["Command"]} for r in merge])
     bad = core.invalid_merge_commands(mdf) if len(mdf) else []
-    out.append(dict(Check="co_stock gate: Command = MERGE on every carryover row", Result="FAIL" if bad else "PASS",
+    out.append(dict(Check="co_stock gate: every carryover row is a MERGE row on the PO", Result="FAIL" if bad else "PASS",
                     Detail=f"{len(merge)} rows" + (f"; invalid: {bad}" if bad else "")))
+    if not merge:
+        return out, writers
     products, new_sizes, problems = collections.OrderedDict(), [], []
     restate = collections.Counter()
     for r in merge:
@@ -185,24 +245,28 @@ def _pu_merge(merge, brand, catalog, core, out_prefix):
             sib = p["variants"]
             price = collections.Counter(x["price"] for x in sib).most_common(1)[0][0]
             cmp_ = collections.Counter(x["compare_at"] for x in sib).most_common(1)[0][0]
+            costs = collections.Counter(round(x["cost"], 2) for x in sib if x["cost"] is not None)
             hs = collections.Counter(x["hs"] for x in sib if x["hs"]).most_common(1)
             cty = collections.Counter(x["country"] for x in sib if x["country"]).most_common(1)
             names = p["option_names"]
             colour = collections.Counter(x["colour"] for x in sib if x["colour"]).most_common(1)[0][0]
             size = norm_size(r["Option2 Value"])
             vals = {n.lower(): (colour if n.lower() in ("colour", "color") else size) for n in names}
+            if len(costs) != 1:
+                problems.append(f"{p['title']}: live sizes carry {len(costs)} different costs {dict(costs)}")
             new_sizes.append({
-                "ID": p["id"], "Command": "MERGE", "Variant Command": "MERGE",
+                "ID": p["id"], "Command": ID_COMMAND, "Variant Command": "MERGE",
                 "Option1 Name": names[0], "Option1 Value": vals[names[0].lower()],
                 "Option2 Name": names[1], "Option2 Value": vals[names[1].lower()],
                 "Variant SKU": _s(r["Variant SKU"]), "Variant Barcode": _s(r["Variant SKU"]),
                 "Variant Price": price, "Variant Compare At Price": cmp_,
-                "Variant Cost": money(r["Variant Cost"]), "Variant Inventory Tracker": "shopify",
+                "Variant Cost": costs.most_common(1)[0][0] if costs else None, "Variant Inventory Tracker": "shopify",
                 "Variant HS Code": hs[0][0] if hs else "", "Variant Country of Origin": cty[0][0] if cty else "",
                 "Variant Metafield:custom.manufacture_code[single_line_text_field]": p["raw_code"].strip(),
                 "Variant Metafield: custom.season [single_line_text_field]": _s(r.get(SEASON)),
                 "Variant Metafield: custom.new_sale [single_line_text_field]": p["new_sale"] or _s(r.get(NEW_SALE)),
                 COST_PRICE: _s(r.get(COST_PRICE)),
+                "_po_cost": _r2(r["Variant Cost"]), "_title": p["title"],
             })
         else:
             delta = (money(r["Variant Cost"]) or 0) - (v["cost"] or 0)
@@ -210,36 +274,58 @@ def _pu_merge(merge, brand, catalog, core, out_prefix):
             restate["changed"] += abs(delta) > 0.005
             restate["units"] += v["on_hand"]
             restate["value"] += delta * v["on_hand"]
-    out.append(dict(Check="Every MERGE row resolves to one live (non-archived) product", Result="FAIL" if problems else "PASS",
-                    Detail="; ".join(problems) or f"{len(products)} products"))
+    out.append(dict(Check="Every MERGE row resolves to one live (non-archived) product, one live cost per product",
+                    Result="FAIL" if problems else "PASS", Detail="; ".join(problems) or f"{len(products)} products"))
     archived = [p["id"] for p, _ in products.values() if p["status"].upper() == "ARCHIVED"]
     out.append(dict(Check="No MERGE target is ARCHIVED", Result="FAIL" if archived else "PASS", Detail=str(archived or "none")))
+
     season = brand["season"]
-    rows = [{"ID": p["id"], "Command": "MERGE", "Tags Command": "MERGE", "Tags": season, SEASON: season}
+    rows = [{"ID": p["id"], "Command": ID_COMMAND, "Tags Command": "MERGE", "Tags": season, SEASON: season}
             for p, _ in products.values()]
-    path = f"{out_prefix}PU-merge.xlsx"
-    pd.DataFrame(rows, columns=MERGE_PRODUCT_COLS).to_excel(path, index=False, sheet_name="Products")
+    ok = all(r["ID"] for r in rows) and all(r["Command"] == "UPDATE" for r in rows) \
+        and all(r["ID"] for r in new_sizes) and all(r["Command"] == "UPDATE" and r["Variant Command"] == "MERGE" for r in new_sizes)
+    out.append(dict(Check="ID-keyed sheets: ID on every row, Command UPDATE (fails on a missing ID instead of "
+                          "creating), new sizes Variant Command MERGE", Result="PASS" if ok else "FAIL",
+                    Detail=f"PU-merge {len(rows)} rows, new sizes {len(new_sizes)} rows"))
     already = sum(1 for p, _ in products.values() if p["season"] == season)
-    out.append(dict(Check="PU-merge written", Result="INFO",
-                    Detail=f"{path}: {len(rows)} products; sets custom.product_season = {season} "
-                           f"({len(rows) - already} change) and adds the '{season}' tag (Tags Command MERGE keeps every "
-                           "existing tag). No Title, Handle, Body HTML, price, cost or variant column."))
-    ids_ok = all(r["ID"] for r in rows) and all(r["Command"] == "MERGE" for r in rows)
-    out.append(dict(Check="PU-merge: ID present and Command MERGE on every row", Result="PASS" if ids_ok else "FAIL",
-                    Detail=f"{len(rows)} rows"))
+    tagged = [p for p, _ in products.values() if season in [t.strip() for t in p["tags"].split(",")]]
+    note = (f"{len(rows)} products; sets custom.product_season = {season} ({len(rows) - already} change) and adds the "
+            f"'{season}' tag (Tags Command MERGE keeps every existing tag). No Title, Handle, Body HTML, price, cost or "
+            "variant column.")
+    frame = pd.DataFrame(rows, columns=MERGE_PRODUCT_COLS)
+    writers.append((f"{out_prefix}PU-merge.xlsx", lambda p: frame.to_excel(p, index=False, sheet_name="Products"), note))
+
+    tagged_ids = {p["id"] for p in tagged}
+    rb = [{"ID": p["id"], "Command": ID_COMMAND,
+           "Tags Command": "MERGE" if p["id"] in tagged_ids else "DELETE",
+           "Tags": "" if p["id"] in tagged_ids else season, SEASON: p["season"]}
+          for p, _ in products.values()]
+    rb_frame = pd.DataFrame(rb, columns=ROLLBACK_COLS)
+    out.append(dict(Check="Rollback for PU-merge", Result="INFO",
+                    Detail=f"restores each product's previous custom.product_season from the catalog export "
+                           f"({collections.Counter(p['season'] for p, _ in products.values()).most_common()}) and deletes the "
+                           f"'{season}' tag on {len(rb) - len(tagged)} products; already carried it before this run: "
+                           + (", ".join(p["title"] for p in tagged) or "none")))
+    writers.append((f"{out_prefix}PU-merge-ROLLBACK.xlsx",
+                    lambda p: rb_frame.to_excel(p, index=False, sheet_name="Products"),
+                    f"{len(rb)} products, Command UPDATE"))
+
     if new_sizes:
         clash = [n["Variant SKU"] for n in new_sizes if n["Variant SKU"] in catalog.skus or not n["Variant SKU"]]
-        path2 = f"{out_prefix}PU-merge-new-sizes.xlsx"
-        pd.DataFrame(new_sizes, columns=NEW_SIZE_COLS).to_excel(path2, index=False, sheet_name="Products")
         out.append(dict(Check="New sizes on live products", Result="FAIL" if clash else "PASS",
-                        Detail=f"{path2}: {len(new_sizes)} variants on {len({n['ID'] for n in new_sizes})} products "
-                               + ", ".join(f"{n['Variant SKU']} size {n['Option2 Value']}" for n in new_sizes)
+                        Detail=f"{len(new_sizes)} variants on {len({n['ID'] for n in new_sizes})} products: "
+                               + ", ".join(f"{n['Variant SKU']} {n['_title']} size {n['Option2 Value']} at live cost "
+                                           f"A${n['Variant Cost']:g} (PO A${n['_po_cost']:g})" for n in new_sizes)
                                + (f"; SKU problem: {clash}" if clash else "")))
+        ns_frame = pd.DataFrame(new_sizes, columns=NEW_SIZE_COLS)
+        writers.append((f"{out_prefix}PU-merge-new-sizes.xlsx",
+                        lambda p: ns_frame.to_excel(p, index=False, sheet_name="Products"),
+                        f"{len(new_sizes)} variants, Command UPDATE, Variant Command MERGE"))
     out.append(dict(Check="Carryover unit cost (decision, not written)", Result="WARN",
                     Detail=f"the PO's Variant Cost differs from live on {restate['changed']} of {restate['variants']} existing "
                            f"variants; writing it would restate {restate['units']:g} units on hand by A${restate['value']:,.2f}. "
-                           "PU-merge leaves live cost alone."))
-    return out
+                           "PU-merge leaves live cost alone and new sizes take the product's live cost."))
+    return out, writers
 
 
 # ---- delivery ------------------------------------------------------------------
@@ -259,14 +345,14 @@ def _delivery(rows, out_prefix):
         size = norm_size(r["Option2 Value"])
         nospace = code.replace(" ", "")
         qty = int(money(r.get("Order Qty")) or 0)
-        tot = money(r.get("Total Order")) or 0
+        tot = _r2(r.get("Total Order")) or 0
         units += qty
         value += tot
         ws.append([
             _s(r["Title"]), _s(r["Vendor"]), _s(r["Type"]), _s(r["Option1 Value"]), size, _s(r["Variant SKU"]),
-            money(r["Variant Price"]), money(r["Variant Compare At Price"]), money(r["Variant Cost"]),
+            _r2(r["Variant Price"]), _r2(r["Variant Compare At Price"]), _r2(r["Variant Cost"]),
             code, nospace, nospace + size, _s(r.get(SEASON)), _s(r.get(MADE_IN)), _s(r.get(NEW_SALE)),
-            _s(r.get(COST_PRICE)), money(r["Wholesale Price"]), tot, qty,
+            _s(r.get(COST_PRICE)), _r2(r["Wholesale Price"]), tot, qty,
             f'=SUMIF(${first_tranche}$1:$AZ$1,"<>Value",{first_tranche}{n}:AZ{n})',
             f"={get_column_letter(col['Order Qty'])}{n}-{get_column_letter(col['Total Delivered'])}{n}",
         ])
@@ -275,8 +361,6 @@ def _delivery(rows, out_prefix):
         for h in ("Wholesale Price", "Total Order"):
             ws.cell(n, col[h]).number_format = EUR_FMT
     ws.freeze_panes = "A2"
-    path = f"{out_prefix}Delivery.xlsx"
-    wb.save(path)
-    return [dict(Check="Delivery file written", Result="INFO",
-                 Detail=f"{path}: {len(rows)} rows, {units} units, EUR {value:,.2f}; Total Delivered = SUMIF over "
-                        f"{first_tranche}:AZ excluding 'Value' columns, so new tranche columns roll up without a formula edit")]
+    note = (f"{len(rows)} rows, {units} units, EUR {value:,.2f}; Total Delivered = SUMIF over {first_tranche}:AZ "
+            "excluding 'Value' columns, so new tranche columns roll up without a formula edit")
+    return [], [(f"{out_prefix}Delivery.xlsx", lambda p: wb.save(p), note)]

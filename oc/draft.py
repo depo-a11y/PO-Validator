@@ -8,11 +8,8 @@ Every drafted cell carries a source for the Review sheet.
 import collections
 
 from .poxlsx import PO_HEADER, CODE, MADE_IN, SEASON, NEW_SALE, COST_PRICE, TITLE_TAG, review_row
-from .resolve import Resolver, COLOUR, split_code
+from .resolve import Resolver, COLOUR, split_code, worse
 from .util import join_key, norm_size, sort_sizes, size_key, fmt_eur, slug
-
-
-RANK = {"OC": 0, "catalog": 0, "cart": 1, "history": 1, "rule": 1, "guess": 2}
 
 
 def oc_lines(docs, gender_of=None):
@@ -99,7 +96,7 @@ def build(docs, brand, catalog, history, tag_lookup, cart=None):
         cname, cn_src, cn_why = R.colour_name(code)
         ptype, t_src, t_why = R.product_type(code, l["product_class"], l["gender"])
         title, ti_src, ti_why = R.title(code, l["product_class"], cname)
-        if RANK[cn_src] > RANK[ti_src]:
+        if worse(cn_src, ti_src) == cn_src and COLOUR[cn_src] != COLOUR[ti_src]:
             ti_src, ti_why = cn_src, f"{ti_why}; colour name: {cn_why}"
         pending.append(dict(
             l=l, code=code, eur=eur, ptype=(ptype, t_src, t_why), title=[title, ti_src, ti_why],

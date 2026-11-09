@@ -67,3 +67,16 @@ def test_app_still_imports(monkeypatch):
     app = importlib.import_module("app")
     assert app.columns_in_order == core.COLUMNS_IN_ORDER
     assert app.assign_size_scale is core.assign_size_scale
+
+
+@pytest.mark.parametrize("ptype,sub", [
+    ("MEN ACCS WALLETS & POUCHES", "WALLETS & POUCHES"),
+    ("MEN CLOTHING T-SHIRTS SHORT SLEEVE", "T-SHIRTS SHORT SLEEVE"),
+    ("WOMEN CLOTHING JEANS HIGH WAISTED JEANS", "JEANS HIGH WAISTED JEANS"),
+    ("WOMEN SHOES BALLERINAS", "BALLERINAS"),
+])
+def test_sub_category_is_the_whole_remainder(ptype, sub):
+    df = core.run_transformations(_sheet(Type=ptype))
+    r = df.iloc[0]
+    assert (r["Metafield: custom.gender [single_line_text_field]"], r["Metafield: custom.category [single_line_text_field]"],
+            r["Metafield: custom.sub_category [single_line_text_field]"]) == (ptype.split()[0], ptype.split()[1], sub)

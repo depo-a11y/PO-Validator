@@ -2,9 +2,10 @@
 (fill the blanks of a PO someone started by hand).
 
 Every resolver returns (value, source, detail). Sources, in trust order:
-  OC, catalog  -> green   (read from the confirmation or the live store)
-  cart, history, rule -> amber (a linesheet, past POs, or a brand rule)
-  guess -> red            (nothing to go on; a person must fill it)
+  OC, catalog  -> green   (read from the confirmation or the live store, same style)
+  cart, history, rule, similar -> amber (a linesheet, past POs on 2+ rows, a brand
+                           rule, or a different live style at the same wholesale)
+  thin, fit, guess -> red (one past row, a fitted ratio, or nothing to go on)
 """
 import collections
 import math
@@ -13,7 +14,14 @@ import re
 from .util import norm_code, norm_size, sort_sizes, size_key, title_colour, slug
 
 GREEN, AMBER, RED = "green", "amber", "red"
-COLOUR = {"OC": GREEN, "catalog": GREEN, "cart": AMBER, "history": AMBER, "rule": AMBER, "guess": RED}
+COLOUR = {"OC": GREEN, "catalog": GREEN, "cart": AMBER, "history": AMBER, "rule": AMBER, "similar": AMBER,
+          "thin": RED, "fit": RED, "guess": RED}
+RANK = {GREEN: 0, AMBER: 1, RED: 2}
+
+
+def worse(a, b):
+    """The less trusted of two sources (b on a tie)."""
+    return a if RANK[COLOUR[a]] > RANK[COLOUR[b]] else b
 
 
 def split_code(code):
@@ -207,10 +215,11 @@ class Resolver:
                     same.update(max(v["price"] or 0, v["compare_at"] or 0) for v in p["variants"][:1])
             if same:
                 price, n = same.most_common(1)[0]
-                src, detail = "catalog", f"{n} carryover line(s) on this OC at EUR {eur:g} sell at A${price:g} today"
+                src, detail = "similar", (f"{n} carryover line(s) of other styles on this OC at EUR {eur:g} "
+                                          f"sell at A${price:g} today")
         if price is None:
-            price, detail = self.hist.ladder(eur)
-            src = "history" if price else None
+            price, detail, n = self.hist.ladder(eur)
+            src = ("history" if n >= 2 else "thin") if price else None
         if price is None:
             from .history import category_of
             ratio, why = self.hist.ratio(category_of(ptype))
@@ -218,13 +227,14 @@ class Resolver:
                 ratio, why = self.hist.ratio()
             if ratio is not None:
                 price = math.ceil(eur * ratio / step) * step
-                src, detail = "history", f"EUR {eur:g} x {ratio:.2f} ({why}), rounded up to {step}"
+                src, detail = "fit", f"EUR {eur:g} x {ratio:.2f} ({why}), rounded up to {step}"
         if price is None:
             return None, "guess", "no price history"
         floor = self.floor_price(eur)
         if price < floor - 1e-9:
             new = math.ceil(floor / step) * step
-            return new, "rule", f"{detail}; raised from A${price:g} to clear the {self.b['margin_floor']}x margin (floor A${floor:.2f})"
+            return new, worse(src, "rule"), (f"{detail}; raised from A${price:g} to clear the "
+                                             f"{self.b['margin_floor']}x margin (floor A${floor:.2f})")
         return price, src, detail
 
     # ---- made in / composition ---------------------------------------------

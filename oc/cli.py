@@ -7,6 +7,7 @@
 
 All inputs and outputs are files. Nothing here talks to Shopify, Matrixify or
 Drive. Exit code 1 means a gate failed; read the Checks sheet or the message.
+The brand config is found by --brand-config, else $OC_BRAND_DIR, else oc/brands/.
 """
 import argparse
 import sys
@@ -22,7 +23,8 @@ REPO = Path(__file__).resolve().parent.parent
 def _common(args):
     sys.path.insert(0, str(REPO))
     import validator_core
-    b = brandm.load(args.brand)
+    b = brandm.load(args.brand, args.brand_config)
+    print(f"brand config: {b['_path']}")
     cat = catm.load(args.catalog)
     hist = histm.load(b["history"])
     tags = validator_core.load_tag_lookup(str(REPO / "expected_tags.xlsx"))
@@ -80,7 +82,7 @@ def cmd_finalize(args):
 
 def cmd_reconcile(args):
     from . import reconcile
-    b = brandm.load(args.brand)
+    b = brandm.load(args.brand, args.brand_config)
     docs = _adapter(b).parse_checked(args.oc)
     ok = reconcile.run(args.draft, args.po, docs, args.out, args.allow_price or [])
     print(f"-> {args.out}")
@@ -126,5 +128,7 @@ def main(argv=None):
     r.add_argument("--allow-price", action="append", metavar="CODE",
                    help="a code whose wholesale is known to differ (reported, not failed)")
     r.set_defaults(fn=cmd_reconcile)
+    for sp in (d, c, f, r):
+        sp.add_argument("--brand-config", help="path to the brand .yaml (else $OC_BRAND_DIR, else oc/brands/)")
     args = p.parse_args(argv)
     return args.fn(args)

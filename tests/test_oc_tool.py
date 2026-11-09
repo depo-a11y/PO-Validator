@@ -9,7 +9,7 @@ import pytest
 import validator_core as core
 from oc import catalog as catm, history as histm, finalize, poxlsx
 from oc.complete import run as complete_run
-from oc.draft import build
+from oc.draft import build, oc_lines as draft_lines
 from oc.resolve import Resolver
 from oc.util import norm_size, join_key, sort_sizes
 
@@ -48,7 +48,7 @@ def catalog_path(tmp_path):
     rows = []
     for i, size in enumerate(["40", "41", "42"]):
         rows.append(_variant("1", "Replica Sneaker in White", "MEN SHOES SNEAKERS", "Active", "S99WS0001P0001 101",
-                             "WHITE", size, f"MMFW26{100 + i}", "800.00", "800.00", "300.00", i == 0, new_sale="CORE"))
+                             "WHITE", size, f"MMFW26{100 + i}", "800.00", "800.00", "310.00", i == 0, new_sale="CORE"))
     for i, size in enumerate(["40", "41"]):
         rows.append(_variant("2", "Replica Sneaker in White", "MEN SHOES SNEAKERS", "Archived", "S99WS0001P0001 101",
                              "WHITE", size, f"MMSS25{100 + i}", "900.00", "900.00", "400.00", i == 0))
@@ -135,12 +135,33 @@ def test_sku_allocation_skips_catalog(catalog_path):
     assert R.next_sku()[0] == "MMSS27003"
 
 
+def _row(eur, price, code="X 1"):
+    return dict(eur=eur, price=price, type="MEN SHOES SNEAKERS", code=code)
+
+
 def test_retail_respects_margin_floor(catalog_path):
     cat = catm.load(catalog_path)
-    hist = histm.History([("F/W 26", [dict(eur=100.0, price=300.0, type="MEN SHOES SNEAKERS", code="X 1")])])
-    R = Resolver(BRAND, cat, hist, _tags())
+    R = Resolver(BRAND, cat, histm.History([("F/W 26", [_row(100.0, 300.0), _row(100.0, 300.0)])]), _tags())
     price, src, why = R.retail("S99WS0001P1 1", 100.0, "MEN SHOES SNEAKERS")
     assert src == "rule" and price == 350 and price / R.cost(100.0) >= 2.25
+    R = Resolver(BRAND, cat, histm.History([("F/W 26", [_row(100.0, 300.0)])]), _tags())
+    price, src, why = R.retail("S99WS0001P1 1", 100.0, "MEN SHOES SNEAKERS")
+    assert src == "thin" and price == 350  # a raise never makes a one-row price look better than red
+
+
+def test_price_shading_by_evidence(catalog_path):
+    cat = catm.load(catalog_path)
+    hist = histm.History([("F/W 26", [_row(150.0, 600.0), _row(150.0, 600.0), _row(170.0, 700.0)]
+                           + [_row(e, e * 4.0, f"Y {e}") for e in (101.0, 102.0, 103.0, 104.0, 105.0)])])
+    docs = _docs()
+    R = Resolver(BRAND, cat, hist, _tags(), draft_lines(docs))
+    assert R.retail("S99WS0001P0001 555", 200.0, "MEN SHOES SNEAKERS")[1] == "catalog"   # same style+fabric sibling
+    assert R.retail("S11ZZ0001P9 1", 200.0, "MEN SHOES SNEAKERS")[1] == "similar"        # other carryover style, same EUR
+    assert R.retail("S11ZZ0001P9 1", 150.0, "MEN SHOES SNEAKERS")[1] == "history"        # 2 past rows
+    assert R.retail("S11ZZ0001P9 1", 170.0, "MEN SHOES SNEAKERS")[1] == "thin"           # 1 past row
+    assert R.retail("S11ZZ0001P9 1", 333.0, "MEN SHOES SNEAKERS")[1] == "fit"            # ratio
+    from oc.resolve import COLOUR
+    assert [COLOUR[s] for s in ("catalog", "similar", "history", "thin", "fit")] == ["green", "amber", "amber", "red", "red"]
 
 
 def test_resolve_formula_rejects_unknown():
@@ -196,11 +217,17 @@ def test_complete_keeps_human_cells_and_finalize_is_safe(catalog_path, tmp_path)
     assert not [c for c in fchecks if c["Result"] == "FAIL"], fchecks
     pu_merge = pd.read_excel(prefix + "PU-merge.xlsx")
     assert list(pu_merge.columns) == finalize.MERGE_PRODUCT_COLS
-    assert set(pu_merge["Command"]) == {"MERGE"} and pu_merge["ID"].notna().all()
+    assert set(pu_merge["Command"]) == {"UPDATE"} and pu_merge["ID"].notna().all()
+    assert set(pu_merge["Tags Command"]) == {"MERGE"}
+    rb = pd.read_excel(prefix + "PU-merge-ROLLBACK.xlsx", dtype=str)
+    assert list(rb["Command"]) == ["UPDATE"] and list(rb["Tags Command"]) == ["DELETE"] and list(rb["Tags"]) == ["S/S 27"]
+    assert list(rb[poxlsx.SEASON]) == ["F/W 26"]
     for forbidden in ("Title", "Handle", "Body HTML", "Variant Price", "Variant Cost", "Metafield: title_tag"):
         assert forbidden not in pu_merge.columns
     sizes = pd.read_excel(prefix + "PU-merge-new-sizes.xlsx", dtype=str)
     assert list(sizes["Option2 Value"]) == ["43"] and sizes["Variant SKU"][0].startswith("MMSS27")
+    assert list(sizes["Command"]) == ["UPDATE"] and list(sizes["Variant Command"]) == ["MERGE"]
+    assert list(sizes["Variant Cost"]) == ["310"]  # the product's live cost, not the PO's 300
     pu_new = pd.read_excel(prefix + "PU-new.xlsx", dtype=str)
     assert list(pu_new.columns) == core.COLUMNS_IN_ORDER
     assert list(pu_new["Option2 Value"]) == ["41", "42"]
@@ -220,3 +247,58 @@ def test_complete_rejects_a_price_override_the_oc_does_not_confirm(catalog_path,
     with pytest.raises(SystemExit):
         complete_run(str(hand), _docs(), BRAND, cat, _hist(), _tags(), str(tmp_path / "o.xlsx"),
                      price_overrides={"S99WS0001P0001 101": 999.0})
+
+
+def _finalize_po(tmp_path, title="Replica Sneaker in Black", option1="BLACK"):
+    base = {"Vendor": "MAISON MARGIELA", "Status": "Active", "Option1 Name": "Colour", "Option2 Name": "Size",
+            poxlsx.SEASON: "S/S 27", poxlsx.NEW_SALE: "NEW", "Wholesale Price": 200.0, "Variant Cost": 300.0,
+            poxlsx.COST_PRICE: "EUR 200", "Command": "NEW", "Title": title, "Type": "MEN SHOES SNEAKERS",
+            "Published": False, "Option1 Value": option1, poxlsx.CODE: "S99WS0001P0001 900", poxlsx.MADE_IN: "Italy",
+            "Body HTML": "<p>x</p>", "Variant Price": 800.0, "Variant Compare At Price": 800.0,
+            poxlsx.TITLE_TAG: f"MAISON MARGIELA - {title} |MARAIS"}
+    rows = [dict(base, **{"Option2 Value": s, "Variant SKU": f"MMSS2709{s}", "Order Qty": 2, "Total Order": 400.0})
+            for s in ("41", "42")]
+    po = tmp_path / "po.xlsx"
+    _hand_po(po, rows)
+    return str(po)
+
+
+@pytest.mark.parametrize("title,option1,needle", [
+    ("Replica Sneaker in 900", "BLACK", "raw style/fabric/colour code"),
+    ("Sneakers in P0001", "BLACK", "raw style/fabric/colour code"),
+    ("Replica Sneaker in Black", "", "Option1"),
+])
+def test_finalize_is_all_or_nothing(catalog_path, tmp_path, title, option1, needle):
+    cat = catm.load(catalog_path)
+    prefix = str(tmp_path / "x-")
+    ok = finalize.run(_finalize_po(tmp_path), BRAND, cat, prefix)
+    assert not [c for c in ok if c["Result"] == "FAIL"], ok
+    assert all(os.path.exists(prefix + n) for n in ("PU-new.xlsx", "Delivery.xlsx"))
+    bad = finalize.run(_finalize_po(tmp_path, title, option1), BRAND, cat, prefix)
+    fails = [c["Check"] for c in bad if c["Result"] == "FAIL"]
+    assert any(needle in f for f in fails), fails
+    assert not any(os.path.exists(prefix + n) for n in finalize.OUTPUTS)
+    assert os.path.exists(prefix + "finalize-checks.xlsx")
+
+
+def test_raw_code_in_title():
+    assert finalize.raw_code_in_title("Trench Coat in 114", "S98AH0001M00001 114") == ["114"]
+    assert finalize.raw_code_in_title("Sandal in T0099", "S99WP0001P0001 T0099") == ["T0099"]
+    assert finalize.raw_code_in_title("Box Card Holder 3Cc in Black", "SA9XX0001P0001 T0004") == []
+
+
+def test_brand_config_lookup_order(tmp_path, monkeypatch):
+    from oc import brand as brandm
+    body = "\n".join(f"{k}: {v}" for k, v in dict(vendor="X", adapter="otb", season="S/S 27", sku_prefix="XX",
+                                                    cost_multiplier=1.5, cost_currency="EUR", margin_floor=2.5).items())
+    d = tmp_path / "brands"
+    d.mkdir()
+    (d / "zzbrand.local.yaml").write_text(body)
+    monkeypatch.setenv("OC_BRAND_DIR", str(d))
+    assert brandm.load("zzbrand")["_path"] == str(d / "zzbrand.local.yaml")
+    other = tmp_path / "other.yaml"
+    other.write_text(body.replace("vendor: X", "vendor: Y"))
+    assert brandm.load("zzbrand", str(other))["vendor"] == "Y"
+    monkeypatch.delenv("OC_BRAND_DIR")
+    with pytest.raises(brandm.BrandError):
+        brandm.load("zzbrand")
