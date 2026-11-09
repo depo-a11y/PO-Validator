@@ -90,6 +90,15 @@ def adapter(brand_cfg):
     if brand_cfg["adapter"] == "otb":
         from .adapters import otb
         return otb
+    if brand_cfg["adapter"] == "admilano":
+        from .adapters import admilano
+        return admilano
+    if brand_cfg["adapter"] == "adidas":
+        from .adapters import adidas
+        return adidas
+    if brand_cfg["adapter"] == "fog":
+        from .adapters import fog
+        return fog
     raise brandm.BrandError(f"unknown adapter '{brand_cfg['adapter']}'")
 
 
