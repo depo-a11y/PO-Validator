@@ -147,6 +147,9 @@ class Resolver:
         if v and (how == "same fabric+colour" or row is None):
             return v, "catalog", f"{how} {colour} is {v} on {n} of {tot} product(s)"
         fam = self.keyword_family(colour_name)
+        if row is not None and fam and v == fam:
+            return v, "catalog", f"{how} {colour} is {v} on {n} of {tot} product(s); " + \
+                self.cart_why(row, f"colour '{colour_name}' agrees")
         if row is not None and fam:
             other = f"; other fabrics' {colour} is {v} in the catalog" if v and v != fam else ""
             return fam, "cart", self.cart_why(row, f"colour '{colour_name}' matches the {fam} keyword list{other}")

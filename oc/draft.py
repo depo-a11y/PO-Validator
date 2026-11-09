@@ -281,7 +281,7 @@ def _draft_checks(docs, lines, rows, R, brand, catalog, tag_lookup, dup):
     by_title = collections.defaultdict(set)
     for r in new:
         by_title[r["Title"]].add(r[CODE])
-    multi = {t: c for t, c in by_title.items() if len(c) > 1}
+    multi = {t: sorted(c) for t, c in by_title.items() if len(c) > 1}
     out.append(dict(Check="One manufacture code per NEW title (Matrixify groups NEW rows by Title)",
                     Result="FAIL" if multi else "PASS", Detail=str(multi) if multi else f"{len(by_title)} titles"))
     sale = sorted({f"{p['title']} (A${v['price']:g} vs compare-at A${v['compare_at']:g})"

@@ -63,6 +63,8 @@ MUTANTS = [
     ("oc/resolve.py", '        if row and row["subcategory"]:', "        if False:", "cart subcategory Type removed"),
     ("oc/resolve.py", '        if sib and " ".join(html.unescape(sib[0]).split()).casefold() == " ".join(value.split()).casefold():',
      "        if sib:", "cart value green although the live style disagrees"),
+    ("oc/resolve.py", "        if row is not None and fam and v == fam:", "        if False:",
+     "cart family agreeing with the catalog's colour code shaded amber"),
     # ---- cart text is data ----
     ("oc/resolve.py", '        if "<" in value or ">" in value:', "        if False:", "cart markup used in Body HTML"),
     ("oc/resolve.py", "        comp = composition if composition_is_html else html.escape(str(composition), quote=False)",

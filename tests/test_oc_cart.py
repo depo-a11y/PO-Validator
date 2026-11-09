@@ -407,3 +407,25 @@ def test_write_frame_is_to_excel_without_formulas(tmp_path):
     assert list(back["Title"]) == FORMULA_LIKE and list(back.columns) == list(frame.columns)
     assert back["Variant Price"].isna().tolist() == [False, False, True, False, False]
     assert list(back["Order Qty"]) == [1, 2, 3, 4, 5]
+
+
+def test_cart_family_agreeing_with_the_catalog_colour_code_stays_green(tmp_path):
+    _catalog(tmp_path)
+    # two live products on other fabrics call colour 961 BEIGE: a cross-fabric vote, green without a cart
+    extra = []
+    for pid, code in (("7", "S90AA0001M00009 961"), ("8", "S90AB0001M00008 961")):
+        r = {c: "" for c in CAT_COLS}
+        r.update({"ID": pid, "Variant ID": pid + "1", "Option1 Name": "Colour", "Option1 Value": "BEIGE",
+                  "Option2 Name": "Size", "Option2 Value": "M", "Variant SKU": "X" + pid, "Variant Price": "500",
+                  "Variant Compare At Price": "500", "Variant Cost": "200", "Top Row": "true", "Handle": "h" + pid,
+                  "Title": f"Coat {pid} in Sand", "Vendor": "MAISON MARGIELA", "Type": "WOMEN CLOTHING COATS TRENCH",
+                  "Tags": "", "Status": "Active", catm.MCODE: code})
+        extra.append(r)
+    with open(tmp_path / "catalog.csv", "a", encoding="utf-8", newline="") as fh:
+        csv.DictWriter(fh, fieldnames=CAT_COLS).writerows(extra)
+    cat = catm.load(str(tmp_path / "catalog.csv"))
+    cart = cartm.load(write_cart(tmp_path / "c.xlsx"))
+    _, review, _, _ = _draft(cat, cart)
+    a, b = _review(review, JACKET_A, "Option1 Value"), _review(review, JACKET_B, "Option1 Value")
+    assert (a["Value"], a["Colour"]) == ("BEIGE", "green") and "agrees" in a["Why"]     # cart Beige = catalog BEIGE
+    assert (b["Value"], b["Colour"]) == ("WHITE", "amber") and "961 is BEIGE" in b["Why"]  # cart wins, says so
