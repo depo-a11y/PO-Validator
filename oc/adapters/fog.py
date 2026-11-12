@@ -262,6 +262,7 @@ def _finish(d, cur):
                 colour_name=squash(col_text), composition=squash("".join(cur["fab"])), product_class=None,
                 sizes={s: q for s, q in hit.items() if q}, size_run=[s for s, _ in cells],
                 qty=int(units[0]["text"]), price=amounts["PRICE"], msrp=amounts.get("MSRP"),
+                rrp=amounts.get("MSRP"), rrp_currency=d["currency"],
                 line_value=amounts["TOTAL"], deliver_from=d["start_ship"], deliver_to=d["cancel_date"],
                 page=cur["pno"]), problems
 

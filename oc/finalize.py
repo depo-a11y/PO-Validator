@@ -53,6 +53,7 @@ from openpyxl.utils import get_column_letter
 
 from .poxlsx import (read_po, CODE, MADE_IN, SEASON, NEW_SALE, COST_PRICE, TITLE_TAG, AUD_FMT, money_format,
                      write_table, write_frame, append_text)
+from .draft import PRICE_CHECK
 from .util import blank, cost_currency, norm_code, norm_size, money, slug
 
 REPO = Path(__file__).resolve().parent.parent
@@ -198,6 +199,15 @@ def _pu_new(new, brand, catalog, core, out_prefix):
     no_opt = sorted({t for t, o in zip(df["Title"], df["Option1 Value"]) if not o})
     out.append(dict(Check="Every NEW row has an Option1 (colour family)", Result="FAIL" if no_opt else "PASS",
                     Detail=f"{len(no_opt)} products blank: " + "; ".join(no_opt) if no_opt else "all set"))
+    unpriced = [r for r in new if _r2(r["Variant Price"]) is None]
+    out.append(dict(Check=PRICE_CHECK, Result="FAIL" if unpriced else "PASS",
+                    Detail=(f"fill the retail price: {len(unpriced)} NEW row(s) have none, PO rows "
+                            + ", ".join(str(r["_row"]) for r in unpriced[:25]) + (" and more" if len(unpriced) > 25 else "")
+                            + " (SKUs " + ", ".join(_s(r["Variant SKU"]) for r in unpriced[:8])
+                            + (", ..." if len(unpriced) > 8 else "") + ")"
+                            if unpriced else f"{len(new)} NEW rows priced")))
+    if unpriced:
+        return out, []
 
     report = f"{out_prefix}PU-new-VALIDATION_ERRORS_REPORT.xlsx"
     if os.path.exists(report):

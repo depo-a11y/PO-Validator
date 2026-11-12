@@ -63,7 +63,7 @@ def _line(style, fabric, colour, desc, sizes, qty, price, value):
     return dict(line_no=None, style=style, fabric=fabric, colour=colour, product_class=None, description=desc,
                 composition=None, made_in=None, deliver_from=None, deliver_to=None,
                 sizes=[dict(size=s, qty_text=q) for s, q in sizes], qty_text=qty, price_text=price,
-                line_value_text=value, page=1)
+                line_value_text=value, page=1, rrp_text=None, rrp_currency=None)
 
 
 RESPONSE = dict(supplier="Example Atelier Ltd", document_kind="order_confirmation", has_size_breakdown=True,
@@ -81,8 +81,8 @@ RESPONSE = dict(supplier="Example Atelier Ltd", document_kind="order_confirmatio
 
 def _expected_line(n, style, fabric, colour, desc, sizes, qty, price, value):
     return dict(line_no=n, style=style, fabric=fabric, colour=colour, product_class="", sizes=sizes, qty=qty,
-                price=price, line_value=value, deliver_from=None, deliver_to=None, page=1, description=desc,
-                composition=None, made_in=None, reader="ai")
+                price=price, line_value=value, rrp=None, rrp_currency=None, deliver_from=None, deliver_to=None,
+                page=1, description=desc, composition=None, made_in=None, reader="ai")
 
 
 EXPECTED = [dict(doc="SO-90001", date="01 July 2026", collection=None, currency="EUR", total_qty=9, net=2716.5,

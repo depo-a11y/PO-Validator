@@ -73,7 +73,8 @@ def test_draft_returns_a_shaded_workbook_that_opens(tmp_path, oc_stub):
     assert set(review["Colour"]) >= {"red", "green"} and len(review) == wb["Review"].max_row - 1
     first = [c.value for c in wb["Checks"][2]]
     assert first[:2] == [service.HISTORY_CHECK, "WARN"] and service.RED_WARNING in first[2]
-    assert not service.fails(checks)
+    assert [c["Check"] for c in service.fails(checks)] == ["Every NEW row has a retail price"]
+    assert not service.blocking(checks)  # a blank price is filled in the sheet, so the draft is still given
 
 
 def test_draft_withholds_the_workbook_on_a_fail_the_sheet_cannot_fix(tmp_path, oc_stub):
@@ -88,7 +89,8 @@ def test_draft_keeps_the_workbook_on_a_fail_the_reviewer_fixes(tmp_path, oc_stub
     taken = base._variant("9", "Replica Sneaker in 900", "MEN SHOES SNEAKERS", "Active", "S00XX0001P0001 1",
                           "BLACK", "41", "ZXFW26900", "800.00", "800.00", "310.00", True)
     po, review, checks = service.draft("oc.pdf", _catalog(tmp_path, [taken]), _cfg())
-    assert [c["Check"] for c in service.fails(checks)] == ["NEW title does not collide with a live handle"]
+    assert [c["Check"] for c in service.fails(checks)] == ["Every NEW row has a retail price",
+                                                          "NEW title does not collide with a live handle"]
     assert service.blocking(checks) == [] and po is not None
 
 

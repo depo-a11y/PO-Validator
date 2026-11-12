@@ -8,7 +8,21 @@ Pure Python, files in and files out. Nothing here talks to Shopify, Matrixify or
     python -m oc reconcile --draft PO-draft.xlsx --po hand_PO.xlsx --oc OC.pdf --brand <brand> --out accuracy.md
 
 - `draft` builds the whole buy sheet from the OC. Every drafted cell is shaded green (OC or live
-  catalog), amber (past POs or a brand rule) or red (a guess), and the `Review` sheet says why.
+  catalog), amber (past POs or a brand rule) or red (a guess, or a value a person must supply), and the
+  `Review` sheet says why.
+
+**Retail price (Colwyn, 2026-11-12: "we can keep price blank unless theres an rrp").** A NEW product's
+`Variant Price` and `Variant Compare At Price` are written only from a brand RRP in AUD: the OC line's own RRP
+column (fog prints one as MSRP, in the document's currency; the AI reader returns `rrp_text` and `rrp_currency`;
+otb, admilano and adidas print none), else a nonzero `Sugg. Retail` in the cart, in the cart's `Currency`. An RRP
+in another or an unknown currency is never the price: the Review sheet names it. With no usable RRP both cells
+are blank and red, "price needed, no RRP from brand", and the check "Every NEW row has a retail price" is a FAIL
+fixed in the sheet. A brand RRP is never raised: under the margin floor it stays as given and "NEW rows clear the
+Nx margin" is a FAIL, also fixed in the sheet, because Step 2's margin gate would refuse it. `finalize` refuses
+any NEW row without a price ("fill the retail price", with its PO rows and SKUs). MERGE rows are unchanged:
+PU-merge never writes price. Live siblings, other styles at the same cost, past POs and ratio fits no longer
+price anything. The "same style, live sibling price" source was 10/10 right on the Margiela SS27 test and is now
+off by Colwyn's rule of 2026-11-12.
 - `complete` fills the blanks of a PO someone started by hand and never changes a typed cell, except a
   wholesale price named with `--set-price`, which must equal the OC's.
 - `finalize` turns a reviewed PO into `PU-new.xlsx` (through `validator_core.run_gate`, the same gate as
@@ -90,8 +104,8 @@ What the draft takes from the cart, shaded amber with the cart's session and row
 Where the live same style+fabric product says the same thing, the cell stays green. The product-name part of a
 new title still comes from the catalog (same style+fabric, then same style), else the class name in red.
 
-Never from the cart: quantities, wholesale and retail. Its Sugg. Retail is ignored (OTB sends 0) and a Wholesale
-that differs from the OC is an INFO check. Coverage checks: OC codes not in the cart and cart codes not on the OC
+Never from the cart: quantities and wholesale. Its Sugg. Retail is a NEW product's price only when nonzero and the
+cart's Currency is AUD (OTB sends 0, in EUR), and a Wholesale that differs from the OC is an INFO check. Coverage checks: OC codes not in the cart and cart codes not on the OC
 (INFO, with counts), and a cart sharing no code with the OC is a FAIL (wrong cart).
 
 Cart text is data, never markup or a formula. A Materials or Made In value holding `<` or `>` is not used
@@ -140,12 +154,19 @@ nothing is written into the repo and nothing talks to Shopify.
 
 The page names the config it uses (source, vendor, season), never its contents.
 
-**Past season POs** set most retail prices for new styles. Only a config file on the computer running the app may
+**Past season POs** feed the Type and the size run of new styles, never their price. Only a config file on the
+computer running the app may
 name them by path. A config from secrets or an upload never has its paths opened, because an upload could
 otherwise make the app read any file on its server; upload the past POs on the page instead. Uploads replace the
 config's list. Each is labelled with the config's label for a file of the same name, else its season column, else
 a season in its file name, and they are read newest first. When past POs are missing the page warns before the
-run, and the draft's first check says retail prices will mostly come back red.
+run, and the draft's first check says Types and size runs will rest on the catalog alone.
+
+**Local use.** The page runs on one laptop (Colwyn, 2026-11-12). `.streamlit/config.toml` binds it to 127.0.0.1,
+headless, so nobody else on the network can open it or spend on the API key; hosting must revisit that file, with
+a viewer allowlist and a per-user cap on AI reads. A brand config's numbers are checked at load: `sku_digits` is a
+whole number from 1 to 12 (it is a format width), `cost_multiplier` and `margin_floor` are above 0 and below 20,
+and the retired `price_round` key is dropped.
 
 `.streamlit/secrets.toml` is gitignored. Never commit it.
 

@@ -1,0 +1,10 @@
+# The OC-to-PO tool runs on one laptop only (Colwyn, 2026-11-12: "lets keep it on this device for now").
+# Binding to 127.0.0.1 keeps anyone else on the office network from opening the page and spending on the
+# Anthropic key through the AI reader. Hosting it anywhere must revisit this file, together with a viewer
+# allowlist and a per-user cap on AI reads. No secrets here: those live in secrets.toml, which git ignores.
+[server]
+address = "127.0.0.1"
+headless = true
+
+[browser]
+gatherUsageStats = false

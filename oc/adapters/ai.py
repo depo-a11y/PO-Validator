@@ -38,7 +38,7 @@ import time
 from pathlib import Path
 
 from . import otb
-from ..util import cost_currency, currency_off
+from ..util import cost_currency, currency_off, iso_currency
 
 MODEL = "claude-opus-5-5"
 PRICE_USD_PER_MTOK = (4.0, 20.0)    # claude-opus-5-5 input, output (thinking is billed as output)
@@ -73,6 +73,7 @@ _S = {"type": "string"}
 _NS = {"type": ["string", "null"]}
 _NI = {"type": ["integer", "null"]}
 LINE_KEYS = ["line_no", "style", "fabric", "colour", "product_class", "description", "composition", "made_in",
+             "rrp_text", "rrp_currency",
              "deliver_from", "deliver_to", "sizes", "qty_text", "price_text", "line_value_text", "page"]
 DOC_KEYS = ["number", "label", "date", "collection", "currency", "total_qty_text", "net_total_text",
             "gross_total_text", "pages", "lines"]
@@ -100,6 +101,7 @@ SCHEMA = {
                             "type": "object", "additionalProperties": False, "required": ["size", "qty_text"],
                             "properties": {"size": _S, "qty_text": _S}}},
                         "qty_text": _NS, "price_text": _NS, "line_value_text": _NS, "page": {"type": "integer"},
+                        "rrp_text": _NS, "rrp_currency": _NS,
                     }}},
             }}},
     },
@@ -142,7 +144,9 @@ For each line: line_no as printed (null if lines are not numbered); style, fabri
 or colour null if the layout has no such field); product_class is the printed product class or category column, \
 if any; description, composition (material content) and made_in (country of origin) as printed or null; \
 deliver_from and deliver_to are the line's printed delivery dates, else null; page is the PDF page number the \
-line's style code is printed on."""
+line's style code is printed on. rrp_text is the line's printed recommended retail price (an RRP, MSRP or \
+suggested retail column), as printed, else null; rrp_currency is the ISO 4217 code of that retail price, or null \
+if the document does not show which currency it is in."""
 
 PROMPT = "Transcribe every order confirmation in this PDF."
 
@@ -421,8 +425,8 @@ class Pages:
             end = next((x for x in found[k + 1:] if x >= 0), len(toks))
             block = toks[j:end]
             joined = "".join(block)
-            for field in ("price_text", "line_value_text"):
-                if l[field] is not None and _flat(_bare(l[field])) not in joined:
+            for field in ("price_text", "line_value_text", "rrp_text"):
+                if l.get(field) is not None and _flat(_bare(l[field])) not in joined:
                     miss.append(f"{field.replace('_text', '').replace('_', ' ')} '{l[field]}'")
             for field in ("fabric", "colour"):
                 if l[field] is not None and not has_words(block, l[field]):
@@ -633,7 +637,8 @@ def interpret(data, brand_cfg, pages, tight=None):
             lines.append(dict(
                 line_no=l["line_no"] if l["line_no"] is not None else i, style=l["style"], fabric=l["fabric"],
                 colour=l["colour"], product_class=l["product_class"] or "", sizes=sizes, qty=vals["qty_text"],
-                price=vals["price_text"], line_value=vals["line_value_text"], deliver_from=l["deliver_from"],
+                price=vals["price_text"], line_value=vals["line_value_text"], rrp=parse_money(l.get("rrp_text")),
+                rrp_currency=iso_currency(l.get("rrp_currency")), deliver_from=l["deliver_from"],
                 deliver_to=l["deliver_to"], page=l["page"], description=l["description"],
                 composition=l["composition"], made_in=l["made_in"], reader="ai"))
         tq, net = parse_int(d["total_qty_text"]), parse_money(d["net_total_text"])

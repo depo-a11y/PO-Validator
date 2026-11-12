@@ -4,8 +4,9 @@ the cart, one row per style-colour, e.g. OTB's '<BRAND> SS27 AVP X MARAIS, ID <s
 What the cart is for: the descriptive fields the order confirmation lacks
 (colour description, composition, made in, category, gender). What it is not
 for: quantities and prices. The OC can amend both, so they always come from the
-OC; the cart's Wholesale is read only to report where it differs, and its
-Sugg. Retail is ignored (OTB carts carry 0).
+OC; the cart's Wholesale is read only to report where it differs. A nonzero
+Sugg. Retail is the brand's RRP, in the cart's Currency: a NEW product's retail
+price only when that currency is AUD (Colwyn, 2026-11-12). OTB carts carry 0.
 
 Rows are keyed by the full join key `<Model><Fabric> <Color Code>`, never by the
 colour code alone: a Margiela numeric colour code names a different colour on
@@ -16,18 +17,18 @@ load(path) -> dict:
      "rows": {join_key: {code, row, style_name, model, fabric, colour_code, colour,
                          gender, gender_raw, collection, category, subcategory,
                          materials, made_in, made_in_raw, size_grid, available_sizes,
-                         wholesale, currency}},
+                         wholesale, currency, rrp, rrp_currency}},
      "duplicates": [join keys on more than one row (first row kept)]}
 """
 import re
 import warnings
 from pathlib import Path
 
-from .util import join_key, money, norm_size
+from .util import iso_currency, join_key, money, norm_size
 
 REQUIRED = ["Model", "Fabric", "Color Code", "Color Description"]
 OPTIONAL = ["Style Name", "Gender", "Collection", "Category", "Subcategory", "Materials", "Made In",
-            "Size Grid", "Available Sizes", "Wholesale", "Currency"]
+            "Size Grid", "Available Sizes", "Wholesale", "Currency", "Sugg. Retail"]
 GENDER = {"FEMALE": "WOMEN", "WOMAN": "WOMEN", "WOMEN": "WOMEN", "MALE": "MEN", "MAN": "MEN", "MEN": "MEN"}
 HEADER_SCAN = 50
 
@@ -126,7 +127,8 @@ def load(path):
             subcategory=_text(g(row, "Subcategory")), materials=_text(g(row, "Materials")),
             made_in=made_in_name(made_raw), made_in_raw=made_raw,
             size_grid=_sizes(g(row, "Size Grid")), available_sizes=_sizes(g(row, "Available Sizes")),
-            wholesale=money(g(row, "Wholesale")), currency=_text(g(row, "Currency")))
+            wholesale=money(g(row, "Wholesale")), currency=_text(g(row, "Currency")),
+            rrp=money(g(row, "Sugg. Retail")) or None, rrp_currency=iso_currency(_text(g(row, "Currency"))))
     if not rows:
         raise CartError(f"{Path(path).name}: sheet '{ws.title}' has a cart header on row {hdr_row} "
                         "but no style-colour rows under it")

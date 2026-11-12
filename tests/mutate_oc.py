@@ -23,7 +23,6 @@ MUTANTS = [
     ("oc/adapters/otb.py", '            if abs(l["qty"] * l["price"] - l["line_value"]) > 0.02:', "            if False:", "gate 2 removed"),
     ("oc/adapters/otb.py", '        if q != d["total_qty"]:', "        if False:", "gate 3 (units) removed"),
     ("oc/adapters/otb.py", '        if abs(v - d["net"]) > 0.02:', "        if False:", "gate 3 (value) removed"),
-    ("oc/resolve.py", "        if price < floor - 1e-9:", "        if False:", "margin floor raise removed"),
     ("oc/catalog.py", '        live = [p for p in cands if p["status"].upper() != "ARCHIVED"]',
      "        live = list(cands)", "ARCHIVED twins kept"),
     ("oc/finalize.py", """            f'=SUMIF(${first_tranche}$1:$AZ$1,"<>Value",{first_tranche}{n}:AZ{n})',""",
@@ -38,12 +37,6 @@ MUTANTS = [
      "columns_in_order = core.COLUMNS_IN_ORDER\n"
      "split_t = lambda val: core.split_t(\" \".join(str(val).split()[:4]))\n",
      "app.split_t a truncating copy, not the gate's (rebase onto b2a7c9e)"),
-    ("oc/resolve.py", '                src, detail = "similar", (', '                src, detail = "catalog", (',
-     "other-style same-EUR price shaded green"),
-    ("oc/resolve.py", '            src = ("history" if n >= 2 else "thin") if price else None',
-     '            src = "history" if price else None', "one-row history price shaded amber"),
-    ("oc/resolve.py", '                src, detail = "fit", f"{self.cur}', '                src, detail = "history", f"{self.cur}',
-     "ratio-fit price shaded amber"),
     ("oc/finalize.py", '        n["Variant Cost"] = new_cost.get(n["ID"])',
      '        n["Variant Cost"] = next(round(x["cost"], 2) for x in catalog.products[n["ID"]]["variants"] if x["cost"] is not None)',
      "new sizes take the live cost, not the OC's (rule since f2ce816)"),
@@ -389,6 +382,41 @@ MUTANTS = [
     ("oc/service.py", "                d[\"label\"] = own(d)   # the brand's own reader's label rule, on what the AI read",
      "                pass", "AI read of a fixed-layout brand keeps the AI's own label"),
     ("oc/brand.py", '    "otb": {"oc_label": ', '    "otb-not": {"oc_label": ', "otb configs load without oc_label"),
+    # ---- 2026-11-12: a NEW price only from a brand RRP in AUD ("we can keep price blank unless theres an rrp") ----
+    ("oc/resolve.py", '            if iso_currency(cur) == "AUD":', "            if True:", "an RRP in another currency used as the price"),
+    ("oc/resolve.py", '        if line and line.get("rrp"):', "        if False:", "the OC's own RRP ignored"),
+    ("oc/resolve.py", '        if row and row.get("rrp"):', "        if False:", "the cart's Sugg. Retail ignored"),
+    ("oc/draft.py", '                cell(row, "Variant Compare At Price", None, p_src, p_why)',
+     '                cell(row, "Variant Compare At Price", None, "rule", "compare-at = price at creation")',
+     "draft: a blank compare-at not marked red"),
+    ("oc/draft.py", '    out.append(dict(Check=PRICE_CHECK, Result="FAIL" if blank else "PASS",',
+     '    out.append(dict(Check=PRICE_CHECK, Result="PASS",', "draft: blank NEW prices not flagged"),
+    ("oc/draft.py", '                  if r["Variant Price"] / r["Variant Cost"] < floor})', '                  if False})',
+     "draft: a brand RRP under the margin floor not flagged"),
+    ("oc/service.py", '    "Every NEW row has a retail price",\n)', ")", "a blank price withholds the whole draft"),
+    ("oc/complete.py", '        if blank(ws.cell(r, col["Variant Compare At Price"]).value) and not blank(get(r, "Variant Price")):',
+     '        if blank(ws.cell(r, col["Variant Compare At Price"]).value):', "complete: compare-at formula over a blank price"),
+    ("oc/complete.py", '    out.append(dict(Check=PRICE_CHECK, Result="FAIL" if unpriced else "PASS",',
+     '    out.append(dict(Check=PRICE_CHECK, Result="PASS",', "complete: blank NEW prices not flagged"),
+    ("oc/finalize.py", '    out.append(dict(Check=PRICE_CHECK, Result="FAIL" if unpriced else "PASS",',
+     '    out.append(dict(Check=PRICE_CHECK, Result="PASS",', "finalize: a blank NEW price not refused by name"),
+    ("oc/cart.py", '            rrp=money(g(row, "Sugg. Retail")) or None,', "            rrp=None,", "cart: Sugg. Retail not read"),
+    ("oc/cart.py", 'rrp_currency=iso_currency(_text(g(row, "Currency"))))', 'rrp_currency="AUD")',
+     "cart: Sugg. Retail taken as AUD whatever the cart's currency"),
+    ("oc/adapters/fog.py", '                rrp=amounts.get("MSRP"), rrp_currency=d["currency"],',
+     '                rrp=amounts.get("MSRP"), rrp_currency="AUD",', "fog: MSRP taken as AUD"),
+    ("oc/adapters/ai.py", '            for field in ("price_text", "line_value_text", "rrp_text"):',
+     '            for field in ("price_text", "line_value_text"):', "AI: an RRP not held to its line's part of the PDF"),
+    ("oc/adapters/ai.py", '                rrp_currency=iso_currency(l.get("rrp_currency")), deliver_from=l["deliver_from"],',
+     '                rrp_currency="AUD", deliver_from=l["deliver_from"],', "AI: an RRP with no currency taken as AUD"),
+    ("pages/1_Order_confirmation_to_PO.py", '"The Review sheet in the file says where each value came from. Retail prices of new products are "',
+     '"The Review sheet in the file says where each value came from. "', "page: no word that new prices are blank"),
+    # ---- security review of f1070f5 ----
+    (".streamlit/config.toml", 'address = "127.0.0.1"', 'address = "0.0.0.0"', "page listens on every network interface"),
+    ("oc/brand.py", "    if isinstance(digits, bool) or not isinstance(digits, int) or not 1 <= digits <= 12:", "    if False:",
+     "an uploaded sku_digits builds a huge SKU"),
+    ("oc/brand.py", "        if isinstance(v, bool) or not isinstance(v, (int, float)) or not 0 < v < 20:", "        if False:",
+     "cost_multiplier / margin_floor not range-checked"),
 ]
 
 
@@ -416,7 +444,8 @@ def main():
             assert src.count(old) == 1, f"{label}: anchor not unique in {f}"
             p.write_text(src.replace(old, new))
             try:
-                py_compile.compile(str(p), doraise=True)
+                if p.suffix == ".py":   # a mutated .toml or .md is checked by the suite alone
+                    py_compile.compile(str(p), doraise=True)
             except py_compile.PyCompileError:
                 results.append((label, "BROKEN"))
                 p.write_bytes(before[f])

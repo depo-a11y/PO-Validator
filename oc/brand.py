@@ -54,7 +54,7 @@ BRANDS = Path(__file__).resolve().parent / "brands"
 
 DEFAULTS = dict(
     status="Active", published_new=False, published_merge=True, new_sale="NEW",
-    option1_name="Colour", option2_name="Size", price_round=50, sku_digits=3,
+    option1_name="Colour", option2_name="Size", sku_digits=3,
     title_tag="{vendor} - {title} |MARAIS",
     body_html="<p>Composition: {composition}</p> <p>Made in {made_in}</p> <p>SKU: {code}</p>",
     unknown="-", womens_prefix="Womens ", history=[], product_class_types={},
@@ -242,6 +242,20 @@ def _reader_keys(cfg, data, source):
     cfg["colour_codes"] = {norm_colour(k): str(v).strip() for k, v in codes.items()}
 
 
+def _numbers(cfg, source):
+    """Numbers from a config, which can be an upload: checked so none can blow up memory or time. sku_digits is a
+    format width (a huge one builds a huge string); the money rates must be ordinary positive numbers."""
+    digits = cfg.get("sku_digits")
+    if isinstance(digits, bool) or not isinstance(digits, int) or not 1 <= digits <= 12:
+        raise BrandError(f"{source}: sku_digits is how many digits follow the SKU prefix, a whole number from 1 to "
+                         f"12, got {digits!r}")
+    for key in ("cost_multiplier", "margin_floor"):
+        v = cfg.get(key)
+        if isinstance(v, bool) or not isinstance(v, (int, float)) or not 0 < v < 20:
+            raise BrandError(f"{source}: {key} is a number above 0 and below 20, got {v!r}")
+    cfg.pop("price_round", None)   # retail is never fitted or rounded since 2026-11-12; an old config's key is unused
+
+
 def _text_templates(cfg, source):
     """title_tag and body_html may hold only their own {tokens}; any other brace is refused, as for join_key."""
     for key, fields in TEXT_TEMPLATES.items():
@@ -276,6 +290,7 @@ def _finish(data, source, name, paths=False):
         raise BrandError(f"{source}: missing {missing}")
     _reader_keys(cfg, data, source)
     _text_templates(cfg, source)
+    _numbers(cfg, source)
     for h in cfg["history"]:
         if not isinstance(h, Mapping) or not h.get("path") or not h.get("label"):
             raise BrandError(f"{source}: each history entry needs a label and a path, got {h!r}")

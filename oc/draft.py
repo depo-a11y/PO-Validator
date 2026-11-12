@@ -13,7 +13,9 @@ import collections
 
 from .brand import ColourCodeError, code_for, unmapped_colours
 from .poxlsx import PO_HEADER, CODE, MADE_IN, SEASON, NEW_SALE, COST_PRICE, TITLE_TAG, review_row
-from .resolve import Resolver, COLOUR, AI_OC, AI_NEW_SIZE, split_code, worse
+from .resolve import Resolver, COLOUR, AI_OC, AI_NEW_SIZE, NO_RRP, split_code, worse
+
+PRICE_CHECK = "Every NEW row has a retail price"
 from .util import norm_size, sort_sizes, size_key, fmt_money, cost_currency, slug
 
 
@@ -122,7 +124,7 @@ def build(docs, brand, catalog, history, tag_lookup, cart=None):
         pending.append(dict(
             l=l, code=code, eur=eur, gender=gender, ptype=(ptype, t_src, t_why), title=[title, ti_src, ti_why],
             fam=R.colour_family(code, cname), run=R.size_run(code, l["sizes_norm"], ptype),
-            price=R.retail(code, eur, ptype), made=R.made_in(code), comp=R.composition(code)))
+            price=R.retail(code, l), made=R.made_in(code), comp=R.composition(code)))
 
     _dedupe_titles(pending, R, brand, checks)
     for n in pending:
@@ -155,7 +157,10 @@ def build(docs, brand, catalog, history, tag_lookup, cart=None):
             sku, s_, why = R.next_sku()
             cell(row, "Variant SKU", sku, s_, why)
             cell(row, "Variant Price", price, p_src, p_why)
-            cell(row, "Variant Compare At Price", price, "rule", "compare-at = price at creation")
+            if price is None:
+                cell(row, "Variant Compare At Price", None, p_src, p_why)
+            else:
+                cell(row, "Variant Compare At Price", price, "rule", "compare-at = price at creation")
             _money_cells(cell, row, R, brand, eur, l["sizes_norm"].get(size, 0))
             cell(row, CODE, code, "OC", f"{l['doc']} line {l['line_no']} ({l['product_class']})")
             cell(row, SEASON, brand["season"], "rule", "brand config")
@@ -280,9 +285,20 @@ def _draft_checks(docs, lines, rows, R, brand, catalog, tag_lookup, dup):
     if mt:
         out.append(dict(Check="MERGE (live) Type is in expected_tags.xlsx", Result="WARN",
                         Detail=", ".join(sorted({f"{r['Title']}: {r['Type']}" for r in mt}))))
-    low = [r for r in new if not r["Variant Price"] or r["Variant Price"] / r["Variant Cost"] < brand["margin_floor"]]
-    out.append(dict(Check=f"NEW rows clear the {brand['margin_floor']}x margin", Result="FAIL" if low else "PASS",
-                    Detail=f"{len(new) - len(low)} of {len(new)} rows"))
+    floor = brand["margin_floor"]
+    blank = [r for r in new if r["Variant Price"] is None]
+    out.append(dict(Check=PRICE_CHECK, Result="FAIL" if blank else "PASS",
+                    Detail=(f"{NO_RRP}: {len(blank)} of {len(new)} rows, {len({r[CODE] for r in blank})} products. "
+                            "Type each retail price into the sheet." if blank else f"{len(new)} rows priced")))
+    priced = [r for r in new if r["Variant Price"] is not None]
+    low = sorted({(r[CODE], r["Variant Price"], r["Variant Cost"]) for r in priced
+                  if r["Variant Price"] / r["Variant Cost"] < floor})
+    out.append(dict(Check=f"NEW rows clear the {floor}x margin", Result="FAIL" if low else "PASS",
+                    Detail=(f"{len(low)} brand RRP(s) under the floor, kept as the brand gave them (never raised): "
+                            + "; ".join(f"{c} A${p:g} / A${k:g} = {p / k:.2f}x" for c, p, k in low)
+                            + ". Step 2's margin gate refuses them: agree a price, or ask Colwyn about the floor."
+                            if low else f"{len(priced)} priced rows" + (f"; {len(blank)} blank rows have no price "
+                                                                        "to check yet" if blank else ""))))
     lowm = sorted({(r[CODE], r["Title"], r["Variant Price"], r["Variant Cost"]) for r in rows
                    if r["Command"] == "MERGE" and r["Variant Price"] / r["Variant Cost"] < brand["margin_floor"]})
     if lowm:

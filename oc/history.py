@@ -1,11 +1,10 @@
-"""Past season POs for the brand: retail ladder, Type runs, colour names.
+"""Past season POs for the brand: the Types and size runs of past products.
 
-Each PO is the house 29/30-column buy sheet (`<Brand>_<SEASON>_PO.xlsx`) with
-Wholesale Price (supplier currency) next to Variant Price (AUD). Paths come from
-the brand config, newest first; nothing here is committed.
+Each PO is the house 29/30-column buy sheet (`<Brand>_<SEASON>_PO.xlsx`). Paths come
+from the brand config, newest first; nothing here is committed. Past retail prices are
+not read: since 2026-11-12 a NEW product's price comes only from a brand RRP in AUD.
 """
 import collections
-import statistics
 
 import openpyxl
 
@@ -23,31 +22,6 @@ class History:
         for r in self.rows:
             self.by_code[r["code"]].append(r)
 
-    def ladder(self, eur, currency="EUR"):
-        """Most common retail for this exact wholesale in the newest season that has it.
-
-        Returns (price, detail, n) where n is the number of past PO rows behind it."""
-        for label, rs in self.seasons:
-            c = collections.Counter(r["price"] for r in rs
-                                    if r["eur"] is not None and abs(r["eur"] - eur) < 0.005 and r["price"])
-            if c:
-                (price, n), = c.most_common(1)
-                return price, f"{label}: {currency} {eur:g} sold at A${price:g} on {n} row(s)", n
-        return None, None, 0
-
-    def ratio(self, category=None):
-        """Median retail/wholesale in the newest season, optionally for one category."""
-        for label, rs in self.seasons:
-            vals = [r["price"] / r["eur"] for r in rs if r["eur"] and r["price"]
-                    and (category is None or category_of(r["type"]) == category)]
-            if len(vals) >= 5:
-                return statistics.median(vals), f"{label} median retail/wholesale" + (f" for {category}" if category else "")
-        return None, None
-
-    def wholesale_of(self, code):
-        vals = [r["eur"] for r in self.by_code.get(norm_code(code), []) if r["eur"]]
-        return vals[0] if vals else None
-
     def runs_for_type(self, ptype):
         """Counter of size runs (tuples) per product code for one Type, all seasons."""
         runs = collections.Counter()
@@ -63,11 +37,6 @@ class History:
 def _k(s):
     from .util import size_key
     return size_key(s)
-
-
-def category_of(ptype):
-    p = str(ptype or "").split()
-    return p[1] if len(p) > 1 else None
 
 
 def _load_one(path, label):
@@ -97,7 +66,6 @@ def _load_one(path, label):
             season=label, code=norm_code(code), title=title, stem=stem, colour_name=colour,
             type=str(g(r, "Type") or "").strip(), option1=str(g(r, "Option1 Value") or "").strip(),
             size=norm_size(g(r, "Option2 Value")), qty=money(g(r, "Order Qty")) or 0,
-            eur=money(g(r, "Wholesale Price")), price=money(g(r, "Variant Price")),
             command=str(g(r, "Command") or "").strip().upper()))
     wb.close()
     return rows

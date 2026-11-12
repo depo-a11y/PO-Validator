@@ -210,7 +210,7 @@ cart_up = st.file_uploader(
     "Linesheet/cart export (optional, improves titles and colours)", type=["xlsx"], key="w_cart",
     disabled=not can_cart, help=None if can_cart else "This version cannot read a linesheet yet.")
 hist_ups = st.file_uploader(
-    "Past season POs (optional, used for retail prices)", type=["xlsx"], accept_multiple_files=True, key="w_hist",
+    "Past season POs (optional, used for Types and size runs)", type=["xlsx"], accept_multiple_files=True, key="w_hist",
     help="The brand's PO buy sheets from past seasons. If you add any, they replace the list in the brand config.")
 if cfg:
     if hist_ups:
@@ -279,7 +279,9 @@ if S.get("draft"):
                            type="primary", on_click="ignore")
         st.info(f"Next: open the draft in Excel, fix every red cell ({n_red} values, listed below), check every "
                 f"amber cell ({n_amber} values below, plus the house rules), save it, then upload it in Step 2. "
-                "The Review sheet in the file says where each value came from.")
+                "The Review sheet in the file says where each value came from. Retail prices of new products are "
+                "blank unless the brand gave a retail price (RRP) in Australian dollars: type them in. Step 2 "
+                "will not make the files until every new product has a price.")
         fixable = service.fails(d["checks"])
         if fixable:
             st.warning("Step 2 will refuse the PO until these are also fixed in the sheet:")

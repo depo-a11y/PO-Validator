@@ -155,3 +155,19 @@ def test_the_expander_names_the_built_in_readers_before_ai(tmp_path, monkeypatch
     text = " ".join(m.value for m in exp.markdown)
     assert ("the built-in one if the brand's OCs are one of the known layouts (Margiela/MM6, AD Milano, adidas, "
             "Fear of God), else `adapter: ai`") in text
+
+
+def test_the_page_says_prices_are_blank_without_an_rrp_and_step_2_wants_them(tmp_path, monkeypatch):
+    at = _page_with_brand(tmp_path, monkeypatch, "adapter: otb\noc_label: MM\n")
+    review = pd.DataFrame([dict(Row=2, Code="X 1", Size="41", Column="Variant Price", Value=None, Source="price needed",
+                                Colour="red", Why="price needed, no RRP from brand")])
+    price = dict(Check="Every NEW row has a retail price", Result="FAIL", Detail="price needed, no RRP from brand: 1 of 1 rows")
+    at.session_state["draft"] = dict(po=b"x", review=review, checks=[price], file="x.xlsx", made_from="oc.pdf")
+    at.session_state["final"] = dict(zip=None, errors=pd.DataFrame(), file="x.zip", run="r", made_from="po.xlsx",
+                                     checks=[dict(price, Detail="fill the retail price: 1 NEW row(s) have none, PO rows 2 "
+                                                                "(SKUs MMSS27091)")])
+    at.run()
+    assert not at.exception
+    assert any("Retail prices of new products are blank unless the brand gave a retail price (RRP) in Australian "
+               "dollars: type them in" in i.value for i in at.info)
+    assert any("fill the retail price: 1 NEW row(s) have none, PO rows 2" in e.value for e in at.error)

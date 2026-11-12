@@ -13,8 +13,8 @@ Two differences from the CLI, both for a hosted app:
   `history_paths` (uploaded files) replaces the config's list, and config paths
   that do not exist are skipped with a WARN check instead of a crash. A config
   from text (an upload or the app's secrets) never has its paths opened at all
-  (see oc/brand.py). Either way a "Past season POs" check says what the retail
-  prices were built from.
+  (see oc/brand.py). Either way a "Past season POs" check says what the Types
+  and size runs of new styles were built from (never their prices).
 - Bad inputs (an OC that fails its gates, a catalog missing columns, an
   unreadable linesheet) come back as FAIL checks rather than exceptions.
 
@@ -60,10 +60,11 @@ FIXABLE_IN_SHEET = (
     "One manufacture code per NEW title",
     "Every NEW Type is in expected_tags.xlsx",
     "NEW rows clear the ",
+    "Every NEW row has a retail price",
 )
 
 ZIP_MEMBERS = finalizem.OUTPUTS + ["finalize-checks.xlsx"]
-HISTORY_CHECK = "Past season POs (retail price history)"
+HISTORY_CHECK = "Past season POs (Types and size runs)"
 READER_CHECK = "Order confirmation reader"
 CURRENCY_CHECK = "Order confirmation is in the brand's cost currency"
 IDENTITY_CHECK = "Order confirmation is for the brand picked (issuer and label)"
@@ -81,7 +82,7 @@ LAYOUTS = {"otb": "the OTB layout (Maison Margiela, MM6)", "admilano": "the AD M
 def fixed_reader_row(name):
     return _check(READER_CHECK, "INFO", f"read by the built-in reader for {LAYOUTS[name]}, which reads the PDF's "
                                         "text by position; no AI was used")
-RED_WARNING = "Retail prices for new styles will mostly come back red."
+RED_WARNING = "Types and size runs of new styles will rest on the catalog alone."
 
 SEASON_RE = re.compile(r"\b(S/S|F/W|A/W)\s*(\d{2})\b")
 FILE_SEASON_RE = re.compile(r"(?<![A-Z])(SS|FW|AW)[\s_-]?(\d{2})(?!\d)", re.I)

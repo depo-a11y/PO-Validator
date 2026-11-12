@@ -123,9 +123,13 @@ def test_draft_merge_and_new(catalog_path):
     assert next(r for r in merge if r["Option2 Value"] == "41")["Variant SKU"] == "ZXFW26101"
     assert {r["Title"] for r in new} == {"Replica Sneaker in 900"}
     assert new[0]["Type"] == "MEN SHOES SNEAKERS"
-    assert new[0]["Variant Price"] == 800
+    assert new[0]["Variant Price"] is None and new[0]["Variant Compare At Price"] is None  # no RRP: blank
     assert sum(r["Order Qty"] for r in rows) == 6
-    assert not [c for c in checks if c["Result"] == "FAIL"]
+    assert [c["Check"] for c in checks if c["Result"] == "FAIL"] == ["Every NEW row has a retail price"]
+    price = {(x["Column"], x["Source"], x["Colour"], x["Why"]) for x in review
+             if x["Code"] == "S99WS0001P0001 900" and x["Column"] in ("Variant Price", "Variant Compare At Price")}
+    assert price == {(c, "price needed", "red", "price needed, no RRP from brand")
+                     for c in ("Variant Price", "Variant Compare At Price")}
     sources = {(x["Column"], x["Source"]) for x in review if x["Code"] == "S99WS0001P0001 900"}
     assert ("Title", "guess") in sources and ("Variant SKU", "rule") in sources  # stem is live, colour name is not
     why = {x["Why"] for x in review if x["Column"] == "Published" and x["Code"] == "S99WS0001P0001 900"}
@@ -138,42 +142,6 @@ def test_sku_allocation_skips_catalog(catalog_path):
     R = Resolver(BRAND, cat, _hist(), _tags())
     assert R.next_sku()[0] == "MMSS27002"
     assert R.next_sku()[0] == "MMSS27003"
-
-
-def _row(eur, price, code="X 1"):
-    return dict(eur=eur, price=price, type="MEN SHOES SNEAKERS", code=code)
-
-
-def test_retail_respects_margin_floor(catalog_path):
-    cat = catm.load(catalog_path)
-    R = Resolver(BRAND, cat, histm.History([("F/W 26", [_row(100.0, 300.0), _row(100.0, 300.0)])]), _tags())
-    price, src, why = R.retail("S99WS0001P1 1", 100.0, "MEN SHOES SNEAKERS")
-    assert src == "rule" and price == 350 and price / R.cost(100.0) >= 2.25
-    R = Resolver(BRAND, cat, histm.History([("F/W 26", [_row(100.0, 300.0)])]), _tags())
-    price, src, why = R.retail("S99WS0001P1 1", 100.0, "MEN SHOES SNEAKERS")
-    assert src == "thin" and price == 350  # a raise never makes a one-row price look better than red
-
-
-def test_price_shading_by_evidence(catalog_path):
-    cat = catm.load(catalog_path)
-    hist = histm.History([("F/W 26", [_row(150.0, 600.0), _row(150.0, 600.0), _row(170.0, 700.0)]
-                           + [_row(e, e * 4.0, f"Y {e}") for e in (101.0, 102.0, 103.0, 104.0, 105.0)])])
-    docs = _docs()
-    R = Resolver(BRAND, cat, hist, _tags(), draft_lines(docs))
-    assert R.retail("S99WS0001P0001 555", 200.0, "MEN SHOES SNEAKERS")[1] == "catalog"   # same style+fabric sibling
-    assert R.retail("S11ZZ0001P9 1", 200.0, "MEN SHOES SNEAKERS")[1] == "similar"        # other carryover style, same EUR
-    assert R.retail("S11ZZ0001P9 1", 150.0, "MEN SHOES SNEAKERS")[1] == "history"        # 2 past rows
-    assert R.retail("S11ZZ0001P9 1", 170.0, "MEN SHOES SNEAKERS")[1] == "thin"           # 1 past row
-    assert R.retail("S11ZZ0001P9 1", 333.0, "MEN SHOES SNEAKERS")[1] == "fit"            # ratio
-    from oc.resolve import COLOUR
-    assert [COLOUR[s] for s in ("catalog", "similar", "history", "thin", "fit")] == ["green", "amber", "amber", "red", "red"]
-
-
-def test_resolve_formula_rejects_unknown():
-    raw = {2: [None, 5.0]}
-    assert poxlsx.resolve_formula("=B2", raw, 2) == 5.0
-    with pytest.raises(ValueError):
-        poxlsx.resolve_formula("=B2*2", raw, 2)
 
 
 def _hand_po(path, cat_rows):
@@ -199,6 +167,7 @@ def test_complete_keeps_human_cells_and_finalize_is_safe(catalog_path, tmp_path)
     new = [dict(base, Command="NEW", Title="Replica Sneaker in Black", Type="MEN SHOES SNEAKERS", Published=False,
                 **{"Option1 Value": "BLACK", "Option2 Value": float(s), poxlsx.CODE: "S99WS0001P0001 900",
                    "Order Qty": q, "Total Order": q * 200.0, poxlsx.MADE_IN: "-", "Body HTML": "<p>hand</p>",
+                   "Variant Price": 800.0,
                    poxlsx.TITLE_TAG: "MAISON MARGIELA - Replica Sneaker in Black |MARAIS"})
            for s, q in (("41", 2), ("42", 2))]
     hand = tmp_path / "hand.xlsx"

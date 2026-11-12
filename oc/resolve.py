@@ -5,26 +5,29 @@ Every resolver returns (value, source, detail). Sources, in trust order:
   OC, catalog  -> green   (read from the confirmation or the live store, same style)
   OC (AI read) -> amber   (read from the confirmation by the AI reader)
   OC (AI read), size not live -> red (an AI-read size the live product does not have)
-  cart, history, rule, similar -> amber (the selling-session cart, past POs on 2+ rows,
-                           a brand rule, or a different live style at the same wholesale)
-  thin, fit, guess -> red (one past row, a fitted ratio, or nothing to go on)
+  price needed -> red    (a NEW retail price left blank: no RRP in AUD from the brand)
+  cart, history, rule -> amber (the selling-session cart, past POs, or a brand rule)
+  guess -> red            (nothing to go on)
+A NEW product's retail price is never resolved from the catalog, past POs or other styles: only from a
+brand RRP in AUD (see Resolver.retail). Past POs still feed Type and size runs.
 """
 import collections
 import html
-import math
 import re
 
 from .brand import fill_text
-from .util import cost_currency, norm_code, norm_size, sort_sizes, size_key, title_colour, slug
+from .util import cost_currency, iso_currency, norm_code, norm_size, sort_sizes, size_key, title_colour, slug
 
 GREEN, AMBER, RED = "green", "amber", "red"
+NEEDED = "price needed"   # a NEW retail price left blank for a person to fill: red
+NO_RRP = "price needed, no RRP from brand"
 AI_OC = "OC (AI read)"   # a value the AI reader took from the OC: never green, however well it passed the gates
 AI_NEW_SIZE = "OC (AI read), size not live"   # an AI-read size the live product does not have: red
 GENDERS = ("MEN", "WOMEN", "UNISEX")
 # A colour description is copied into a title; anything outside these is a garbled export ('Peach Pur}e').
 CLEAN_COLOUR = re.compile(r"[^\w\s/&'.,()+-]")
-COLOUR = {"OC": GREEN, AI_OC: AMBER, AI_NEW_SIZE: RED, "catalog": GREEN, "cart": AMBER, "history": AMBER, "rule": AMBER, "similar": AMBER,
-          "thin": RED, "fit": RED, "guess": RED}
+COLOUR = {"OC": GREEN, AI_OC: AMBER, AI_NEW_SIZE: RED, NEEDED: RED, "catalog": GREEN, "cart": AMBER, "history": AMBER,
+          "rule": AMBER, "guess": RED}
 RANK = {GREEN: 0, AMBER: 1, RED: 2}
 
 
@@ -267,52 +270,23 @@ class Resolver:
     def cost(self, eur):
         return round(eur * self.b["cost_multiplier"], 2)
 
-    def floor_price(self, eur):
-        return self.cost(eur) * self.b["margin_floor"]
-
-    def retail(self, code, eur, ptype):
-        step = self.b["price_round"]
-        price = src = detail = None
-        for p in self.siblings(code, "fabric"):
-            if p["status"].upper() == "ARCHIVED":
-                continue
-            sib_eur = self.oc.get(p["code"], {}).get("price") or self.hist.wholesale_of(p["code"])
-            prices = [max(v["price"] or 0, v["compare_at"] or 0) for v in p["variants"]]
-            if sib_eur is not None and abs(sib_eur - eur) < 0.005 and prices:
-                price = collections.Counter(prices).most_common(1)[0][0]
-                src, detail = "catalog", f"same style+fabric {p['title']} at {self.cur} {sib_eur:g} sells at A${price:g}"
-                break
-        if price is None:
-            same = collections.Counter()
-            for c, l in self.oc.items():
-                if c == norm_code(code) or abs(l["price"] - eur) > 0.005:
-                    continue
-                p, _, _ = self.cat.match(c)
-                if p is not None:
-                    same.update(max(v["price"] or 0, v["compare_at"] or 0) for v in p["variants"][:1])
-            if same:
-                price, n = same.most_common(1)[0]
-                src, detail = "similar", (f"{n} carryover line(s) of other styles on this OC at {self.cur} {eur:g} "
-                                          f"sell at A${price:g} today")
-        if price is None:
-            price, detail, n = self.hist.ladder(eur, self.cur)
-            src = ("history" if n >= 2 else "thin") if price else None
-        if price is None:
-            from .history import category_of
-            ratio, why = self.hist.ratio(category_of(ptype))
-            if ratio is None:
-                ratio, why = self.hist.ratio()
-            if ratio is not None:
-                price = math.ceil(eur * ratio / step) * step
-                src, detail = "fit", f"{self.cur} {eur:g} x {ratio:.2f} ({why}), rounded up to {step}"
-        if price is None:
-            return None, "guess", "no price history"
-        floor = self.floor_price(eur)
-        if price < floor - 1e-9:
-            new = math.ceil(floor / step) * step
-            return new, worse(src, "rule"), (f"{detail}; raised from A${price:g} to clear the "
-                                             f"{self.b['margin_floor']}x margin (floor A${floor:.2f})")
-        return price, src, detail
+    def retail(self, code, line):
+        """(price | None, source, why) for a NEW product. Only a brand-supplied RRP in AUD is a price (Colwyn,
+        2026-11-12, "we can keep price blank unless theres an rrp"): the OC line's own RRP column, else a nonzero
+        Sugg. Retail in the cart. Never a live sibling, another style, a past PO or a ratio. An RRP in another or
+        an unknown currency is named in the Why and never used; it is never raised to the margin floor either."""
+        offers = []
+        if line and line.get("rrp"):
+            offers.append(("OC", line["rrp"], line.get("rrp_currency"), f"{line['doc']} line {line['line_no']}"))
+        row = self.cart_row(code)
+        if row and row.get("rrp"):
+            offers.append(("cart", row["rrp"], row.get("rrp_currency"), self.cart_why(row, "Sugg. Retail")))
+        for src, value, cur, where in offers:
+            if iso_currency(cur) == "AUD":
+                return value, src, f"brand RRP A${value:g} ({where})"
+        seen = "; ".join(f"the brand's RRP is {iso_currency(cur) or 'in an unknown currency'} {value:g} ({where}), "
+                         "not an AUD price" for _, value, cur, where in offers)
+        return None, NEEDED, NO_RRP + (f"; {seen}" if seen else "")
 
     # ---- made in / composition ---------------------------------------------
     def made_in_of(self, p):

@@ -14,7 +14,8 @@ from openpyxl.utils import get_column_letter
 from .draft import oc_lines, cart_checks
 from .poxlsx import (FILLS, CODE, MADE_IN, COST_PRICE, TITLE_TAG, SEASON, NEW_SALE, PO_FORMULA,
                      resolve_formula, write_table, review_row, clean_text, as_text)
-from .resolve import Resolver, COLOUR, AI_OC
+from .draft import PRICE_CHECK
+from .resolve import Resolver, COLOUR, AI_OC, NO_RRP
 from .util import blank, norm_code, norm_size, fmt_money, cost_currency, money, slug
 
 
@@ -80,7 +81,8 @@ def run(po_path, docs, brand, catalog, history, tag_lookup, out, price_overrides
                 sku, s, why = R.next_sku()
                 put(r, "Variant SKU", sku, s, why + ("" if command == "NEW" else " (new size on a live product)"))
 
-    # 3. retail price + compare-at on NEW rows, one price per product
+    # 3. retail price on NEW rows only from a brand RRP in AUD (Resolver.retail); otherwise left blank for a
+    #    person. The compare-at formula goes in only where there is a price for it to copy.
     priced = {}
     for r in data_rows:
         if str(get(r, "Command")).strip().upper() != "NEW":
@@ -88,10 +90,11 @@ def run(po_path, docs, brand, catalog, history, tag_lookup, out, price_overrides
         code = norm_code(get(r, CODE))
         if blank(get(r, "Variant Price")):
             if code not in priced:
-                priced[code] = R.retail(code, money(get(r, "Wholesale Price")), get(r, "Type"))
+                priced[code] = R.retail(code, by_code.get(code))
             price, s, why = priced[code]
-            put(r, "Variant Price", price, s, why)
-        if blank(ws.cell(r, col["Variant Compare At Price"]).value):
+            if price is not None:
+                put(r, "Variant Price", price, s, why)
+        if blank(ws.cell(r, col["Variant Compare At Price"]).value) and not blank(get(r, "Variant Price")):
             put(r, "Variant Compare At Price", f"={get_column_letter(col['Variant Price'])}{r}",
                 "rule", "compare-at = price (a formula, as on the sheet's MERGE rows)")
 
@@ -169,9 +172,16 @@ def _checks(ws, col, data_rows, get, lines, R, brand, catalog, tag_lookup, revie
                     Detail=f"{len(stale)} differ" + (f": {stale[:5]}" if stale else "")))
     new = [x for x in rows if str(x["Command"]).strip().upper() == "NEW"]
     floor = brand["margin_floor"]
-    low = [x for x in new if not money(x["Variant Price"]) or money(x["Variant Price"]) / money(x["Variant Cost"]) < floor]
+    unpriced = [x for x in new if not money(x["Variant Price"])]
+    out.append(dict(Check=PRICE_CHECK, Result="FAIL" if unpriced else "PASS",
+                    Detail=(f"{NO_RRP}: rows {', '.join(str(x['_row']) for x in unpriced[:20])}"
+                            + (" and more" if len(unpriced) > 20 else "") + ". Type each retail price in."
+                            if unpriced else f"{len(new)} rows priced")))
+    low = [x for x in new if money(x["Variant Price"]) and money(x["Variant Price"]) / money(x["Variant Cost"]) < floor]
     out.append(dict(Check=f"NEW rows clear the {floor}x margin", Result="FAIL" if low else "PASS",
-                    Detail=f"{len(new) - len(low)} of {len(new)} rows"))
+                    Detail=f"{len(new) - len(unpriced) - len(low)} of {len(new) - len(unpriced)} priced rows"
+                           + (f"; under the floor (kept as given, never raised): rows {[x['_row'] for x in low][:10]}"
+                              if low else "")))
     types = set(tag_lookup)
     badt = sorted({x["Type"] for x in new if x["Type"] not in types})
     out.append(dict(Check="Every NEW Type is in expected_tags.xlsx", Result="FAIL" if badt else "PASS",

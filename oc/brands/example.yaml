@@ -24,7 +24,6 @@ cost_currency: EUR             # the OC's currency (an OC in any other is refuse
 # title_tag: "{vendor} - {title} |MARAIS"   # only {vendor} {title}; body_html only {composition} {made_in} {code}
 cost_multiplier: 1.0           # AUD Variant Cost = wholesale x this (season convention)
 margin_floor: 2.5              # must match validator_core.margin_threshold for the vendor
-price_round: 50                # retail rounded to this step when fitted from a ratio
 default_gender: MEN            # for collections that carry no gender (e.g. jewellery)
 history:                       # past season POs, newest first
   - {label: F/W 26, path: ~/path/to/Brand_FW26_PO.xlsx}
