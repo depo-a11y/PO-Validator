@@ -1,5 +1,5 @@
 """Fixed-layout OC adapters: AD Milano, adidas AG, Fear of God, THUG CLUB Corp. (tests/test_oc_thugclub.py has its own),
-the JOOR order print.
+the JOOR order print, the "#3xxxxxx" ordering platform (p3m).
 
 Synthetic PDFs (tests/oc_synth.py) always. Real PDFs only when OC_FIXED_PDF_DIR
 points at a local folder of them, because order data is never committed to this
@@ -12,9 +12,10 @@ import pdfplumber
 import pytest
 
 import oc_synth
+import oc_synth_p3m
 import thug_synth
 from oc import service
-from oc.adapters import admilano, adidas, fog, joor, otb, thugclub
+from oc.adapters import admilano, adidas, fog, joor, otb, p3m, thugclub
 from oc.brand import code_for
 from oc.util import join_key
 
@@ -22,7 +23,8 @@ ADAPTERS = {"admilano": (admilano, oc_synth.admilano_pdf),
             "adidas": (adidas, oc_synth.adidas_pdf),
             "fog": (fog, oc_synth.fog_pdf),
             "thugclub": (thugclub, thug_synth.portrait_pdf),
-            "joor": (joor, oc_synth.joor_pdf)}
+            "joor": (joor, oc_synth.joor_pdf),
+            "p3m": (p3m, oc_synth_p3m.grid_pdf)}
 
 
 @pytest.fixture(scope="module")
@@ -74,7 +76,8 @@ def test_service_names_each_adapter(name):
 
 @pytest.mark.parametrize("name,want", [("admilano", (1, 3, 14, 10550.0)), ("adidas", (1, 4, 29, 2260.0)),
                                        ("fog", (1, 3, 24, 430.0)), ("thugclub", (1, 4, 17, 1653.0)),
-                                       ("joor", (2, 8, 21, 1679.37))])
+                                       ("joor", (2, 8, 21, 1679.37)),
+                                       ("p3m", (1, 6, 33, 2425.0))])
 def test_synthetic_reproduces_printed_totals(pdfs, name, want):
     mod = ADAPTERS[name][0]
     t = mod.totals(mod.parse_checked(pdfs[name]))
@@ -319,7 +322,8 @@ def test_adidas_size_cell_wrapped_onto_the_composition_row_is_read(build):
 REAL = os.environ.get("OC_FIXED_PDF_DIR")
 GLOBS = {"admilano": "OC *.pdf", "adidas": "OrderConfirmation_*.pdf", "fog": "SO*_order_confirmation.pdf",
          "thugclub": "*_OC_*TC*.pdf",
-         "joor": "JOOR *.pdf"}   # JOOR prints carry no common file name: copy them in as "JOOR <anything>.pdf"
+         "joor": "JOOR *.pdf",   # JOOR prints carry no common file name: copy them in as "JOOR <anything>.pdf"
+         "p3m": "P3M_*.pdf"}   # p3m files keep no one name on Drive: the real-PDF folder gives each a P3M_ prefix
 
 
 @pytest.mark.skipif(not REAL, reason="set OC_FIXED_PDF_DIR to a local folder of real order-confirmation PDFs")

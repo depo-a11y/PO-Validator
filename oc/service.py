@@ -86,7 +86,9 @@ LAYOUTS = {"otb": "the OTB layout (Maison Margiela, MM6)", "admilano": "the AD M
            "adidas": "the adidas AG layout (Y-3, Willy Chavarria, RS)",
            "fog": "the Fear of God layout (FOG Essentials, Fear of God LLC)",
            "thugclub": "the THUG CLUB Corp. proforma invoice layout (Thug Club, Thug Club x Alpha Industries)",
-           "joor": "the JOOR order print (any brand ordering through JOOR)"}
+           "joor": "the JOOR order print (any brand ordering through JOOR)",
+           "p3m": "the \"#3xxxxxx\" ordering-platform layout (Willy Chavarria, Gosha Rubchinskiy, Maison MIHARA "
+                  "YASUHIRO, Amiri)"}
 
 
 def fixed_reader_row(name):

@@ -68,9 +68,23 @@ SS27 test and is now off by Colwyn's rule of 2026-11-12.
   admilano is checked when the key is set. An AI read of a fixed-layout brand takes its label by that reader's own
   rule (otb: the collection's first word; adidas: the description prefixes). otb, which does not parse its issuer,
   passes the issuer check when one of the names is printed on the document's pages. Every layout problem of a fixed reader (no confirmation found, a moved header, a quantity off
-  its column) says to tick "Read the OC with AI"; the arithmetic gates and discounts do not.
+  its column) says to tick "Read the OC with AI"; the arithmetic gates, discounts, a number format the reader will
+  not guess and a document the reader knows is not an order do not; a reader marks any other problem that is not a
+  layout change (a placeholder price, an order printed twice, its own printed totals) as `otb.NotLayout`.
+- More fixed readers, with the same gates and the same currency and identity refusals: `thugclub` (THUG CLUB Corp.
+  proforma invoices, USD; `oc_label` THUG CLUB or a collaboration such as TC x AI; a commercial invoice, packing
+  list or deposit proforma is refused as "not an order confirmation"), `joor` (the JOOR order print of any brand;
+  `oc_supplier` is the brand contact's email domain, since JOOR prints the brand as a logo; a Pending order is a
+  WARN; a wholesale under 1.00 or a Grand Total other than the Subtotal is refused) and `p3m` (the "#3xxxxxx"
+  ordering platform: Willy Chavarria, Gosha Rubchinskiy, Maison MIHARA YASUHIRO, Amiri, grid and SOSU inline
+  layouts; `oc_supplier` is the selling company printed on page 1).
 - OC spreadsheet: `adapter: sheet` reads a brand's OC sent as .xlsx, .xls (BIFF, or the HTML-table ".xls" some
   order desks export) or .csv, by the config's `sheet:` column mapping (see "Spreadsheet OCs" below).
+- Matching and identity keys, any reader, off unless set: `match_ignore` (separator characters such as "-_ " left
+  out of both codes, upper-cased, when an OC code is matched to a live product; a MERGE row carries the live code,
+  a NEW row the OC's; two live codes that become equal stop the draft naming both), `oc_style_prefix` (every OC
+  line's style must start with one, for a brand that shares an agency's issuer; it counts as an identity check)
+  and `size_map` (see Sizes).
 - Money: Wholesale Price, Total Order and the `Variant.cost_price` metafield are in the brand's `cost_currency`.
   The metafield is written and checked as `<cost_currency> <amount>` (`EUR 34`, `USD 150`), messages are worded in
   that currency, and the PO and Delivery file format those columns in it (EUR keeps the euro-sign format).

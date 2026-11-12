@@ -3,10 +3,21 @@
 # commercial and must never be committed while this repo is public.
 vendor: EXAMPLE BRAND          # exactly as in validator_core.APPROVED_VENDORS
 adapter: otb                   # OC reader. Built-in, one layout each: otb (Maison Margiela/MM6), admilano (AD
-                               # Milano), adidas (adidas AG), fog (Fear of God). sheet: an OC sent as a spreadsheet,
-                               # read by a sheet: column mapping (oc/adapters/sheet.py) and join_key. Or ai: any
-                               # layout, read by Claude; needs oc_supplier and join_key below, and ANTHROPIC_API_KEY
-                               # in the app's secrets
+                               # Milano), adidas (adidas AG), fog (Fear of God), thugclub (THUG CLUB Corp.
+                               # proforma invoices; needs oc_label), joor (the JOOR order print of any brand;
+                               # needs oc_supplier, the brand contact's email domain), p3m (the "#3xxxxxx" ordering
+                               # platform; needs oc_supplier, the selling company). sheet: an OC sent as a
+                               # spreadsheet, read by a sheet: column mapping (oc/adapters/sheet.py) and join_key.
+                               # Or ai: any layout, read by Claude; needs oc_supplier and join_key below, and
+                               # ANTHROPIC_API_KEY in the app's secrets. With no OC yet, `draft --cart` reads the
+                               # OTB selling-session cart as the order, UNCONFIRMED, with this same config
+# sheet:                       # sheet only: printed header per field, e.g. columns: {style: Style, qty: Units, ...},
+#   ean_prefixes: ["0000000"]  # the brand's GS1 company prefixes, checked against every EAN (its identity anchor);
+#   totals: none               # or a totals row / cells; none when the brand prints none (oc/adapters/sheet.py)
+# oc_style_prefix: [ZZ]        # any reader: every OC line's style must start with one (a brand sharing an
+                               # agency's issuer); counts as an identity check
+# match_ignore: "-_ "          # any reader: these separators are left out of both codes, upper-cased, when an
+                               # OC code is matched to a live product (MERGE rows carry the live code)
 # oc_supplier: Example Brand Ltd   # ai: the company printed as the issuer on the brand's OCs (a list if it varies);
                                # a PDF from any other supplier is refused. Required for ai and fog; checked for
                                # otb and admilano when set
@@ -23,6 +34,8 @@ oc_label: EX                   # the label, for a reader that serves several: ot
                                # unless the store holds the same size spelled differently: IT 42 = 42, OSFM = O/S
                                # = F = OS, S-M = S - M, from the live product or its live siblings, or a clear
                                # brand-wide majority (90% of the live products with that size, at least 10)
+# heel_codes: true             # NEW titles write a heel height as the brand's H-code (Tabi Ballerina H30)
+# colour_spelling: {Antracite: Anthracite}   # a cart colour word written the brand's way on NEW titles
 season: S/S 27                 # Marais season label (slash form)
 sku_prefix: EXSS27             # new SKUs continue after the highest existing one
 sku_digits: 3

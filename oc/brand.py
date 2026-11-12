@@ -25,13 +25,15 @@ returns both per document and an OC that does not match the config is refused. f
 need `oc_label` (otb's is the collection's first word: MM or MM6; thugclub's is THUG CLUB or
 a collaboration such as TC x AI); for admilano and ai the check runs when the key is set.
 joor needs `oc_supplier`, the email domain of the brand
-contact JOOR prints (the brand itself is a logo; joor reads no label). `oc_style_prefix` (any
+contact JOOR prints (the brand itself is a logo; joor reads no label). p3m (the "#3xxxxxx" ordering platform)
+needs `oc_supplier`: its documents print the selling company and no separate label. `oc_style_prefix` (any
 reader, checked when set): every OC line's style must start with one of them, so a brand sold
 through an agency, whose issuer it shares with the agency's other brands, accepts only its own.
 
 `adapter` picks the OC reader: a built-in reader for one known layout (`otb` Maison
 Margiela/MM6, `admilano` AD Milano, `adidas` adidas AG, `fog` Fear of God, `thugclub` THUG CLUB
-Corp. proforma invoices, `joor` the JOOR order print of any brand), `sheet` (an OC sent
+Corp. proforma invoices, `joor` the JOOR order print of any brand, `p3m` the "#3xxxxxx"
+ordering platform: Willy Chavarria, Gosha Rubchinskiy, Maison MIHARA YASUHIRO, Amiri), `sheet` (an OC sent
 as a spreadsheet, read by the config's `sheet:` column mapping; oc/adapters/sheet.py) or `ai` (any
 layout, read by Claude; oc/adapters/ai.py). An `ai` brand must name `oc_supplier`
 (the company printed as the issuer on its OCs) and `join_key`; a `sheet` brand `join_key` and `sheet:`.
@@ -76,7 +78,7 @@ REQUIRED = ["vendor", "adapter", "season", "sku_prefix", "cost_multiplier",
             "cost_currency", "margin_floor"]
 
 # built-in readers, one per known layout (oc/adapters/<name>.py)
-FIXED = ("otb", "admilano", "adidas", "fog", "thugclub", "joor")
+FIXED = ("otb", "admilano", "adidas", "fog", "thugclub", "joor", "p3m")
 FIXED += ("sheet",)   # built-in too: a spreadsheet OC of any layout, read by the brand config's sheet: mapping
 ADAPTERS = FIXED + ("ai",)
 JOIN_FIELDS = ("style", "fabric", "colour", "colour_code")
@@ -107,6 +109,9 @@ FIXED_NEEDS = {
     "joor": {"oc_supplier": "oc_supplier: the email domain of the Brand Information contact on this brand's JOOR "
                             "orders (e.g. brand.com; a list if it varies; an agency's for an agency order); one JOOR "
                             "reader serves every brand on JOOR, which prints the brand only as a logo"},
+    "p3m": {"oc_supplier": "oc_supplier: the company printed at the top left of this brand's order confirmations, "
+                           "beside 'Order number #3...' (e.g. SOSU CO.,LTD. for Maison MIHARA YASUHIRO); one reader "
+                           "serves every brand on that ordering platform"},
 }
 
 
