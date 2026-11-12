@@ -69,6 +69,8 @@ SS27 test and is now off by Colwyn's rule of 2026-11-12.
   rule (otb: the collection's first word; adidas: the description prefixes). otb, which does not parse its issuer,
   passes the issuer check when one of the names is printed on the document's pages. Every layout problem of a fixed reader (no confirmation found, a moved header, a quantity off
   its column) says to tick "Read the OC with AI"; the arithmetic gates and discounts do not.
+- OC spreadsheet: `adapter: sheet` reads a brand's OC sent as .xlsx, .xls (BIFF, or the HTML-table ".xls" some
+  order desks export) or .csv, by the config's `sheet:` column mapping (see "Spreadsheet OCs" below).
 - Money: Wholesale Price, Total Order and the `Variant.cost_price` metafield are in the brand's `cost_currency`.
   The metafield is written and checked as `<cost_currency> <amount>` (`EUR 34`, `USD 150`), messages are worded in
   that currency, and the PO and Delivery file format those columns in it (EUR keeps the euro-sign format).
@@ -192,6 +194,40 @@ whole number from 1 to 12 (it is a format width), `cost_multiplier` and `margin_
 and the retired `price_round` key is dropped.
 
 `.streamlit/secrets.toml` is gitignored. Never commit it.
+
+## Spreadsheet OCs
+
+    python -m oc read OC.xls --brand-config brand.yaml
+
+`adapter: sheet` (oc/adapters/sheet.py) reads an OC spreadsheet by the brand config's `sheet:` block: which printed
+header holds the style, colour (code and/or name), size, quantity, unit price, line value and currency, and,
+optionally, the RRP, EAN, HS code, country of origin, description, gender and order number. Sizes are one row per
+size (`columns: size` and `qty`), a matrix with one column per size (`size_columns`), or (size, qty, size price)
+column groups as NuORDER exports them (`size_pairs`). The module docstring shows every key. A sheet brand needs
+`join_key`; `oc_supplier` and `oc_label` need the column that prints them.
+
+The header row is found by its text, not its position; a later repeat of it (a page break in an export) is skipped.
+An unknown mapping key fails when the config loads, and a mapped header missing from the file fails the read naming
+it, as does a formula Excel never calculated in a mapped column. The gates are the PDF readers': sizes sum to the
+line, qty x unit price = the printed value (per row, or per line when `line_value_per: line` says each size row
+repeats the line's subtotal, which is then taken once), and the lines reproduce the printed totals (a totals row by
+its label, or totals cells, or `totals: none` when the brand prints none). Totals, line values or line quantities the
+mapping does not read from the file are recomputed, and a WARN names which and why (declared none, not mapped, none
+printed): compare the units and value with the brand's PDF or invoice. Every money and quantity cell must fit
+`decimal`; a cell that contradicts it, or reads two ways ("1.234"), fails the read naming the cells. An RRP is read
+only from a column printed as one (`util.rrp_header`) and is a retail price only in AUD; one that differs by size
+leaves the retail blank and a WARN says so.
+
+Identity: a spreadsheet rarely names its brand. `oc_supplier` and `oc_label` are checked against mapped issuer and
+label columns, and `ean_prefixes` (the brand's GS1 company prefixes) against every EAN. When none of these can run,
+the Checks carry a WARN that the brand was NOT checked, as they do for any reader whose config names no issuer or
+label. EANs and HS codes fill the PO's
+`Variant.gtin` and `HS Code` columns on NEW rows, on the row of the store's name for the size they were printed
+against, and the Review names the printed size (two printed sizes that become one store size with different EANs
+leave it blank, and the Review says so); country of origin stays
+on the read (no PO column takes it). The `sheet:` block's own `size_map` renames sizes as the file is read; the
+top-level `size_map` (see Sizes) applies after it, when sizes are matched to the store's.
+On the page, a sheet brand's upload takes .xls, .xlsx or .csv and has no AI box.
 
 ## AI reader
 

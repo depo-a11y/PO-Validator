@@ -40,7 +40,8 @@ from example.yaml. Send him one of the brand's order confirmations and ask for o
 - the cost multiplier and the cost currency
 - the margin floor
 - the reader: the built-in one if the brand's OCs are one of the known layouts (Margiela/MM6, AD Milano, \
-adidas, Fear of God), else `adapter: ai`, so they are read by AI
+adidas, Fear of God), `adapter: sheet` with a `sheet:` column mapping if the brand sends its OC as a spreadsheet, \
+else `adapter: ai`, so they are read by AI
 - `oc_supplier`: the company name printed on the brand's OCs (and `oc_label` for an issuer with several labels)
 - `join_key` and `colour_codes`: how the store's manufacture code is built from an OC line"""
 AI_CAP = 10
@@ -204,7 +205,10 @@ with col2:
 
 # ---- step 1 --------------------------------------------------------------------
 st.header("Step 1. Build the draft PO")
-oc_up = st.file_uploader("Order confirmation (PDF)", type=["pdf"], key="w_oc")
+SHEET_TYPES = ["xls", "xlsx", "csv"]
+is_sheet = bool(cfg) and cfg["adapter"] == "sheet"
+oc_up = st.file_uploader("Order confirmation (the brand's spreadsheet: .xls, .xlsx or .csv)" if is_sheet else
+                         "Order confirmation (PDF)", type=SHEET_TYPES if is_sheet else ["pdf"], key="w_oc")
 can_cart = service.cart_supported()
 cart_up = st.file_uploader(
     "Linesheet/cart export (optional, improves titles and colours)", type=["xlsx"], key="w_cart",
@@ -226,7 +230,7 @@ if cfg and cfg["adapter"] == "ai":
                "quantities and price against the PDF.")
     if capped:
         st.error(CAP_MSG)
-elif cfg:
+elif cfg and not is_sheet:   # the AI reader reads PDFs; a sheet brand's OC is a spreadsheet
     use_ai = st.checkbox(AI_BOX, value=False, key="w_ai", help=AI_HELP,
                          disabled=not cfg.get("oc_supplier") or capped)
     if not cfg.get("oc_supplier"):
@@ -250,7 +254,8 @@ if build:
                 hist_paths = [save(os.path.join(tmp, "history"), safe_name(f.name), f.getvalue())
                               for f in hist_ups or []]
                 po, review, checks = service.draft(
-                    save(tmp, "oc.pdf", oc_up.getvalue()), save(tmp, "catalog.csv", S["catalog"][1]), cfg,
+                    save(tmp, safe_name(oc_up.name) if is_sheet else "oc.pdf", oc_up.getvalue()),
+                    save(tmp, "catalog.csv", S["catalog"][1]), cfg,
                     cart_path=save(tmp, "cart.xlsx", cart_up.getvalue()) if cart_up else None,
                     history_paths=hist_paths or None, reader="ai" if use_ai else None)
             if service.ai_read_sent(checks):

@@ -33,6 +33,7 @@ import collections
 import csv
 import datetime
 import importlib
+import inspect
 import io
 import os
 import re
@@ -68,10 +69,14 @@ HISTORY_CHECK = "Past season POs (Types and size runs)"
 READER_CHECK = "Order confirmation reader"
 CURRENCY_CHECK = "Order confirmation is in the brand's cost currency"
 IDENTITY_CHECK = "Order confirmation is for the brand picked (issuer and label)"
+TOTALS_CHECK = "Order confirmation totals printed by the brand"
+NOTES_CHECK = "Order confirmation values the tool did not use"
 # A fixed reader's problem that is not a layout change: the arithmetic gates, a discount and a number format the
 # reader will not guess. Every other problem (no confirmation found, a moved header, a quantity off its column)
-# gets the hint to read the OC with AI.
-NOT_LAYOUT = re.compile(r": sizes sum | != line value |: its lines add up to |discount|: number format: ", re.I)
+# gets the hint to read the OC with AI. The sheet reader words its grand-total gate ": parsed ..., printed ..." and its
+# number-format refusal "... number format (decimal mark ...)".
+NOT_LAYOUT = re.compile(r": sizes sum | != line value |: its lines add up to |: parsed |discount|: number format: "
+                        r"|number format \(", re.I)
 GATE_CHECK = "Order confirmation passes its gates (parsed = printed)"
 AI_HINT = ("If this is the right brand and its layout changed, tick 'Read the OC with AI' and build again "
            "(the box needs oc_supplier in the brand's config).")
@@ -137,12 +142,14 @@ def read_oc(oc_path, brand_cfg, reader=None, ai_factory=None):
         reader_mod = adapter(brand_cfg)
     except brandm.BrandError as e:
         return None, [_check("Brand config names a known OC layout", "FAIL", str(e))], None
-    row = fixed_reader_row(brand_cfg["adapter"])
+    own_row = getattr(reader_mod, "reader_row", None)
+    row = _check(READER_CHECK, "INFO", own_row(brand_cfg)) if own_row else fixed_reader_row(brand_cfg["adapter"])
+    hint = getattr(reader_mod, "LAYOUT_HINT", AI_HINT)
     try:
-        docs = reader_mod.parse_checked(oc_path)
+        docs = _parse(reader_mod, oc_path, brand_cfg)
     except Exception as e:
         problems = getattr(e, "problems", None) or [f"{type(e).__name__}: {e}"]
-        return None, [row] + [_check(GATE_CHECK, "FAIL", p if NOT_LAYOUT.search(p) else f"{p}. {AI_HINT}")
+        return None, [row] + [_check(GATE_CHECK, "FAIL", p if NOT_LAYOUT.search(p) else f"{p}. {hint}")
                               for p in problems], None
     off = currency_off(docs, cost_currency(brand_cfg))
     if off:
@@ -150,7 +157,54 @@ def read_oc(oc_path, brand_cfg, reader=None, ai_factory=None):
     wrong = identity_problems(docs, brand_cfg, oc_path)
     if wrong:
         return None, [row, _check(IDENTITY_CHECK, "FAIL", wrong)], None
-    return docs, [row], None
+    return docs, [row] + identity_unchecked(docs, brand_cfg) + recomputed_rows(docs) + note_rows(docs), None
+
+
+def _parse(reader_mod, oc_path, brand_cfg):
+    """The reader's parse_checked, given the brand config when it takes one (the sheet reader's column mapping)."""
+    takes = "brand_cfg" in inspect.signature(reader_mod.parse_checked).parameters
+    return reader_mod.parse_checked(oc_path, brand_cfg=brand_cfg) if takes else reader_mod.parse_checked(oc_path)
+
+
+def _who(ds, docs):
+    if len(ds) == len(docs) > 1:
+        return f"all {len(ds)} confirmations"
+    return ", ".join(ds[:5]) + (f" and {len(ds) - 5} more" if len(ds) > 5 else "")
+
+
+def identity_unchecked(docs, brand_cfg):
+    """A WARN row naming the documents whose brand nothing checked: the config names no oc_supplier or oc_label and
+    the reader found no other anchor in the file (d["identity"], e.g. the brand's EAN prefix on every EAN)."""
+    if _listed(brand_cfg.get("oc_supplier")) or _listed(brand_cfg.get("oc_label")):
+        return []
+    ds = [d["doc"] for d in docs if not d.get("identity")]
+    if not ds:
+        return []
+    vendor = brand_cfg.get("vendor")
+    return [_check(IDENTITY_CHECK, "WARN", f"NOT checked for {_who(ds, docs)}: the brand config names no issuer "
+                   f"(oc_supplier) or label (oc_label), and the file carries nothing else the tool can check. An "
+                   f"order confirmation from another brand in the same layout would be drafted as {vendor}: make sure "
+                   f"this file is {vendor}'s.")]
+
+
+def note_rows(docs):
+    """A WARN row for what a reader read but did not use (d["notes"]), e.g. an RRP that differs by size."""
+    notes = [n for d in docs for n in d.get("notes") or []]
+    return [_check(NOTES_CHECK, "WARN", "; ".join(notes))] if notes else []
+
+
+def recomputed_rows(docs):
+    """A WARN row when a reader recomputed totals, line values or line quantities the brand config does not read
+    from the file (d["recomputed"]): the gates then had nothing printed to compare with."""
+    groups = {}
+    for d in docs:
+        if d.get("recomputed"):
+            groups.setdefault(" and ".join(d["recomputed"]), []).append(d["doc"])
+    if not groups:
+        return []
+    return [_check(TOTALS_CHECK, "WARN", "Recomputed from the lines, so nothing printed checked them: "
+                   + "; ".join(f"{what} for {_who(ds, docs)}" for what, ds in groups.items())
+                   + ". Compare the units and value with the brand's PDF or invoice of this order.")]
 
 
 def _listed(v):
@@ -179,6 +233,7 @@ def identity_problems(docs, brand_cfg, oc_path, issuer=True):
         if labels and not ai.suppliers_match(d.get("label"), labels):
             out.append(f"{d['doc']} is for label {d.get('label') or 'none the reader could find'!r}, "
                        f"not {' or '.join(labels)}")
+        out += d.get("identity_problems") or []   # a reader's own anchor, e.g. the brand's EAN prefix
     if not out:
         return ""
     return ("; ".join(out) + f". The brand picked is {brand_cfg.get('vendor')} ({brand_cfg.get('_name', 'brand')}). "

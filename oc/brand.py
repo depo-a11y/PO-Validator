@@ -26,9 +26,10 @@ returns both per document and an OC that does not match the config is refused. f
 check runs when the key is set.
 
 `adapter` picks the OC reader: a built-in reader for one known layout (`otb` Maison
-Margiela/MM6, `admilano` AD Milano, `adidas` adidas AG, `fog` Fear of God) or `ai` (any
+Margiela/MM6, `admilano` AD Milano, `adidas` adidas AG, `fog` Fear of God), `sheet` (an OC sent
+as a spreadsheet, read by the config's `sheet:` column mapping; oc/adapters/sheet.py) or `ai` (any
 layout, read by Claude; oc/adapters/ai.py). An `ai` brand must name `oc_supplier`
-(the company printed as the issuer on its OCs) and `join_key`.
+(the company printed as the issuer on its OCs) and `join_key`; a `sheet` brand `join_key` and `sheet:`.
 
 `join_key` says how the store's manufacture_code is built from an OC line: a template
 over {style}, {fabric}, {colour} and {colour_code}. The default, for otb, is
@@ -65,6 +66,7 @@ REQUIRED = ["vendor", "adapter", "season", "sku_prefix", "cost_multiplier",
             "cost_currency", "margin_floor"]
 
 FIXED = ("otb", "admilano", "adidas", "fog")   # built-in readers, one per known layout (oc/adapters/<name>.py)
+FIXED += ("sheet",)   # built-in too: a spreadsheet OC of any layout, read by the brand config's sheet: mapping
 ADAPTERS = FIXED + ("ai",)
 JOIN_FIELDS = ("style", "fabric", "colour", "colour_code")
 JOIN_TOKEN = re.compile(r"\{(style|fabric|colour|colour_code)\}")
@@ -86,6 +88,8 @@ FIXED_NEEDS = {
                            "one reader serves both, so the config says which it accepts"},
     "adidas": {"oc_label": "oc_label: the label printed at the start of this brand's line descriptions (Y-3, "
                            "Willy Chavarria or RS); one adidas AG reader serves all three"},
+    "sheet": {"join_key": "join_key: how the store's manufacture_code is built from a sheet line, e.g. \"{style} "
+                          "{colour}\" ({colour} is the sheet's colour_code column when it is mapped)"},
 }
 
 
@@ -246,6 +250,11 @@ def _reader_keys(cfg, data, source):
         raise BrandError(f"{source}: size_map is a list of 'printed size: store size' lines, each a word or number "
                          f"(e.g. 31x34: 31), got {sizes!r}")
     cfg["size_map"] = {norm_size(k): norm_size(v) for k, v in sizes.items()}
+    if cfg["adapter"] == "sheet":
+        from .adapters import sheet
+        bad = sheet.check_mapping(cfg.get("sheet"), cfg)
+        if bad:
+            raise BrandError(f"{source}: " + "; ".join(bad))
 
 
 def _numbers(cfg, source):

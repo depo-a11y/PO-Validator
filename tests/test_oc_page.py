@@ -154,7 +154,8 @@ def test_the_expander_names_the_built_in_readers_before_ai(tmp_path, monkeypatch
     (exp,) = [e for e in at.expander if e.label == "My brand is not in the list"]
     text = " ".join(m.value for m in exp.markdown)
     assert ("the built-in one if the brand's OCs are one of the known layouts (Margiela/MM6, AD Milano, adidas, "
-            "Fear of God), else `adapter: ai`") in text
+            "Fear of God), `adapter: sheet` with a `sheet:` column mapping if the brand sends its OC as a spreadsheet, "
+            "else `adapter: ai`") in text
 
 
 def test_the_page_says_prices_are_blank_without_an_rrp_and_step_2_wants_them(tmp_path, monkeypatch):

@@ -21,6 +21,9 @@ from .util import norm_size, sort_sizes, size_key, fmt_money, cost_currency, slu
 
 PRICE_COL = col_letter(PO_HEADER, "Variant Price")
 SIZE_NAMES_CHECK = "Each size has one name per product"
+# Identifiers an OC line may carry per size (the sheet reader's ean / hs_code) and the PO column each fills on NEW rows.
+ID_COLS = (("Variant Metafield: Variant.gtin [single_line_text_field]", "ean", "EAN"),
+           ("Variant Metafield: HS Code", "hs_code", "HS code"))
 
 
 def _live_size_names(R, code, vendor):
@@ -43,6 +46,23 @@ def _live_size_names(R, code, vendor):
     return sib, counts
 
 
+def _to_store_sizes(l, known, size_map, quorum=None):
+    """l's ordered sizes under the store's names (store_sizes; why each was renamed in l["size_notes"]), with each
+    identifier printed per size (ID_COLS) moved onto the name its size took and the printed names it came from in
+    l["id_printed"] ({(field, store size): [printed sizes]}). A store size that two printed sizes with different
+    identifiers became gets none (None)."""
+    l["id_printed"] = {}
+    for _, field, _ in ID_COLS:
+        if l.get(field):
+            ids = {}
+            for s, x in l[field].items():
+                t = next(iter(store_sizes({s: 0}, known, size_map, quorum)[0]))
+                ids[t] = x if ids.get(t, x) == x else None
+                l["id_printed"].setdefault((field, t), []).append(norm_size(s))
+            l[field] = ids
+    l["sizes_norm"], l["size_notes"] = store_sizes(l["sizes_norm"], known, size_map, quorum)
+
+
 def oc_lines(docs, brand=None):
     """One dict per OC line, keyed by `code`: the store's manufacture_code by the brand's join_key."""
     missing = unmapped_colours(brand, docs)
@@ -56,7 +76,7 @@ def oc_lines(docs, brand=None):
             for s, q in l["sizes"].items():
                 sizes[norm_size(s)] = sizes.get(norm_size(s), 0) + q
             out.append(dict(l, code=code, doc=d["doc"], collection=d["collection"],
-                            gender=d.get("gender"), sizes_norm=sizes))
+                            gender=l.get("gender") or d.get("gender"), sizes_norm=sizes))
     return out
 
 
@@ -89,8 +109,7 @@ def build(docs, brand, catalog, history, tag_lookup, cart=None):
         common = {}
         if product is not None:
             live = {v["size"]: v for v in product["variants"]}
-            l["sizes_norm"], l["size_notes"] = store_sizes(l["sizes_norm"], [{s: f"the live product {product['title']}"
-                                                                     for s in live}], brand.get("size_map"))
+            _to_store_sizes(l, [{s: f"the live product {product['title']}" for s in live}], brand.get("size_map"))
             run = sort_sizes(set(live) | set(l["sizes_norm"]))
             run_src, run_why = "catalog", f"live sizes of {product['title']} plus ordered sizes"
             ptype, title = product["type"], product["title"]
@@ -149,7 +168,7 @@ def build(docs, brand, catalog, history, tag_lookup, cart=None):
         if worse(cn_src, ti_src) == cn_src and COLOUR[cn_src] != COLOUR[ti_src]:
             ti_src, ti_why = cn_src, f"{ti_why}; colour name: {cn_why}"
         sib, counts = _live_size_names(R, code, brand.get("vendor"))
-        l["sizes_norm"], l["size_notes"] = store_sizes(l["sizes_norm"], sib, brand.get("size_map"), counts)
+        _to_store_sizes(l, sib, brand.get("size_map"), counts)
         pending.append(dict(
             l=l, code=code, eur=eur, gender=gender, ptype=(ptype, t_src, t_why), title=[title, ti_src, ti_why],
             fam=R.colour_family(code, cname), run=R.size_run(code, l["sizes_norm"], ptype),
@@ -199,6 +218,16 @@ def build(docs, brand, catalog, history, tag_lookup, cart=None):
             cell(row, MADE_IN, made, made_src, made_why)
             cell(row, NEW_SALE, brand["new_sale"], "rule", "new stock is created NEW")
             cell(row, TITLE_TAG, R.title_tag(title), ti_src, "house title_tag template over the drafted title")
+            for col, field, what in ID_COLS:
+                ids = {norm_size(s): x for s, x in (l.get(field) or {}).items()}
+                was = (l.get("id_printed") or {}).get((field, size)) or [size]
+                named = "" if was == [size] else f" (named {size})"
+                if ids.get(size):
+                    cell(row, col, ids[size], "OC",
+                         f"{what} printed for size {' and '.join(was)}{named} on {l['doc']} line {l['line_no']}")
+                elif len(was) > 1:   # two printed sizes the store names one way, with different identifiers
+                    cell(row, col, None, "rule", f"left blank: {l['doc']} line {l['line_no']} prints a different {what} "
+                                                 f"for each of sizes {' and '.join(was)}, which the store names {size}")
             rows.append(row)
 
     names = collections.defaultdict(set)
@@ -296,9 +325,11 @@ def _draft_checks(docs, lines, rows, R, brand, catalog, tag_lookup, dup):
     cur = cost_currency(brand)
     out = []
     ok = t["units"] == t["printed_units"] and abs(t["value"] - t["printed_value"]) < 0.01
-    out.append(dict(Check="OC totals reproduced (parsed = printed)", Result="PASS" if ok else "FAIL",
+    rec = [d["doc"] for d in docs if any(r.startswith("totals") for r in d.get("recomputed") or [])]
+    out.append(dict(Check="OC totals reproduced (parsed = printed)", Result="FAIL" if not ok else "INFO" if rec else "PASS",
                     Detail=f"{t['docs']} confirmations, {t['lines']} lines, {t['units']} units, {cur} {t['value']:,.2f} "
-                           f"(printed {t['printed_units']} / {cur} {t['printed_value']:,.2f})"))
+                           + (f"(printed {t['printed_units']} / {cur} {t['printed_value']:,.2f})" if not rec else
+                              f"(recomputed from the lines: {', '.join(rec)} print(s) no totals, so nothing to compare)")))
     units = sum(r["Order Qty"] for r in rows)
     value = round(sum(r["Total Order"] for r in rows), 2)
     ok = units == t["units"] and abs(value - t["value"]) < 0.01

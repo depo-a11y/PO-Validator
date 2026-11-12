@@ -146,6 +146,25 @@ def test_a_brand_size_map_applies_before_matching(tmp_path):
     assert cmd == {"MERGE"} and got["31"] == 2 and "31X34" not in got
 
 
+def test_an_ean_printed_for_a_size_lands_on_the_name_the_store_gives_it(tmp_path):
+    """A sheet OC prints an EAN per size; the NEW row of that size carries it under the store's name for the size."""
+    sib = ("1", "S99WP0001P0001 900", ["IT 42", "IT 44"], "Active")
+    docs = _docs(CODE, {"42": 2, "44": 1, "IT 44": 1})
+    docs[0]["lines"][0].update(ean={"42": "2990000000017", "44": "2990000000024", "IT 44": "2990000000031"},
+                               hs_code={"42": "6203", "44": "6203", "IT 44": "6203"})
+    rows, review, _, _ = draftm.build(docs, base.BRAND, _catalog(tmp_path, [sib]), base._hist(), base._tags())
+    got = {r["Option2 Value"]: (r.get(draftm.ID_COLS[0][0]), r.get(draftm.ID_COLS[1][0])) for r in rows
+           if r[draftm.CODE] == CODE}
+    assert got == {"IT 42": ("2990000000017", "6203"), "IT 44": (None, "6203")}   # two EANs for one size: neither
+    why = {(x["Size"], x["Column"]): (x["Source"], x["Why"]) for x in review if x["Code"] == CODE}
+    assert why[("IT 42", draftm.ID_COLS[0][0])] == ("OC", "EAN printed for size 42 (named IT 42) on SS - 1 line 1")
+    assert why[("IT 44", draftm.ID_COLS[0][0])] == (
+        "rule", "left blank: SS - 1 line 1 prints a different EAN for each of sizes 44 and IT 44, which the store "
+                "names IT 44")
+    assert why[("IT 44", draftm.ID_COLS[1][0])] == ("OC", "HS code printed for size 44 and IT 44 (named IT 44) on SS - 1 "
+                                                          "line 1")
+
+
 def _load(tmp_path, **extra):
     cfg = dict(vendor="ZX BRAND", adapter="otb", oc_label="ZX", season="S/S 99", sku_prefix="ZXSS99", sku_digits=3,
                cost_currency="EUR", cost_multiplier=1.5, margin_floor=2.0, **extra)
