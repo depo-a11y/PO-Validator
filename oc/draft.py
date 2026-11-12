@@ -12,6 +12,7 @@ always the OC's; a cart wholesale that differs is reported, never used.
 import collections
 
 from .brand import ColourCodeError, code_for, unmapped_colours
+from . import cartorder, housestyle
 from .poxlsx import PO_HEADER, CODE, MADE_IN, SEASON, NEW_SALE, COST_PRICE, TITLE_TAG, review_row, col_letter
 from .resolve import Resolver, COLOUR, AI_OC, AI_NEW_SIZE, NO_RRP, split_code, worse
 
@@ -80,7 +81,7 @@ def oc_lines(docs, brand=None):
     return out
 
 
-def build(docs, brand, catalog, history, tag_lookup, cart=None):
+def build(docs, brand, catalog, history, tag_lookup, cart=None, prior_prices=None):
     lines = oc_lines(docs, brand)
     dup = [c for c, n in collections.Counter(l["code"] for l in lines).items() if n > 1]
     R = Resolver(brand, catalog, history, tag_lookup, lines, cart)
@@ -91,6 +92,8 @@ def build(docs, brand, catalog, history, tag_lookup, cart=None):
         l = cur.get("line")
         if source == "OC" and l is not None and l.get("reader") == "ai":
             source, detail = AI_OC, f"read by AI from {l['doc']} line {l['line_no']}; {detail}"
+        elif cartorder.is_cart_line(l, source, key):
+            source, detail = cartorder.marked(l, key, detail)
         row[key] = value
         cells.append((len(rows), key, value, source, detail))
 
@@ -161,10 +164,10 @@ def build(docs, brand, catalog, history, tag_lookup, cart=None):
             continue
 
         # ---- NEW: resolve now, emit after titles are de-duplicated -------------
-        cname, cn_src, cn_why = R.colour_name(code)
+        cname, cn_src, cn_why = housestyle.colour_words(brand, *R.colour_name(code))
         gender, pclass = R.gender_of(code, l["gender"]), R.product_class_of(code, l["product_class"])
         ptype, t_src, t_why = R.product_type(code, pclass, gender)
-        title, ti_src, ti_why = R.title(code, pclass, cname)
+        title, ti_src, ti_why = housestyle.new_title(brand, R, code, *R.title(code, pclass, cname))
         if worse(cn_src, ti_src) == cn_src and COLOUR[cn_src] != COLOUR[ti_src]:
             ti_src, ti_why = cn_src, f"{ti_why}; colour name: {cn_why}"
         sib, counts = _live_size_names(R, code, brand.get("vendor"))
@@ -172,9 +175,11 @@ def build(docs, brand, catalog, history, tag_lookup, cart=None):
         pending.append(dict(
             l=l, code=code, eur=eur, gender=gender, ptype=(ptype, t_src, t_why), title=[title, ti_src, ti_why],
             fam=R.colour_family(code, cname), run=R.size_run(code, l["sizes_norm"], ptype),
-            price=R.retail(code, l), made=R.made_in(code), comp=R.composition(code)))
+            price=cartorder.with_prior_price(R.retail(code, l), code, prior_prices), made=R.made_in(code),
+            comp=R.composition(code)))
 
     _dedupe_titles(pending, R, brand, checks)
+    housestyle.mark_live_titles(pending, catalog, checks)
     for n in pending:
         l, code, eur = n["l"], n["code"], n["eur"]
         cur["line"] = l
@@ -238,9 +243,11 @@ def build(docs, brand, catalog, history, tag_lookup, cart=None):
         checks.append(dict(Check=SIZE_NAMES_CHECK, Result="WARN", Detail=(
             f"{len(clash)} product(s) carry one size under two names, because the live product holds both: "
             + "; ".join(clash) + ". Keep the store's name and move the quantity onto it.")))
-    if cart is not None:
+    if cart is not None and not cartorder.from_cart(lines):
         checks += cart_checks(lines, cart, brand)
     checks = _draft_checks(docs, lines, rows, R, brand, catalog, tag_lookup, dup) + checks
+    if cartorder.from_cart(lines):
+        checks = cartorder.cart_wording(checks)
     review = [review_row(i + 2, rows[i].get(CODE), rows[i].get("Option2 Value"), k, v, s, w)
               for i, k, v, s, w in cells]
     fills = {(i, k): COLOUR.get(s, "red") for i, k, v, s, w in cells}
@@ -349,7 +356,7 @@ def _draft_checks(docs, lines, rows, R, brand, catalog, tag_lookup, dup):
         out.append(dict(Check="Each join key on one OC line", Result="WARN", Detail=f"repeated: {dup}"))
     new = [r for r in rows if r["Command"] == "NEW"]
     types = set(tag_lookup)
-    badt = sorted({r["Type"] for r in new if r["Type"] not in types})
+    badt = sorted({r["Type"] or "(blank)" for r in new if r["Type"] not in types})
     out.append(dict(Check="Every NEW Type is in expected_tags.xlsx", Result="FAIL" if badt else "PASS",
                     Detail=", ".join(badt) or f"{len({r['Type'] for r in new})} Types"))
     mt = [r for r in rows if r["Command"] == "MERGE" and r["Type"] not in types]

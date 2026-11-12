@@ -132,6 +132,61 @@ Brand config keys the cart uses: `colour_families`, `subcategory_types` (cart Su
 A `product_class_types` or `subcategory_types` value may be a list (first valid Type for the gender wins) or a
 full Type starting MEN, WOMEN or UNISEX.
 
+## Before the OC: the cart as the order
+
+    python -m oc draft --cart CART.xlsx --catalog export.csv --brand <brand> --out PO-draft.xlsx
+    python -m oc draft --oc OC.pdf --prior PO-draft.xlsx --catalog export.csv --brand <brand> --out PO-from-OC.xlsx
+    python -m oc complete --po PO-draft.xlsx --oc OC.pdf --catalog export.csv --brand <brand> --out PO.xlsx
+
+With no `--oc`, `oc/cartorder.py` reads the selling-session cart as the order: one line per row with units, the
+quantities from its size grid (every column between Size Grid / Available Sizes and Units, read under its own
+header, since a header such as 40 repeats across size systems; `355` is 35.5 when 35 is also a header; UNI is OS),
+the unit price from Wholesale. OTB's Units and Total Wholesale are formulas Excel never calculated, so they are
+recomputed and a Checks WARN says so; where a cart does carry them, sizes must sum to Units and Units x Wholesale
+must equal Total Wholesale. A quantity under a size outside the row's Size Grid, a size in two columns, a quantity
+that is not a whole number, a formula with no value in a size cell, a row with units and no Wholesale, or a code
+on two rows: no draft. Currency and label are checked as for an OC (`oc_label` against the word after the
+collection code, `MM` in `S0XX - MM WOMEN'S RTW CO-ED`).
+
+The Checks say `UNCONFIRMED: from cart <session>, signed <date>, not an order confirmation`, every quantity and
+price cell (and the cost made from it) is amber `cart, not confirmed`, and a WARN asks to confirm the cost
+multiplier for this selling session. The written PO names its quantity and price columns `Order Qty (from cart
+<session>, not confirmed)`, `Wholesale Price (...)` and `Total Order (...)`. That header is the marker: deleting
+the Checks sheet does not make the PO look confirmed, and the page and service name the draft and its run
+`...-from-cart-<session>-...`. A draft from a cart says "equal the cart" where an OC draft says "equal the OC".
+
+Descriptive fields come from the cart as in "Cart" above: the title from the Style Name in house style (amber), the
+Type also from the Subcategory read as an OC product class (`Sportsjackets` as SPORTSJACKET, `Ballet Shoes` as BALLET
+SHOE) when `subcategory_types` has no entry, and a NEW style with no run anywhere takes the cart's Available Sizes.
+Live same-style products still set the Type first; when the Type comes from the style family's past Types and the
+cart's Subcategory maps to another, the Why names both ("check which"). Retail prices stay blank (OTB's Sugg. Retail
+is empty), so finalize stops there by design.
+
+A PO is read as drafted from a cart when any one of three signs is in the workbook: its renamed columns, an
+`UNCONFIRMED: ... from cart <session>` row in a later sheet (the draft's or complete's Checks), or a `cart, not
+confirmed` Source in a later sheet (the draft's Review). So a PO drafted before the renamed columns existed, or
+one whose columns were renamed back, is still caught. Only a PO with plain headers and no Review or Checks left
+carries no sign, and is read as an order confirmation's. finalize then writes PU-new only, with a WARN: PU-merge,
+PU-merge-new-sizes, PU-merge-ROLLBACK and Delivery need the OC's cost and quantities; PU-new creates N products at
+the cost currency x the multiplier, not confirmed for this session; the OC can drop codes, so a product created
+before it may never ship; whether to import PU-new before the OC is Colwyn's decision. Any other PO without plain
+`Order Qty` and `Wholesale Price` columns is a FAIL, so nothing is made. A cart PO is refused as a past season PO,
+and `reconcile` reads a cart PO's renamed columns.
+
+When the OC arrives it is the authority (GTC 3.3/3.4). `draft --oc ... --prior <the cart-built PO>` (on the page,
+"PO drafted from the cart") drafts from the OC, carries a retail price typed into the prior PO's NEW rows where
+the brand gives no RRP (amber, `prior PO`), and adds a Changes sheet: codes the OC adds or drops, quantity per
+code and size (a printed 40 is the store's IT 40, as the draft named it), unit price, and the typed retail prices. `complete --po <the cart-built PO> --oc ...` writes the
+same sheet in place of the PO's old Review and Checks, with its own UNCONFIRMED row, and keeps the PO's typed
+cells, so its quantity checks FAIL and finalize keeps to PU-new until the PO is redrafted from the OC.
+
+House style on NEW titles (`oc/housestyle.py`): with `heel_codes: true` in the brand config, a heel height in
+centimetres becomes the brand's H-code as the last word before "in <Colour>" ('Tabi Ballerina 3cm' ->
+'Tabi Ballerina H30'; H30, H50, H60, H80 only). A cart colour word the brand config's `colour_spelling:` map names
+(`Antracite: Anthracite`) is written as the map says, amber; nothing else is respelled. A live stem that departs from
+the cart's Style Name names it in the Why, and a NEW title that an ACTIVE live product already carries is amber with
+a Checks WARN naming the live handles. MERGE titles are never rewritten.
+
 ## Web page
 
 `pages/1_Order_confirmation_to_PO.py` runs `draft` and `finalize` for someone with no command line, inside the

@@ -144,9 +144,10 @@ def read_po(path, sheet=None):
     return header, rows
 
 
-def write_po(path, header, rows, review=None, checks=None, fills=None, title="Sheet1", raw=False, currency="EUR"):
+def write_po(path, header, rows, review=None, checks=None, fills=None, title="Sheet1", raw=False, currency="EUR",
+             extra=None):
     """rows: list of dicts keyed like read_po. fills: {(row_index, key): colour}. Wholesale Price and Total Order
-    are formatted in `currency`, the brand's cost currency."""
+    are formatted in `currency`, the brand's cost currency. extra: {sheet name: rows} written after Checks."""
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = title
@@ -165,7 +166,7 @@ def write_po(path, header, rows, review=None, checks=None, fills=None, title="Sh
                 cell.data_type = "f"   # the draft's compare-at copies its own row's price, the one formula kept
             if h in AUD_COLS or (h is None and j > 0 and header[j - 1] in AUD_COLS):
                 cell.number_format = AUD_FMT
-            elif h in EUR_COLS:
+            elif h in EUR_COLS or str(h).split(" (from ")[0] in EUR_COLS:   # a cart PO's renamed columns too
                 cell.number_format = money_format(currency)
     if fills:
         for (i, key), colour in fills.items():
@@ -175,6 +176,8 @@ def write_po(path, header, rows, review=None, checks=None, fills=None, title="Sh
         write_table(wb, "Review", review, colour_key="Colour")
     if checks is not None:
         write_table(wb, "Checks", checks, colour_key="Result")
+    for name, table in (extra or {}).items():
+        write_table(wb, name, table)
     wb.save(path)
 
 

@@ -290,6 +290,24 @@ def zip_name(prefix):
     return prefix + "uploads.zip"
 
 
+def source_part(source):
+    """'from-cart-<session>-' for a PO drafted from a cart ('cart <session>'), else ''."""
+    return f"from-{slug(source)}-" if source else ""
+
+
+def draft_file(brand_cfg, checks, when=None):
+    """The draft's file name: a draft from a cart says so ('...-from-cart-<session>-PO-draft.xlsx')."""
+    m = next((re.match(r"UNCONFIRMED: from (cart .+?)(?:, signed [^,]+)?, not an order confirmation", str(c["Detail"]))
+              for c in checks if c["Check"] == READER_CHECK), None)
+    return file_prefix(brand_cfg, when) + source_part(m.group(1) if m else None) + "PO-draft.xlsx"
+
+
+def run_prefix(po_path, brand_cfg, when=None):
+    """The run's file-name prefix: a PO drafted from a cart carries 'from-cart-<session>-' (read off its header)."""
+    from .cartorder import unconfirmed_session
+    return file_prefix(brand_cfg, when) + source_part(unconfirmed_session(po_path))
+
+
 # ---- past season POs -----------------------------------------------------------
 def season_key(label):
     m = SEASON_RE.search(str(label or "").upper())
@@ -404,8 +422,12 @@ def secret_brands_for(table, viewers, email):
 
 
 # ---- step 1 --------------------------------------------------------------------
-def draft(oc_path, catalog_path, brand_cfg, cart_path=None, history_paths=None, reader=None, ai_factory=None):
-    """OC + catalog (+ linesheet, + past POs) -> (draft PO xlsx bytes | None, Review DataFrame, checks)."""
+def draft(oc_path, catalog_path, brand_cfg, cart_path=None, history_paths=None, reader=None, ai_factory=None,
+          prior_path=None):
+    """OC + catalog (+ linesheet, + past POs) -> (draft PO xlsx bytes | None, Review DataFrame, checks).
+
+    oc_path None with a cart_path drafts from the selling-session cart before the OC exists (oc/cartorder.py:
+    UNCONFIRMED). prior_path, a PO drafted before (from the cart), adds a Changes sheet: what the OC changed."""
     from . import draft as draftm
     empty = pd.DataFrame()
     core = _core()
@@ -421,7 +443,13 @@ def draft(oc_path, catalog_path, brand_cfg, cart_path=None, history_paths=None, 
         return None, empty, pre + [_check("Catalog export has the columns the tool needs", "FAIL", str(e))]
     except (UnicodeDecodeError, csv.Error) as e:
         return None, empty, pre + [_check("Catalog export is a Matrixify CSV", "FAIL", f"{type(e).__name__}: {e}")]
-    docs, rchecks, _ = read_oc(oc_path, brand_cfg, reader, ai_factory)
+    cart = None
+    if oc_path is None:
+        from . import cartorder
+        docs, rchecks, cart = cartorder.read_order(cart_path, brand_cfg) if cart_path else \
+            (None, [_check(READER_CHECK, "FAIL", "no order confirmation and no cart to draft from")], None)
+    else:
+        docs, rchecks, _ = read_oc(oc_path, brand_cfg, reader, ai_factory)
     pre += rchecks
     if docs is None:
         return None, empty, pre
@@ -429,8 +457,7 @@ def draft(oc_path, catalog_path, brand_cfg, cart_path=None, history_paths=None, 
     if colours:
         return None, empty, pre + [_check("Every OC colour has a code in the brand config (colour_codes)", "FAIL",
                                           str(brandm.ColourCodeError(colours)))]
-    cart = None
-    if cart_path:
+    if cart_path and cart is None:
         try:
             from . import cart as cartm
         except ImportError:
@@ -442,11 +469,21 @@ def draft(oc_path, catalog_path, brand_cfg, cart_path=None, history_paths=None, 
         except cartm.CartError as e:
             return None, empty, pre + [_check("Linesheet/cart export can be read", "FAIL", str(e))]
     tags = core.load_tag_lookup(str(REPO / "expected_tags.xlsx"))
-    rows, review, checks, fills = draftm.build(docs, brand_cfg, cat, hist, tags, cart=cart)
+    from . import cartorder
+    prior = cartorder.read_prior(prior_path) if prior_path else None
+    if prior and "fail" in prior:
+        return None, empty, pre + [prior["fail"]]
+    rows, review, checks, fills = draftm.build(docs, brand_cfg, cat, hist, tags, cart=cart,
+                                               prior_prices=prior["typed"] if prior else None)
+    extra = None
+    if prior:
+        extra, check = cartorder.prior_sheet(prior, docs, brand_cfg)
+        checks.append(check)
     checks = pre + checks
+    header, rows, review, fills = cartorder.as_written(docs, poxlsx.PO_HEADER, rows, review, fills)
     with tempfile.TemporaryDirectory(prefix="oc-draft-") as tmp:
         out = os.path.join(tmp, "PO-draft.xlsx")
-        poxlsx.write_po(out, poxlsx.PO_HEADER, rows, review, checks, fills, currency=cost_currency(brand_cfg))
+        poxlsx.write_po(out, header, rows, review, checks, fills, currency=cost_currency(brand_cfg), extra=extra)
         data = Path(out).read_bytes()
     return (None if blocking(checks) else data), pd.DataFrame(review), checks
 
@@ -457,7 +494,7 @@ def finalize(po_path, catalog_path, brand_cfg, when=None):
 
     All or nothing: if any check FAILs there is no zip at all. `when` names the run: pass the
     same value to zip_name(file_prefix(brand_cfg, when)) so the zip carries the run id too."""
-    prefix = file_prefix(brand_cfg, when)
+    prefix = run_prefix(po_path, brand_cfg, when)
     with tempfile.TemporaryDirectory(prefix="oc-finalize-") as tmp:
         try:
             cat = catm.load(catalog_path)

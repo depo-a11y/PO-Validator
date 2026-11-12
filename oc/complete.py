@@ -11,12 +11,13 @@ import collections
 import openpyxl
 from openpyxl.utils import get_column_letter
 
+from . import cartorder
 from .draft import oc_lines, cart_checks
 from .poxlsx import (FILLS, CODE, MADE_IN, COST_PRICE, TITLE_TAG, SEASON, NEW_SALE, PO_FORMULA,
                      resolve_formula, write_table, review_row, clean_text, as_text)
 from .draft import PRICE_CHECK
 from .resolve import Resolver, COLOUR, AI_OC, NO_RRP
-from .util import blank, norm_code, norm_size, fmt_money, cost_currency, money, slug
+from .util import blank, norm_code, norm_size, fmt_money, cost_currency, money, slug, size_match
 
 
 def run(po_path, docs, brand, catalog, history, tag_lookup, out, price_overrides=None, cart=None):
@@ -29,6 +30,7 @@ def run(po_path, docs, brand, catalog, history, tag_lookup, out, price_overrides
     ws = wb.worksheets[0]
     header = [c.value for c in ws[1]]
     col = {h: i + 1 for i, h in enumerate(header) if h}
+    col.update(cartorder.aliases(col))   # a PO drafted from a cart: its quantity and price columns are renamed
     last = max(r for r in range(1, ws.max_row + 1) if any(ws.cell(r, c).value is not None for c in range(1, len(header) + 1)))
     data_rows = [r for r in range(2, last + 1)
                  if any(ws.cell(r, c).value is not None for c in range(1, len(header) + 1))]
@@ -115,10 +117,34 @@ def run(po_path, docs, brand, catalog, history, tag_lookup, out, price_overrides
     checks = _checks(ws, col, data_rows, get, lines, R, brand, catalog, tag_lookup, review)
     if cart is not None:
         checks += cart_checks(lines, cart, brand)
+    changed = _changes_since_cart(po_path, header, lines, brand, checks)
+    for name in ("Review", "Checks", "Changes"):   # a drafted PO carries its own: replace them, never add Review1
+        if name in wb.sheetnames:
+            del wb[name]
     write_table(wb, "Review", review, colour_key="Colour")
     write_table(wb, "Checks", checks, colour_key="Result")
+    if changed is not None:
+        write_table(wb, "Changes", changed)
     wb.save(out)
     return checks
+
+
+def _changes_since_cart(po_path, header, lines, brand, checks):
+    """A PO drafted from a cart before its OC (oc/cartorder.py): what the OC changed, as a Changes sheet. The
+    quantities and prices typed in the PO are kept, as everywhere in complete; the checks above FAIL on them, and
+    its renamed cart columns keep finalize to PU-new."""
+    from .poxlsx import read_po
+    src = cartorder.unconfirmed_session(po_path)
+    if not src:
+        return None
+    checks.append(dict(Check="PO drafted from a cart", Result="WARN",
+                       Detail=f"{cartorder.UNCONFIRMED}: from {src}, not an order confirmation: complete kept this PO's "
+                              "cart quantities and prices, so finalize still makes PU-new only."))
+    changed, check = cartorder.changes(read_po(po_path)[1], lines, cost_currency(brand), "this PO", "this PO",
+                                       size_map=brand.get("size_map"))
+    checks.append(dict(check, Detail=check["Detail"] + " To take the OC's quantities and prices, draft from the OC "
+                                                       "with this PO as --prior."))
+    return changed
 
 
 def _checks(ws, col, data_rows, get, lines, R, brand, catalog, tag_lookup, review):
@@ -128,11 +154,11 @@ def _checks(ws, col, data_rows, get, lines, R, brand, catalog, tag_lookup, revie
     for l in lines:
         oc_eur[l["code"]] = l["price"]
         for s, q in l["sizes_norm"].items():
-            oc_q[(l["code"], s)] += q
+            oc_q[(l["code"], size_match(s, brand.get("size_map")))] += q   # a size the draft renamed meets its print
     rows = [{h: get(r, h) for h in col} | {"_row": r} for r in data_rows]
     po_q = collections.Counter()
     for x in rows:
-        po_q[(norm_code(x[CODE]), norm_size(x["Option2 Value"]))] += int(money(x["Order Qty"]) or 0)
+        po_q[(norm_code(x[CODE]), size_match(x["Option2 Value"], brand.get("size_map")))] += int(money(x["Order Qty"]) or 0)
     bad = sorted(k for k in set(oc_q) | set(po_q) if oc_q[k] != po_q[k])
     out.append(dict(Check="Qty per code+size equals the OC", Result="FAIL" if bad else "PASS",
                     Detail=f"{len(bad)} mismatches" + (f": {bad[:5]}" if bad else "")))
@@ -186,7 +212,7 @@ def _checks(ws, col, data_rows, get, lines, R, brand, catalog, tag_lookup, revie
                            + (f"; under the floor (kept as given, never raised): rows {[x['_row'] for x in low][:10]}"
                               if low else "")))
     types = set(tag_lookup)
-    badt = sorted({x["Type"] for x in new if x["Type"] not in types})
+    badt = sorted({x["Type"] or "(blank)" for x in new if x["Type"] not in types})
     out.append(dict(Check="Every NEW Type is in expected_tags.xlsx", Result="FAIL" if badt else "PASS",
                     Detail=", ".join(badt) or f"{len({x['Type'] for x in new})} Types"))
     by_title = collections.defaultdict(set)

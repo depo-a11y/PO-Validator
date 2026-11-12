@@ -78,6 +78,13 @@ def store_sizes(ordered, known, size_map=None, quorum=None):
     return out, why
 
 
+def size_match(size, size_map=None):
+    """One key for a size printed on an OC line and the same size on a drafted PO row, whose name the draft may have
+    changed to the store's (store_sizes renames only through the brand's size_map or to a name of the same size_alias):
+    '40' and 'IT 40', '31x34' and '31' under size_map {31x34: 31}. For comparing quantities, never for writing."""
+    return size_alias((size_map or {}).get(norm_size(size), size))
+
+
 def one_name_per_size(run, ordered):
     """A size run with one name per size. Where siblings spell a size two ways (one live product 'IT 40', another
     '40'), the name the ordered sizes use wins: their own name if ordered, else the same form (bare or not)."""

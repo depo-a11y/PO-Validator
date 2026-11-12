@@ -1,6 +1,8 @@
 """oc: Order Confirmation -> PO buy sheet -> PU (product upload) + delivery file.
 
     python -m oc draft    --oc OC.pdf --catalog export.csv --brand margiela --out PO-draft.xlsx [--cart CART.xlsx]
+                          [--prior PO-from-cart.xlsx]
+    python -m oc draft    --cart CART.xlsx --catalog export.csv --brand margiela --out PO-draft.xlsx  (no OC yet)
     python -m oc complete --po hand_PO.xlsx --oc OC.pdf --catalog export.csv --brand margiela --out PO.xlsx [--cart CART.xlsx]
     python -m oc finalize --po PO.xlsx --catalog export.csv --brand margiela --out-prefix <path-prefix>
     python -m oc reconcile --draft PO-draft.xlsx --po hand_PO.xlsx --oc OC.pdf --out accuracy.md
@@ -31,7 +33,10 @@ def _common(args):
     b = brandm.load(args.brand, args.brand_config)
     print(f"brand config: {b['_path']}")
     cat = catm.load(args.catalog)
-    hist = histm.load(b["history"], b["vendor"])
+    try:
+        hist = histm.load(b["history"], b["vendor"])
+    except ValueError as e:
+        raise SystemExit(f"past season PO: {e}")
     tags = validator_core.load_tag_lookup(str(REPO / "expected_tags.xlsx"))
     return b, cat, hist, tags
 
@@ -64,15 +69,41 @@ def _fails(checks):
     return [c for c in checks if c["Result"] == "FAIL"]
 
 
+def _cart_order(args, b):
+    """No OC yet: the cart is the order, UNCONFIRMED (oc/cartorder.py)."""
+    from . import cartorder
+    if not args.cart:
+        raise SystemExit("give --oc, or --cart to draft from the selling-session cart before the OC arrives")
+    docs, checks, cart = cartorder.read_order(args.cart, b)
+    _print_checks(checks)
+    if docs is None:
+        raise SystemExit(1)
+    return docs, checks, cart
+
+
 def cmd_draft(args):
     from . import draft, poxlsx
     b, cat, hist, tags = _common(args)
-    docs, rchecks = _read(args, b)
-    rows, review, checks, fills = draft.build(docs, b, cat, hist, tags, cart=_cart(args))
+    if args.oc:
+        docs, rchecks = _read(args, b)
+        cart = _cart(args)
+    else:
+        docs, rchecks, cart = _cart_order(args, b)
+    from . import cartorder
+    prior = cartorder.read_prior(args.prior) if args.prior else None
+    if prior and "fail" in prior:
+        raise SystemExit(prior["fail"]["Detail"])
+    rows, review, checks, fills = draft.build(docs, b, cat, hist, tags, cart=cart,
+                                              prior_prices=prior["typed"] if prior else None)
+    extra = None
+    if prior:
+        extra, check = cartorder.prior_sheet(prior, docs, b)
+        checks.append(check)
+    _print_checks(checks)   # the reader's checks were printed as it read
     checks = rchecks + checks
     from .util import cost_currency
-    poxlsx.write_po(args.out, poxlsx.PO_HEADER, rows, review, checks, fills, currency=cost_currency(b))
-    _print_checks(checks)
+    header, rows, review, fills = cartorder.as_written(docs, poxlsx.PO_HEADER, rows, review, fills)
+    poxlsx.write_po(args.out, header, rows, review, checks, fills, currency=cost_currency(b), extra=extra)
     print(f"-> {args.out} ({len(rows)} rows)")
     return 1 if _fails(checks) else 0
 
@@ -145,7 +176,8 @@ def main(argv=None):
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="cmd", required=True)
     d = sub.add_parser("draft", help="OC + catalog -> PO draft with Review and Checks sheets")
-    d.add_argument("--oc", required=True)
+    d.add_argument("--oc", help="the order confirmation; without it, --cart is the order (UNCONFIRMED)")
+    d.add_argument("--prior", help="a PO drafted before the OC (from the cart): a Changes sheet lists what the OC changed")
     d.add_argument("--catalog", required=True)
     d.add_argument("--brand", required=True)
     d.add_argument("--out", required=True)

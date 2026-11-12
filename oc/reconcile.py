@@ -3,7 +3,7 @@ import collections
 
 from .draft import oc_lines
 from .poxlsx import read_po, CODE
-from .util import cost_currency, norm_size, norm_code, size_key
+from .util import cost_currency, norm_size, norm_code, size_key, size_match
 
 
 def _norm(v):
@@ -16,12 +16,12 @@ def compare(draft_rows, hand_rows, docs, allow_price=(), brand=None):
     for l in lines:
         oc_eur[l["code"]] = l["price"]
         for s, q in l["sizes_norm"].items():
-            oc_q[(l["code"], s)] += q
+            oc_q[(l["code"], size_match(s, (brand or {}).get("size_map")))] += q
 
-    def qty(rows):
+    def qty(rows):   # by util.size_match: a size the draft renamed to the store's name meets its printed name
         c = collections.Counter()
         for r in rows:
-            c[(norm_code(r[CODE]), norm_size(r["Option2 Value"]))] += int(r.get("Order Qty") or 0)
+            c[(norm_code(r[CODE]), size_match(r["Option2 Value"], (brand or {}).get("size_map")))] += int(r.get("Order Qty") or 0)
         return c
 
     res = {}
@@ -124,8 +124,9 @@ def by_colour(draft_path, res):
 
 
 def run(draft_path, hand_path, docs, out, allow_price=(), brand=None):
-    _, d = read_po(draft_path)
-    _, h = read_po(hand_path)
+    from .cartorder import standard
+    d = [standard(r) for r in read_po(draft_path)[1]]   # a PO drafted from a cart names its quantity columns apart
+    h = [standard(r) for r in read_po(hand_path)[1]]
     r = compare(d, h, docs, set(allow_price), brand)
     r["currency"] = cost_currency(brand)
     r["by_colour"] = by_colour(draft_path, r)
@@ -146,7 +147,8 @@ def write_md(r, out, draft_path, hand_path, extra=""):
     L.append(f"| Draft vs hand PO, qty per code+size (zero rows count as 0) | {len(r['draft_vs_hand_qty'])} mismatches |")
     L.append(f"| Draft wholesale vs OC | {len(r['draft_price_diff'])} codes differ |")
     L.append(f"| Hand PO wholesale vs OC | {len(r['hand_price_diff'])} codes differ: "
-             + "; ".join(f"{c} {cur} {v} vs OC {cur} {o:g}" for c, v, o in r["hand_price_diff"]) + " |")
+             + "; ".join(f"{c} {cur} {v} vs OC " + (f"{cur} {o:g}" if o is not None else "(not on the OC)")
+                         for c, v, o in r["hand_price_diff"]) + " |")
     L.append(f"| MERGE / NEW split | draft {dict(r['draft_commands'])}, hand {dict(r['hand_commands'])}; "
              f"{len(r['command_disagree'])} codes disagree |")
     L.append("")

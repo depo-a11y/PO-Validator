@@ -122,7 +122,7 @@ def run(po_path, brand, catalog, out_prefix):
     sys.path.insert(0, str(REPO))
     import validator_core as core
 
-    _, rows = read_po(po_path)
+    header, rows = read_po(po_path)
     checks, writers = [run_check(out_prefix)], []
     new = [r for r in rows if _cmd(r) == "NEW"]
     merge = [r for r in rows if _cmd(r) == "MERGE"]
@@ -131,9 +131,15 @@ def run(po_path, brand, catalog, out_prefix):
         checks.append(dict(Check="Every PO row is NEW or MERGE", Result="FAIL",
                            Detail=f"rows {[r['_row'] for r in other]}"))
 
-    for build in (_pu_new(new, brand, catalog, core, out_prefix),
-                  _pu_merge(merge, brand, catalog, core, out_prefix),
-                  _delivery(rows, out_prefix, cost_currency(brand))):
+    from .cartorder import finalize_refusal
+    refused = finalize_refusal(po_path, header, new, brand)   # from a cart: PU-new only; a missing column: FAIL
+    builds = [_pu_new(new, brand, catalog, core, out_prefix)]
+    if refused:
+        checks.append(refused)
+    if not refused:
+        builds += [_pu_merge(merge, brand, catalog, core, out_prefix),
+                   _delivery(rows, out_prefix, cost_currency(brand))]
+    for build in builds:
         c, w = build
         checks += c
         writers += w

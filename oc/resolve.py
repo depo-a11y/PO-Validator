@@ -16,6 +16,7 @@ import html
 import re
 
 from .brand import fill_text
+from .cart import style_title
 from .util import cost_currency, iso_currency, norm_code, norm_size, sort_sizes, size_key, title_colour, slug
 
 GREEN, AMBER, RED = "green", "amber", "red"
@@ -23,11 +24,13 @@ NEEDED = "price needed"   # a NEW retail price left blank for a person to fill: 
 NO_RRP = "price needed, no RRP from brand"
 AI_OC = "OC (AI read)"   # a value the AI reader took from the OC: never green, however well it passed the gates
 AI_NEW_SIZE = "OC (AI read), size not live"   # an AI-read size the live product does not have: red
+CART_OC = "cart, not confirmed"   # a quantity or price read from a cart drafted before its OC (oc/cartorder.py): amber
+PRIOR = "prior PO"   # a NEW retail price typed into the PO drafted from the cart, carried to the OC's draft: amber
 GENDERS = ("MEN", "WOMEN", "UNISEX")
 # A colour description is copied into a title; anything outside these is a garbled export ('Peach Pur}e').
 CLEAN_COLOUR = re.compile(r"[^\w\s/&'.,()+-]")
 COLOUR = {"OC": GREEN, AI_OC: AMBER, AI_NEW_SIZE: RED, NEEDED: RED, "catalog": GREEN, "cart": AMBER, "history": AMBER,
-          "rule": AMBER, "guess": RED}
+          "rule": AMBER, "guess": RED, CART_OC: AMBER, PRIOR: AMBER}
 RANK = {GREEN: 0, AMBER: 1, RED: 2}
 
 
@@ -197,7 +200,8 @@ class Resolver:
             (t, n), = cnt.most_common(1)
             share = n / sum(cnt.values())
             if share >= 0.6 and (gender is None or t.startswith(gender + " ")):
-                return t, "history", f"style family {fam}: {t} on {n} of {sum(cnt.values())} products/rows"
+                return t, "history", f"style family {fam}: {t} on {n} of {sum(cnt.values())} products/rows" \
+                    + self._cart_says(code, t, gender)
         pc = (product_class or "").strip().upper()
         g = gender or self.b["default_gender"]
         t, rest = self._table_type(self.b["product_class_types"].get(pc), g)
@@ -209,8 +213,32 @@ class Resolver:
             if t:
                 return t, "cart", self.cart_why(row, f"Subcategory '{row['subcategory']}' -> {rest} "
                                                      f"(brand subcategory_types, gender {g})")
+            t, rest, cls = self._subcategory_as_class(row["subcategory"], g)
+            if t:
+                return t, "cart", self.cart_why(row, f"Subcategory '{row['subcategory']}' read as product class "
+                                                     f"'{cls}' -> {rest} (brand product_class_types, gender {g})")
         return "", "guess", f"no Type for product class '{product_class}'" + \
             (f" or cart subcategory '{row['subcategory']}'" if row and row["subcategory"] else "")
+
+    def _cart_says(self, code, t, gender):
+        """'; the cart's Subcategory ... says <Type>: check which' when this style's cart row maps to another Type."""
+        row = self.cart_row(code)
+        if not row or not row["subcategory"]:
+            return ""
+        g = gender or self.b["default_gender"]
+        alt = self._table_type(self.b.get("subcategory_types", {}).get(row["subcategory"].upper()), g)[0] \
+            or self._subcategory_as_class(row["subcategory"], g)[0]
+        return f"; the cart's Subcategory '{row['subcategory']}' says {alt}: check which" if alt and alt != t else ""
+
+    def _subcategory_as_class(self, subcategory, gender):
+        """A cart Subcategory looked up as an OC product class, as printed and then singular: OTB's carts print
+        'Sportsjackets' and 'Ballet Shoes' where its OCs print SPORTSJACKET and BALLET SHOE."""
+        sub = subcategory.strip().upper()
+        for cls in dict.fromkeys((sub, sub[:-1] if sub.endswith("S") else sub)):
+            t, rest = self._table_type(self.b["product_class_types"].get(cls), gender)
+            if t:
+                return t, rest, cls
+        return None, None, None
 
     def _table_type(self, entry, gender):
         """A brand-table entry is a Type without gender, a list of them (first valid
@@ -239,6 +267,10 @@ class Resolver:
             if stems:
                 stem = max(stems, key=lambda s: (stems[s], -list(first).index(s)))
                 return f"{stem} in {colour_name}", "catalog", f"{label}: stem of '{first[stem]['title']}'"
+        row = self.cart_row(code)
+        if row and row["style_name"] and product_class == row["style_name"]:
+            return f"{style_title(row['style_name'])} in {colour_name}", "cart", \
+                self.cart_why(row, f"Style Name '{row['style_name']}' in house style")
         stem = " ".join(w.capitalize() for w in re.split(r"\s+", (product_class or "").strip()) if w)
         return f"{stem} in {colour_name}", "guess", f"product class '{product_class}' title-cased"
 
@@ -264,6 +296,9 @@ class Resolver:
         if fits:
             n, r = max(fits, key=lambda t: (t[0], len(t[1])))
             return sort_sizes(r), "catalog", f"most common live {ptype} run holding the ordered sizes ({n} products)"
+        row = self.cart_row(code)
+        if row and row["available_sizes"] and ordered <= set(row["available_sizes"]):
+            return sort_sizes(row["available_sizes"]), "cart", self.cart_why(row, "Available Sizes (no run found)")
         return sort_sizes(ordered), "OC", "ordered sizes only (no run found)"
 
     # ---- price --------------------------------------------------------------

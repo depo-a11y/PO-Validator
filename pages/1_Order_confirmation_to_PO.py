@@ -20,6 +20,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from oc import brand as brandm, catalog as catm, service  # noqa: E402
+from oc.cartorder import REFUSED_CHECK  # noqa: E402
 
 st.set_page_config(page_title="Order confirmation to PO", layout="wide")
 
@@ -211,8 +212,13 @@ oc_up = st.file_uploader("Order confirmation (the brand's spreadsheet: .xls, .xl
                          "Order confirmation (PDF)", type=SHEET_TYPES if is_sheet else ["pdf"], key="w_oc")
 can_cart = service.cart_supported()
 cart_up = st.file_uploader(
-    "Linesheet/cart export (optional, improves titles and colours)", type=["xlsx"], key="w_cart",
+    "Linesheet/cart export (optional, improves titles and colours; with no order confirmation yet, the cart is "
+    "the order, UNCONFIRMED)", type=["xlsx"], key="w_cart",
     disabled=not can_cart, help=None if can_cart else "This version cannot read a linesheet yet.")
+prior_up = st.file_uploader(
+    "PO drafted from the cart (optional, once the order confirmation is here)", type=["xlsx"], key="w_prior",
+    help="The PO this tool drafted from the cart before the order confirmation came. The new draft lists what the "
+         "order confirmation changed (a Changes sheet) and carries the retail prices typed into it.")
 hist_ups = st.file_uploader(
     "Past season POs (optional, used for Types and size runs)", type=["xlsx"], accept_multiple_files=True, key="w_hist",
     help="The brand's PO buy sheets from past seasons. If you add any, they replace the list in the brand config.")
@@ -240,8 +246,8 @@ elif cfg and not is_sheet:   # the AI reader reads PDFs; a sheet brand's OC is a
     use_ai = use_ai and bool(cfg.get("oc_supplier")) and not capped
 blocked = bool(cfg) and cfg["adapter"] == "ai" and capped
 
-need = [n for n, ok in (("a brand", cfg), ("the catalog export", S.get("catalog")), ("the order confirmation", oc_up))
-        if not ok]
+need = [n for n, ok in (("a brand", cfg), ("the catalog export", S.get("catalog")),
+                        ("the order confirmation (or, before it arrives, the cart)", oc_up or cart_up)) if not ok]
 if need:
     st.caption("To build the draft, add " + and_join(need) + ".")
 build = False if blocked else st.button("Build draft PO", type="primary", disabled=bool(need))
@@ -254,14 +260,15 @@ if build:
                 hist_paths = [save(os.path.join(tmp, "history"), safe_name(f.name), f.getvalue())
                               for f in hist_ups or []]
                 po, review, checks = service.draft(
-                    save(tmp, safe_name(oc_up.name) if is_sheet else "oc.pdf", oc_up.getvalue()),
+                    save(tmp, safe_name(oc_up.name) if is_sheet else "oc.pdf", oc_up.getvalue()) if oc_up else None,
                     save(tmp, "catalog.csv", S["catalog"][1]), cfg,
                     cart_path=save(tmp, "cart.xlsx", cart_up.getvalue()) if cart_up else None,
-                    history_paths=hist_paths or None, reader="ai" if use_ai else None)
+                    history_paths=hist_paths or None, reader="ai" if use_ai else None,
+                    prior_path=save(tmp, "prior.xlsx", prior_up.getvalue()) if prior_up and oc_up else None)
             if service.ai_read_sent(checks):
                 S["ai_reads"] = S.get("ai_reads", 0) + 1
-            S["draft"] = dict(po=po, review=review, checks=checks, file=service.file_prefix(cfg) + "PO-draft.xlsx",
-                              made_from=f"{oc_up.name} and {S['catalog'][0]}, brand config {cfg['_path']}")
+            S["draft"] = dict(po=po, review=review, checks=checks, file=service.draft_file(cfg, checks),
+                              made_from=f"{(oc_up or cart_up).name} and {S['catalog'][0]}, brand config {cfg['_path']}")
         except Exception as e:
             st.error("Something went wrong building the draft. Send Colwyn the message below.")
             st.exception(e)
@@ -323,10 +330,10 @@ if st.button("Make upload files", type="primary", disabled=bool(need2)):
         try:
             when = service.now()
             with tempfile.TemporaryDirectory(prefix="oc-page-") as tmp:
-                zbytes, checks, errors = service.finalize(
-                    save(tmp, safe_name(po_up.name), po_up.getvalue()), save(tmp, "catalog.csv", S["catalog"][1]), cfg,
-                    when=when)
-            prefix = service.file_prefix(cfg, when)
+                po_path = save(tmp, safe_name(po_up.name), po_up.getvalue())
+                zbytes, checks, errors = service.finalize(po_path, save(tmp, "catalog.csv", S["catalog"][1]), cfg,
+                                                          when=when)
+                prefix = service.run_prefix(po_path, cfg, when)
             S["final"] = dict(zip=zbytes, checks=checks, errors=errors, file=service.zip_name(prefix),
                               run=prefix.rstrip("-"),
                               made_from=f"{po_up.name} and {S['catalog'][0]}, brand config {cfg['_path']}")
@@ -348,6 +355,9 @@ if S.get("final"):
     else:
         names = zipfile.ZipFile(io.BytesIO(f["zip"])).namelist()
         st.success("No check failed.")
+        for c in f["checks"]:
+            if c["Check"] == REFUSED_CHECK:
+                st.warning(c["Detail"])
         st.download_button("Download the upload and delivery files (.zip)", f["zip"], file_name=f["file"],
                            mime="application/zip", type="primary", on_click="ignore")
         st.write("Inside: " + ", ".join(names) + ".")

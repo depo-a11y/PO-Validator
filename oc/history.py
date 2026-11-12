@@ -7,6 +7,7 @@ Bonner), so only rows of the config's vendor are read; a row with no Vendor is k
 not read: since 2026-11-12 a NEW product's price comes only from a brand RRP in AUD.
 """
 import collections
+import os
 
 import openpyxl
 
@@ -50,6 +51,11 @@ def _k(s):
 
 
 def _load_one(path, label, vendor=None):
+    from .cartorder import unconfirmed_session
+    src = unconfirmed_session(path)
+    if src:
+        raise ValueError(f"{os.path.basename(path)} is a PO drafted from {src} before its order confirmation, not a "
+                         "past season's PO: leave it out of the past season POs")
     wb = openpyxl.load_workbook(path, data_only=True, read_only=True)
     ws = wb.worksheets[0]
     it = ws.iter_rows(values_only=True)

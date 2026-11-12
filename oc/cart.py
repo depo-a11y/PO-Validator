@@ -45,8 +45,26 @@ def _text(v):
     return re.sub(r"\s+", " ", str(v)).strip()
 
 
+def half_size(size, whole):
+    """OTB prints a half size run together: '355' is 35.5 when 35 is also a size of the same grid. Else norm_size."""
+    t = str(size).strip()
+    m = re.fullmatch(r"(\d{2})5", t)
+    return f"{m.group(1)}.5" if m and m.group(1) in whole else norm_size(t)
+
+
 def _sizes(v):
-    return [norm_size(s) for s in _text(v).split(",") if s.strip()]
+    raw = [s.strip() for s in _text(v).split(",") if s.strip()]
+    return [half_size(s, set(raw)) for s in raw]
+
+
+HOUSE_WORDS = {"Tshirt": "T-Shirt", "Tshirts": "T-Shirts"}
+
+
+def style_title(name):
+    """A cart Style Name as a title stem: 'TABI SANDAL PUMP H80' -> 'Tabi Sandal Pump H80' (the heel code stays as
+    the brand prints it), 'INSIDE OUT TSHIRT' -> 'Inside Out T-Shirt', each part of a hyphenated word capitalised."""
+    words = ["-".join(p.capitalize() for p in w.split("-")) for w in _text(name).split()]
+    return " ".join(HOUSE_WORDS.get(w, w) for w in words)
 
 
 def made_in_name(raw):
