@@ -31,6 +31,7 @@ never logged, stored or put in a message. `read` takes a `factory(key) -> client
 tests run offline against a fake client.
 """
 import base64
+import bisect
 import json
 import os
 import re
@@ -38,7 +39,7 @@ import time
 from pathlib import Path
 
 from . import otb
-from ..util import cost_currency, currency_off, iso_currency, rrp_label
+from ..util import cost_currency, currency_off, iso_currency, rrp_header, rrp_label
 
 MODEL = "claude-opus-5-5"
 PRICE_USD_PER_MTOK = (4.0, 20.0)    # claude-opus-5-5 input, output (thinking is billed as output)
@@ -396,6 +397,24 @@ def currency_marks(toks):
     return found
 
 
+COLUMN_WORDS = {"qty", "quantity", "price", "total", "value", "amount", "units", "wholesale", "whl", "gross", "net",
+                "cost"}
+_AMOUNT = re.compile(r"\d[.,]\d{2}(?!\d)")
+_CONNECT = {""} | {c.lower() for c in ISO_CODES} | {"a", "au", "us"}
+
+
+def _connector(word):
+    """What may sit between an RRP label and its amount: currency marks and punctuation ('AUD', '(AUD)', 'A$', ':')."""
+    return not re.search(r"\d", word) and re.sub(r"[^a-z]", "", word) in _CONNECT
+
+
+def header_row(words):
+    """A table's column-header row: two or more column words (Qty, Price, Total, Value, ...) and no amount. An
+    issuer, address or terms line is not one."""
+    return (sum(re.sub(r"[^a-z]", "", w) in COLUMN_WORDS for w in words) >= 2
+            and not any(_AMOUNT.search(w) for w in words))
+
+
 class Pages:
     """The PDF's words page by page, case-folded: from pdfplumber's default extraction and, when given, a tight
     one (x_tolerance=1, which keeps words apart where the default runs them together), each as printed and with
@@ -405,14 +424,20 @@ class Pages:
 
     def __init__(self, pages, tight=None):
         self.n = len(pages)
-        self.variants = []
+        self.variants, self.lines = [], []
         for texts in [pages] + ([tight] if tight and len(tight) == len(pages) else []):
             for tidy in (lambda t: t, undouble):
-                toks, starts = [], []
+                toks, starts, row, page_row, span = [], [], [], [], []   # each word's printed line, line spans
                 for t in texts:
                     starts.append(len(toks))
-                    toks += tidy(t).casefold().split()
+                    page_row.append(len(span))
+                    for text_line in tidy(t).casefold().splitlines():
+                        words = text_line.split()
+                        row += [len(span)] * len(words)
+                        span.append((len(toks), len(toks) + len(words)))
+                        toks += words
                 self.variants.append((toks, starts + [len(toks)]))
+                self.lines.append((row, page_row, span))
 
     def page_tokens(self, v, page):
         toks, starts = self.variants[v]
@@ -469,8 +494,46 @@ class Pages:
             header = toks[page_start:first] + toks[doc_top:doc_first]
             rrp.append(dict(
                 grounded=text is not None and bool(_flat(_bare(text))) and _flat(_bare(text)) in joined,
-                labelled=any(map(rrp_label, block + header)), marks=currency_marks(block + header)))
+                labelled=self.rrp_labelled(v, j, end, text, doc_first), marks=currency_marks(block + header)))
         return out, rrp
+
+    def rrp_labelled(self, v, j, end, text, doc_first):
+        """An RRP label right before the amount in its own printed line (currency marks between allowed), or in
+        the nearest column-header row above it: on its page, else at or above the document's first line. Issuer,
+        address and terms text never count: they are neither next to the amount nor a column-header row."""
+        toks, starts = self.variants[v]
+        row, page_row, span = self.lines[v]
+        flat = _flat(_bare(text or ""))
+        ends, n = [], 0
+        for t in toks[j:end]:
+            n += len(t)
+            ends.append(n)
+        joined = "".join(toks[j:end])
+        p = joined.find(flat) if flat else -1
+        while p >= 0:
+            k = j + bisect.bisect_right(ends, p)
+            head = toks[k][:p - (ends[k - j - 1] if k > j else 0)]
+            i = k - 1
+            while i >= 0 and i >= k - 2 and row[i] == row[k] and _connector(toks[i]):
+                i -= 1
+            if rrp_label(head) or (_connector(head) and i >= 0 and row[i] == row[k] and rrp_label(toks[i])):
+                return True
+            words = self._header_row(v, row[k] - 1, page_row[bisect.bisect_right(starts, k) - 1])
+            if words is None and doc_first < len(toks):
+                words = self._header_row(v, row[doc_first], page_row[bisect.bisect_right(starts, doc_first) - 1])
+            if words is not None and rrp_header(words):
+                return True
+            p = joined.find(flat, p + 1)
+        return False
+
+    def _header_row(self, v, r, top):
+        """The words of the nearest column-header row from printed line r up to line `top`, else None."""
+        toks, span = self.variants[v][0], self.lines[v][2]
+        for x in range(r, top - 1, -1):
+            words = toks[slice(*span[x])]
+            if header_row(words):
+                return words
+        return None
 
 
 def _shape(text, exact_digits=False):
@@ -605,8 +668,8 @@ def page_problems(data, pages):
 
 def rrp_evidence(doc_lines, raw_lines, found):
     """An AI-read RRP is kept only as far as the PDF prints it: its text in the line's own part, not the line's
-    own unit price or line value, and an RRP label (RRP, MSRP, Retail, Sugg., Recommended) in that part or the
-    column header above it (else no RRP); its currency only with a mark printed in that part, the page's column
+    own unit price or line value, and an RRP label right before it in its printed line or in the column-header row
+    above it (Pages.rrp_labelled; else no RRP); its currency only with a mark printed in that part, the page's column
     header or the document's header (else unknown, so never an AUD price). Notes go to the Review through
     `rrp_note` and `rrp_found`."""
     for dl, l, info in zip(doc_lines, raw_lines, found or []):
@@ -624,8 +687,9 @@ def rrp_evidence(doc_lines, raw_lines, found):
                       rrp_note=f"the AI read an RRP '{text}' that is this line's {same[0]}; not used")
         elif not info["labelled"]:
             dl.update(rrp=None, rrp_currency=None,
-                      rrp_note=f"the AI read an RRP '{text}', but no RRP, MSRP, retail, suggested or recommended label "
-                               "is printed in its line or its column header; not used")
+                      rrp_note=f"the AI read an RRP '{text}', but no RRP label (RRP, MSRP, SRP, PVP, UVP, retail, "
+                               "suggested, recommended, ticket price) is printed right before it or in its column-header "
+                               "row; not used")
         elif claimed and claimed not in info["marks"]:
             dl.update(rrp_currency=None,
                       rrp_note=f"the AI read the RRP '{text}' as {claimed}, but no {claimed} mark is printed with it "

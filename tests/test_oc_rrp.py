@@ -15,6 +15,7 @@ from oc import cart as cartm, catalog as catm, complete, draft as draftm, finali
 from oc.adapters import ai, fog
 from oc.resolve import COLOUR, NEEDED, NO_RRP
 from test_oc_ai import RESPONSE, FakeClient, _cfg, _mut, make_pdf, message, PDF_LINES
+from test_oc_ai_blocks import make_pages_pdf
 from test_oc_cart import CART_HEADER, CART_ROWS, write_cart
 
 NEW_CODE = "S99WS0001P0001 900"   # the base docs' second line: not live in the base catalog, so drafted NEW
@@ -283,10 +284,14 @@ def test_complete_marks_an_ai_read_aud_rrp_amber(tmp_path):
 
 
 # ---- an AI-read RRP must be labelled as one and not be the line's own price (review 2026-11-12-buyer-1) ----------
-def _aud_read(tmp_path, monkeypatch, lines, rrp_text):
-    """The synthetic OC billed in AUD (as Diesel and Kenzo bill), line 1's RRP read by the AI as `rrp_text`."""
+def _aud_read(tmp_path, monkeypatch, lines, rrp_text, line=0, pages=None):
+    """The synthetic OC billed in AUD (as Diesel and Kenzo bill), line `line`'s RRP read by the AI as `rrp_text`.
+    `pages`: lists of lines, one per page, instead of the one page `lines`."""
     monkeypatch.setenv(ai.KEY_NAME, "sk-ant-test")
-    pdf = make_pdf(tmp_path / "aud.pdf", [l.replace("EUR", "AUD") for l in lines])
+    if pages:
+        pdf = make_pages_pdf(tmp_path / "aud.pdf", [[l.replace("EUR", "AUD") for l in pg] for pg in pages])
+    else:
+        pdf = make_pdf(tmp_path / "aud.pdf", [l.replace("EUR", "AUD") for l in lines])
     cfg = dict(_cfg(), cost_currency="AUD")
 
     def f(d, doc, ls):
@@ -294,9 +299,12 @@ def _aud_read(tmp_path, monkeypatch, lines, rrp_text):
         for l in ls:
             l.update(price_text=l["price_text"].replace("EUR", "AUD"),
                      line_value_text=l["line_value_text"].replace("EUR", "AUD"))
-        ls[0].update(rrp_text=rrp_text, rrp_currency="AUD")
+        ls[line].update(rrp_text=rrp_text, rrp_currency="AUD")
+        if pages:
+            doc.update(pages=[1, 2])
+            ls[2].update(page=2)
     docs, _, _ = ai.read(pdf, cfg, factory=FakeClient(message(_mut(f))).factory)
-    return docs[0]["lines"][0]
+    return docs[0]["lines"][line]
 
 
 LABELLED = [l.replace("Qty Unit Price Total", "Qty Unit Price Total RRP", 1).replace("EUR 480,00", "EUR 480,00 EUR 980,00")
@@ -312,27 +320,82 @@ def test_an_ai_rrp_that_is_the_lines_own_price_or_value_is_never_used(tmp_path, 
     assert (line["rrp"], line["rrp_currency"]) == (980.0, "AUD")
 
 
-HEADER_LABEL = PDF_LINES[:2] + ["Qty Unit Price Total RRP"] + [l.replace("EUR 480,00", "EUR 480,00 EUR 980,00")
-                                                               for l in PDF_LINES[2:]]
+def _oc(rrp="EUR 980,00", own="", top=None, first=None, desc=None):
+    """The synthetic OC, line 1's amount `rrp` printed after its line value. Each line's own column-header row
+    gains `own`; or, with `top`, one column-header row sits above the table and the lines carry none."""
+    lines = list(PDF_LINES)
+    lines[0] = first or lines[0]
+    lines = [l.replace("EUR 480,00", f"EUR 480,00 {rrp}") for l in lines]
+    if desc:
+        lines = [l.replace("Example Jacket", desc) for l in lines]
+    if top is None:
+        return [l.replace("Qty Unit Price Total", "Qty Unit Price Total" + own) for l in lines]
+    return lines[:2] + [top] + [l.replace(" Qty Unit Price Total", "") for l in lines[2:]]
+
+
+NO_LABEL = ("the AI read an RRP 'AUD 980,00', but no RRP label (RRP, MSRP, SRP, PVP, UVP, retail, suggested, "
+            "recommended, ticket price) is printed right before it or in its column-header row; not used")
 
 
 @pytest.mark.parametrize("lines,kept", [
-    ([l.replace("EUR 480,00", "EUR 480,00 EUR 980,00") for l in PDF_LINES], False),   # an amount with no label
-    (HEADER_LABEL, True),                                                              # label in the column header
-    ([l.replace("EUR 480,00", "EUR 480,00 RRP EUR 980,00") for l in PDF_LINES], True),  # label in its line
+    pytest.param(_oc(), False, id="no label"),
+    pytest.param(_oc(rrp="RRP EUR 980,00"), True, id="label right before the amount"),
+    pytest.param(_oc(rrp="RRP: (EUR) 980,00"), True, id="label, then currency marks, then the amount"),
+    pytest.param(_oc(own=" RRP"), True, id="label in the line's own column-header row"),
+    pytest.param(_oc(top="Qty Unit Price Total RRP"), True, id="label in the column-header row above the table"),
+    pytest.param(_oc(desc="Example Jacket RRP"), False, id="label in the line, not before the amount"),
+    pytest.param(_oc(top="Qty Unit Price Total", first="ORDER CONFIRMATION Example Retail Ltd RRP"), False,
+                 id="label in the issuer line above the table"),
+    pytest.param(_oc(rrp="SRP EUR 980,00"), True, id="SRP"),
+    pytest.param(_oc(rrp="PVP EUR 980,00"), True, id="PVP"),
+    pytest.param(_oc(rrp="UVP EUR 980,00"), True, id="UVP"),
+    pytest.param(_oc(own=" Ticket Price"), True, id="a Ticket Price column"),
+    pytest.param(_oc(rrp="Ticket EUR 980,00"), False, id="Ticket alone"),
+    pytest.param(_oc(rrp="Ticket Price EUR 980,00"), False, id="Ticket Price in the line, not a column header"),
+    pytest.param(_oc(rrp="Retailer EUR 980,00"), False, id="Retailer"),
 ])
-def test_an_ai_rrp_needs_an_rrp_label_in_its_line_or_column_header(tmp_path, monkeypatch, lines, kept):
+def test_an_ai_rrp_needs_an_rrp_label_next_to_it_or_over_its_column(tmp_path, monkeypatch, lines, kept):
     line = _aud_read(tmp_path, monkeypatch, lines, "AUD 980,00")
     assert (line["rrp"], line["rrp_currency"]) == ((980.0, "AUD") if kept else (None, None))
     if not kept:
-        assert line["rrp_note"] == ("the AI read an RRP 'AUD 980,00', but no RRP, MSRP, retail, suggested or "
-                                    "recommended label is printed in its line or its column header; not used")
+        assert line["rrp_note"] == NO_LABEL
+
+
+def test_an_issuer_named_retail_does_not_label_a_gross_column(tmp_path, monkeypatch):
+    """Review 2026-11-12-buyer-3: 'Example Retail Ltd' over a GROSS column kept 520 as the RRP."""
+    lines = _oc(rrp="EUR 520,00", own=" Gross", first="ORDER CONFIRMATION Example Retail Ltd")
+    line = _aud_read(tmp_path, monkeypatch, lines, "AUD 520,00")
+    assert (line["rrp"], line["rrp_currency"]) == (None, None) and "no RRP label" in line["rrp_note"]
+
+
+@pytest.mark.parametrize("label,kept", [("", False), (" RRP", True)])
+def test_a_continuation_page_takes_the_column_header_of_the_first_page(tmp_path, monkeypatch, label, kept):
+    """Line 3 sits on page 2 under an address line, with no column-header row there: its label is page 1's table
+    header (above the confirmation's first line), never the address, which names Retail and Wholesale."""
+    one = _oc(top="Qty Unit Price Total" + label)
+    page1, rest = one[:7], one[7:]                      # line 3 (EXCP03) and the totals move to page 2
+    rest = [l.replace("EUR 2.100,00", "EUR 2.100,00 EUR 2.400,00") for l in rest]
+    pages = [page1, ["1 Retail Way, Wholesale District"] + rest]
+    line = _aud_read(tmp_path, monkeypatch, None, "AUD 2.400,00", line=2, pages=pages)
+    assert (line["rrp"], line["rrp_currency"]) == ((2400.0, "AUD") if kept else (None, None))
+    assert kept or line["rrp_note"] == NO_LABEL.replace("980,00", "2.400,00")
 
 
 def test_an_rrp_label_is_a_retail_price_word_not_the_retailer():
-    from oc.util import rrp_label
-    assert all(map(rrp_label, ["RRP", "MSRP", "Retail", "Sugg.", "Recommended", "RRP(AUD)", "RetailPrice", "r.r.p."]))
-    assert not any(map(rrp_label, ["Retailer", "Retailer:", "RETAILERS", "Price", "Total", "Wholesale", "Unit"]))
+    from oc.util import rrp_header, rrp_label
+    assert all(map(rrp_label, ["RRP", "MSRP", "Retail", "Sugg.", "Recommended", "RRP(AUD)", "RetailPrice", "r.r.p.",
+                               "SRP", "PVP:", "(UVP)", "SRP(AUD)"]))
+    assert not any(map(rrp_label, ["Retailer", "Retailer:", "RETAILERS", "Price", "Total", "Wholesale", "Unit",
+                                   "Ticket", "SRPCODE", "UVPN"]))   # SRP, PVP, UVP only as whole words
+    assert rrp_header("qty ticket price total".split()) and rrp_header(["ticketprice"])
+    assert not rrp_header("qty ticket no. total".split()) and not rrp_header("ticket".split())
+
+
+def test_a_column_header_row_has_column_words_and_no_amount():
+    assert ai.header_row("qty unit price total".split()) and ai.header_row("style qty price rrp".split())
+    assert not ai.header_row("order confirmation example retail ltd".split())
+    assert not ai.header_row("1 retail way, wholesale district".split())        # one column word: an address
+    assert not ai.header_row("total qty 9 net value eur 2.716,50".split())       # a totals line carries an amount
 
 
 @pytest.mark.parametrize("word,read", [("MSRP", True), ("RETAIL", True), ("MARKUP", False)])

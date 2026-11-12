@@ -427,7 +427,7 @@ MUTANTS = [
     # ---- review 2026-11-12-buyer-1 ----
     ("oc/adapters/ai.py", "        elif same:", "        elif False:", "AI: an RRP that is the line's own unit price or line value used"),
     ("oc/adapters/ai.py", '        elif not info["labelled"]:', "        elif False:", "AI: an RRP with no RRP label printed used"),
-    ("oc/adapters/ai.py", "labelled=any(map(rrp_label, block + header)),", "labelled=any(map(rrp_label, block)),",
+    ("oc/adapters/ai.py", "            if words is not None and rrp_header(words):", "            if False:",
      "AI: an RRP label in the column header not seen"),
     ("oc/util.py", 'RRP_LABEL = re.compile(r"rrp|msrp|recommended|sugg|retail(?!er)")',
      'RRP_LABEL = re.compile(r"rrp|msrp|recommended|sugg|retail")', "'Retailer' read as an RRP label"),
@@ -442,6 +442,24 @@ MUTANTS = [
     ("oc/service.py", "computer ({', '.join(h['label'] for h in missing)}). {RED_WARNING} {MISSING_ADVICE}\")",
      "computer ({', '.join(h['label'] for h in missing)}). {RED_WARNING} Upload them as past season POs to fix this.\")",
      "page: a missing past PO advice says upload only the missing one"),
+    # ---- review 2026-11-12-buyer-3 ----
+    ("oc/adapters/ai.py", "labelled=self.rrp_labelled(v, j, end, text, doc_first),",
+     "labelled=any(map(rrp_label, block + header)),", "AI: an RRP label anywhere in the line or the document header"),
+    ("oc/adapters/ai.py", "            if rrp_label(head) or (_connector(head) and i >= 0 and row[i] == row[k] and rrp_label(toks[i])):",
+     "            if rrp_label(head) or any(rrp_label(t) for t, r in zip(toks[:k], row[:k]) if r == row[k]):",
+     "AI: an RRP label anywhere in the amount's line, not right before it"),
+    ("oc/adapters/ai.py", "    return (sum(re.sub(r\"[^a-z]\", \"\", w) in COLUMN_WORDS for w in words) >= 2",
+     "    return (sum(re.sub(r\"[^a-z]\", \"\", w) in COLUMN_WORDS for w in words) >= 1",
+     "AI: an address line with one column word taken as a column-header row"),
+    ("oc/adapters/ai.py", "            if words is None and doc_first < len(toks):", "            if False:",
+     "AI: a continuation page never takes the first page's column header"),
+    ("oc/util.py", 'RRP_WORDS = {"srp", "pvp", "uvp"}', "RRP_WORDS = set()", "SRP, PVP and UVP not labels"),
+    ("oc/util.py", 'RRP_WORDS = {"srp", "pvp", "uvp"}', 'RRP_WORDS = {"srp", "pvp", "uvp", "ticket"}',
+     "'Ticket' on its own a label"),
+    ("oc/util.py", "or bool(RRP_WORDS & set(re.split(r\"[^a-z]+\", w)))", "or any(x in w for x in RRP_WORDS)",
+     "SRP, PVP and UVP matched inside other words"),
+    ("oc/util.py", '    return any(map(rrp_label, words)) or any((a + b).startswith("ticketprice")',
+     '    return any(map(rrp_label, words)) or any((a + b).startswith("ticketpricex")', "a Ticket Price column not a label"),
 ]
 
 

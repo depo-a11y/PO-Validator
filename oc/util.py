@@ -92,12 +92,22 @@ def iso_currency(text):
 
 
 RRP_LABEL = re.compile(r"rrp|msrp|recommended|sugg|retail(?!er)")
+RRP_WORDS = {"srp", "pvp", "uvp"}   # whole words only: suggested retail, precio de venta al publico, Preisempfehlung
 
 
 def rrp_label(word):
     """A printed word that labels a recommended retail price: RRP, MSRP, Retail, Sugg., Recommended, also run into
-    their neighbours ('RRP(AUD)', 'RetailPrice'). Not 'Retailer', which names the buyer."""
-    return bool(RRP_LABEL.search(re.sub(r"[^a-z]", "", str(word).casefold())))
+    their neighbours ('RRP(AUD)', 'RetailPrice'); SRP, PVP and UVP as whole words ('SRP:', '(UVP)'). Not
+    'Retailer', which names the buyer."""
+    w = str(word).casefold()
+    return bool(RRP_LABEL.search(re.sub(r"[^a-z]", "", w))) or bool(RRP_WORDS & set(re.split(r"[^a-z]+", w)))
+
+
+def rrp_header(words):
+    """A column-header row that names an RRP column: a word rrp_label accepts, or 'Ticket Price' ('Ticket' alone
+    is not a price)."""
+    flat = [re.sub(r"[^a-z]", "", str(w).casefold()) for w in words]
+    return any(map(rrp_label, words)) or any((a + b).startswith("ticketprice") for a, b in zip(flat, flat[1:] + [""]))
 
 
 def cost_currency(brand):
