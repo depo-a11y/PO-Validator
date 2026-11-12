@@ -43,6 +43,7 @@ from ..util import cost_currency, currency_off, iso_currency, rrp_header, rrp_la
 
 MODEL = "claude-opus-5-5"
 PRICE_USD_PER_MTOK = (4.0, 20.0)    # claude-opus-5-5 input, output (thinking is billed as output)
+CACHE_USD_PER_MTOK = (5.0, 0.20)    # claude-opus-5-5 5-minute cache write (1.25x input), cache read
 EFFORT = "high"
 MAX_TOKENS = 64000
 FALLBACK_BETA = "server-side-fallback-2026-07-01"
@@ -227,18 +228,28 @@ def api_error(e):
 
 
 # ---- the answer ----------------------------------------------------------------
-def _usage(msg, seconds):
+def tokens(msg):
+    """An answer's tokens: uncached input, 5-minute cache write, cache read and output (thinking is billed as
+    output), summed over its fallback iterations when one ran."""
     u = getattr(msg, "usage", None)
-    its = getattr(u, "iterations", None) or []
-    if its:
-        tin = sum(getattr(i, "input_tokens", 0) or 0 for i in its)
-        tout = sum(getattr(i, "output_tokens", 0) or 0 for i in its)
-    else:
-        tin, tout = getattr(u, "input_tokens", 0) or 0, getattr(u, "output_tokens", 0) or 0
-    cost = tin * PRICE_USD_PER_MTOK[0] / 1e6 + tout * PRICE_USD_PER_MTOK[1] / 1e6
-    return dict(reader="ai", model=getattr(msg, "model", None), requested_model=MODEL, effort=EFFORT,
-                input_tokens=tin, output_tokens=tout, seconds=round(seconds, 1), cost_usd=round(cost, 4),
-                stop_reason=getattr(msg, "stop_reason", None))
+    parts = getattr(u, "iterations", None) or [u]
+
+    def total(name):
+        return sum(getattr(p, name, 0) or 0 for p in parts if p is not None)
+    return dict(input_tokens=total("input_tokens"), cache_write_tokens=total("cache_creation_input_tokens"),
+                cache_read_tokens=total("cache_read_input_tokens"), output_tokens=total("output_tokens"))
+
+
+def cost_usd(t):
+    """US$ for a tokens() dict at claude-opus-5-5 prices (a fallback model is costed at the same prices)."""
+    return (t["input_tokens"] * PRICE_USD_PER_MTOK[0] + t["cache_write_tokens"] * CACHE_USD_PER_MTOK[0]
+            + t["cache_read_tokens"] * CACHE_USD_PER_MTOK[1] + t["output_tokens"] * PRICE_USD_PER_MTOK[1]) / 1e6
+
+
+def _usage(msg, seconds):
+    t = tokens(msg)
+    return dict(reader="ai", model=getattr(msg, "model", None), requested_model=MODEL, effort=EFFORT, **t,
+                seconds=round(seconds, 1), cost_usd=round(cost_usd(t), 4), stop_reason=getattr(msg, "stop_reason", None))
 
 
 def final_text(msg):

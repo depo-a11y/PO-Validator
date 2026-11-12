@@ -10,9 +10,12 @@
 
 All inputs and outputs are files. Nothing here talks to Shopify, Matrixify or
 Drive. The AI reader (`--reader ai`, or a brand config with adapter: ai) sends the
-OC PDF to the Anthropic API and needs ANTHROPIC_API_KEY. Exit code 1 means a gate
-failed; read the Checks sheet or the message. The brand config is found by
---brand-config, else $OC_BRAND_DIR, else oc/brands/.
+OC PDF to the Anthropic API and needs ANTHROPIC_API_KEY. So do `--ai-titles` (draft:
+AI drafts NEW titles, colour words and colour family, amber) and `--ai-explain`
+(draft, finalize: a refusal explained in plain English); without the key they do
+nothing but say so. Exit code 1 means a gate failed; read the Checks sheet or the
+message. The brand config is found by --brand-config, else $OC_BRAND_DIR, else
+oc/brands/.
 """
 import argparse
 import json
@@ -41,11 +44,25 @@ def _common(args):
     return b, cat, hist, tags
 
 
+NO_KEY = "no ANTHROPIC_API_KEY in the environment or the app's secrets"
+
+
+def _explain(e):
+    from .agent import explain
+    if e is None:
+        print(f"AI explanation is off: {NO_KEY}.")
+        return
+    print("AI explanation (check it):")
+    print(explain.as_text(e))
+
+
 def _read(args, b):
     """The OC through the brand's reader (or --reader ai), its reader and gate rows printed. Exits on a FAIL."""
     docs, checks, _ = service.read_oc(args.oc, b, getattr(args, "reader", None))
     _print_checks(checks)
     if docs is None:
+        if getattr(args, "ai_explain", False):
+            _explain(service.explain_draft(args.oc, checks, b))
         raise SystemExit(1)
     colours = brandm.unmapped_colours(b, docs)
     if colours:
@@ -93,7 +110,16 @@ def cmd_draft(args):
     prior = cartorder.read_prior(args.prior) if args.prior else None
     if prior and "fail" in prior:
         raise SystemExit(prior["fail"]["Detail"])
-    rows, review, checks, fills = draft.build(docs, b, cat, hist, tags, cart=cart,
+    titler = None
+    if args.ai_titles:
+        if service.agent_ready():
+            from .agent import titles
+
+            def titler(pending, R):
+                return titles.run(pending, R)
+        else:
+            print(f"AI title drafting is off: {NO_KEY}; the tool's own titles, colour words and colour families stand.")
+    rows, review, checks, fills = draft.build(docs, b, cat, hist, tags, cart=cart, titler=titler,
                                               prior_prices=prior["typed"] if prior else None)
     extra = None
     if prior:
@@ -105,6 +131,8 @@ def cmd_draft(args):
     header, rows, review, fills = cartorder.as_written(docs, poxlsx.PO_HEADER, rows, review, fills)
     poxlsx.write_po(args.out, header, rows, review, checks, fills, currency=cost_currency(b), extra=extra)
     print(f"-> {args.out} ({len(rows)} rows)")
+    if args.ai_explain and service.blocking(checks):
+        _explain(service.explain_draft(args.oc, checks, b))
     return 1 if _fails(checks) else 0
 
 
@@ -132,6 +160,8 @@ def cmd_finalize(args):
     b, cat, hist, tags = _common(args)
     checks = finalize.run(args.po, b, cat, args.out_prefix)
     _print_checks(checks)
+    if args.ai_explain and _fails(checks):
+        _explain(service.explain_finalize(args.po, checks, b))
     return 1 if _fails(checks) else 0
 
 
@@ -213,6 +243,13 @@ def main(argv=None):
     rd.set_defaults(fn=cmd_read)
     for sp in (d, c, r, rd):
         sp.add_argument("--reader", choices=["ai"], help="read the OC with the AI reader whatever the brand's adapter")
+    d.add_argument("--ai-titles", action="store_true",
+                   help="AI drafts NEW titles, colour words and colour family (amber, check every one); "
+                        "needs ANTHROPIC_API_KEY")
+    for sp in (d, f):
+        sp.add_argument("--ai-explain", action="store_true",
+                        help="when the run is refused, AI explains why in plain English (it changes no check); "
+                             "needs ANTHROPIC_API_KEY")
     for sp in (d, c):
         sp.add_argument("--cart", help="the brand's selling-session cart export (.xlsx): colour words, "
                                        "composition, made in; never quantities or prices")

@@ -7,6 +7,7 @@ Every resolver returns (value, source, detail). Sources, in trust order:
   OC (AI read), size not live -> red (an AI-read size the live product does not have)
   price needed -> red    (a NEW retail price left blank: no RRP in AUD from the brand)
   cart, history, rule -> amber (the selling-session cart, past POs, or a brand rule)
+  AI-drafted, check -> amber (a NEW title, colour words or colour family drafted by AI; oc/agent/titles.py)
   guess -> red            (nothing to go on)
 A NEW product's retail price is never resolved from the catalog, past POs or other styles: only from a
 brand RRP in AUD (see Resolver.retail). Past POs still feed Type and size runs.
@@ -27,10 +28,12 @@ AI_NEW_SIZE = "OC (AI read), size not live"   # an AI-read size the live product
 CART_OC = "cart, not confirmed"   # a quantity or price read from a cart drafted before its OC (oc/cartorder.py): amber
 PRIOR = "prior PO"   # a NEW retail price typed into the PO drafted from the cart, carried to the OC's draft: amber
 OFF_RUN = "OC, outside the live size run"   # a new size in another size system than the live product's: amber
+AI_DRAFT = "AI-drafted, check"   # a NEW title, colour words or colour family drafted by AI: never green
 GENDERS = ("MEN", "WOMEN", "UNISEX")
 # A colour description is copied into a title; anything outside these is a garbled export ('Peach Pur}e').
 CLEAN_COLOUR = re.compile(r"[^\w\s/&'.,()+-]")
 COLOUR = {"OC": GREEN, AI_OC: AMBER, AI_NEW_SIZE: RED, NEEDED: RED, "catalog": GREEN, "cart": AMBER, "history": AMBER,
+          AI_DRAFT: AMBER,
           "rule": AMBER, "guess": RED, CART_OC: AMBER, PRIOR: AMBER, OFF_RUN: AMBER}
 RANK = {GREEN: 0, AMBER: 1, RED: 2}
 

@@ -453,13 +453,43 @@ def secret_brands_for(table, viewers, email):
     return dict(table), None
 
 
+# ---- the agent jobs ----------------------------------------------------------------
+def agent_ready():
+    """True when the app has an API key, so the AI title drafting box and the AI explanation are offered."""
+    from .adapters import ai
+    return bool(ai.api_key())
+
+
+def titles_ran(checks):
+    """True when a draft's checks show the AI title job ran (the page counts it against its session cap)."""
+    from .agent import titles
+    return any(c["Check"] == titles.CHECK for c in checks)
+
+
+def explain_draft(oc_path, checks, brand_cfg, ai_factory=None):
+    """A refused draft explained in plain English: None with no key (nothing sent), else the record from
+    agent.explain.explain. Reads the PDF and a copy of the checks; changes neither."""
+    from .agent import explain
+    req, valid = explain.draft_request(oc_path, checks, brand_cfg)
+    return explain.explain(req, valid, ai_factory)
+
+
+def explain_finalize(po_path, checks, brand_cfg, ai_factory=None):
+    """A refused finalize explained: as explain_draft, from the PO rows the failing checks name."""
+    from .agent import explain
+    req, valid = explain.finalize_request(po_path, checks, brand_cfg)
+    return explain.explain(req, valid, ai_factory)
+
+
 # ---- step 1 --------------------------------------------------------------------
 def draft(oc_path, catalog_path, brand_cfg, cart_path=None, history_paths=None, reader=None, ai_factory=None,
-          prior_path=None):
+          prior_path=None, ai_titles=False):
     """OC + catalog (+ linesheet, + past POs) -> (draft PO xlsx bytes | None, Review DataFrame, checks).
 
     oc_path None with a cart_path drafts from the selling-session cart before the OC exists (oc/cartorder.py:
-    UNCONFIRMED). prior_path, a PO drafted before (from the cart), adds a Changes sheet: what the OC changed."""
+    UNCONFIRMED). prior_path, a PO drafted before (from the cart), adds a Changes sheet: what the OC changed.
+    `ai_titles` lets AI redraft NEW titles, colour words and colour family (oc/agent/titles.py); it does nothing
+    when the app has no API key."""
     from . import draft as draftm
     empty = pd.DataFrame()
     core = _core()
@@ -505,7 +535,13 @@ def draft(oc_path, catalog_path, brand_cfg, cart_path=None, history_paths=None, 
     prior = cartorder.read_prior(prior_path) if prior_path else None
     if prior and "fail" in prior:
         return None, empty, pre + [prior["fail"]]
-    rows, review, checks, fills = draftm.build(docs, brand_cfg, cat, hist, tags, cart=cart,
+    titler = None
+    if ai_titles:
+        from .agent import titles
+
+        def titler(pending, R):
+            return titles.run(pending, R, factory=ai_factory)
+    rows, review, checks, fills = draftm.build(docs, brand_cfg, cat, hist, tags, cart=cart, titler=titler,
                                                prior_prices=prior["typed"] if prior else None)
     extra = None
     if prior:

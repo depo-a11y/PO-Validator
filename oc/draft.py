@@ -132,7 +132,10 @@ def _src(l):
     return " + ".join(l.get("sources") or [f"{l['doc']} line {l['line_no']}"])
 
 
-def build(docs, brand, catalog, history, tag_lookup, cart=None, prior_prices=None):
+def build(docs, brand, catalog, history, tag_lookup, cart=None, prior_prices=None, titler=None):
+    """`titler(pending, R) -> checks` (oc/agent/titles.run) may redraft NEW titles, colour words and colour family
+    after they are resolved and before the title de-dupe, so its values meet the same de-dupe, prefix, handle,
+    live-title and title checks. None leaves the draft exactly as the resolvers make it."""
     lines = oc_lines(docs, brand)
     swapped = join_alt(lines, catalog, brand.get("match_ignore") or "")
     lines, merged = merge_repeats(lines)
@@ -236,6 +239,8 @@ def build(docs, brand, catalog, history, tag_lookup, cart=None, prior_prices=Non
         gender, pclass = R.gender_of(code, l["gender"]), R.product_class_of(code, l["product_class"])
         ptype, t_src, t_why = R.product_type(code, pclass, gender)
         title, ti_src, ti_why = housestyle.new_title(brand, R, code, *R.title(code, pclass, cname))
+        cut = f" in {cname}"   # the title is "<name> in <colour name>", in house style
+        name = (title[:-len(cut)] if title.endswith(cut) else title, ti_src, ti_why)
         if worse(cn_src, ti_src) == cn_src and COLOUR[cn_src] != COLOUR[ti_src]:
             ti_src, ti_why = cn_src, f"{ti_why}; colour name: {cn_why}"
         sib, counts = _live_size_names(R, code, brand.get("vendor"))
@@ -244,8 +249,10 @@ def build(docs, brand, catalog, history, tag_lookup, cart=None, prior_prices=Non
             l=l, code=code, eur=eur, gender=gender, ptype=(ptype, t_src, t_why), title=[title, ti_src, ti_why],
             fam=R.colour_family(code, cname), run=R.size_run(code, l["sizes_norm"], ptype),
             price=cartorder.with_prior_price(R.retail(code, l), code, prior_prices), made=R.made_in(code),
-            comp=R.composition(code)))
+            comp=R.composition(code), pclass=pclass, name=name, colour=(cname, cn_src, cn_why)))
 
+    if titler is not None and pending:
+        checks += titler(pending, R)
     _dedupe_titles(pending, R, brand, checks)
     housestyle.mark_live_titles(pending, catalog, checks)
     for n in pending:
@@ -370,7 +377,7 @@ def _dedupe_titles(pending, R, brand, checks):
             for n in ns:
                 pre = prefixes.get(n["gender"] or "")
                 if pre and not n["title"][0].startswith(pre):
-                    n["title"] = [pre + n["title"][0], "rule",
+                    n["title"] = [pre + n["title"][0], n["title"][1] if n.get("ai") else "rule",
                                   n["title"][2] + f"; '{pre.strip()}' prefix keeps it apart from a same-named product"]
     groups = collections.defaultdict(list)
     for n in pending:
