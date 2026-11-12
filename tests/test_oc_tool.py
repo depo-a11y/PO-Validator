@@ -14,7 +14,7 @@ from oc.resolve import Resolver
 from oc.util import norm_size, join_key, sort_sizes
 
 BRAND = dict(
-    vendor="MAISON MARGIELA", adapter="otb", oc_label="MM", season="S/S 27", sku_prefix="MMSS27", sku_digits=3,
+    vendor="MAISON MARGIELA", adapter="otb", oc_label="MM", season="S/S 27", sku_prefix="ZXSS27", sku_digits=3,
     cost_currency="EUR", cost_multiplier=1.5, margin_floor=2.25, price_round=50, status="Active",
     published_new=False, published_merge=True, new_sale="NEW", option1_name="Colour", option2_name="Size",
     title_tag="{vendor} - {title} |MARAIS",
@@ -53,7 +53,7 @@ def catalog_path(tmp_path):
                              "WHITE", size, f"ZXFW26{100 + i}", "800.00", "800.00", "310.00", i == 0, new_sale="CORE"))
     for i, size in enumerate(["40", "41"]):
         rows.append(_variant("2", "Replica Sneaker in White", "MEN SHOES SNEAKERS", "Archived", "S99WS0001P0001 101",
-                             "WHITE", size, f"MMSS25{100 + i}", "900.00", "900.00", "400.00", i == 0))
+                             "WHITE", size, f"ZXSS25{100 + i}", "900.00", "900.00", "400.00", i == 0))
     for i, size in enumerate(["S", "M"]):
         rows.append(_variant("3", "Logo Tee in Black", "MEN CLOTHING T-SHIRTS SHORT SLEEVE", "Active", "S98GC0003S00003 900",
                              "BLACK", size, f"ZXFW26{200 + i}", "560.00", "800.00", "250.00", i == 0))
@@ -119,17 +119,19 @@ def test_draft_merge_and_new(catalog_path):
     merge = [r for r in rows if r["Command"] == "MERGE"]
     new = [r for r in rows if r["Command"] == "NEW"]
     assert {r["Option2 Value"] for r in merge} == {"40", "41", "42", "43"}
-    assert next(r for r in merge if r["Option2 Value"] == "43")["Variant SKU"].startswith("MMSS27")
+    assert next(r for r in merge if r["Option2 Value"] == "43")["Variant SKU"].startswith("ZXSS27")
     assert next(r for r in merge if r["Option2 Value"] == "41")["Variant SKU"] == "ZXFW26101"
     assert {r["Title"] for r in new} == {"Replica Sneaker in 900"}
     assert new[0]["Type"] == "MEN SHOES SNEAKERS"
-    assert new[0]["Variant Price"] is None and new[0]["Variant Compare At Price"] is None  # no RRP: blank
+    assert new[0]["Variant Price"] is None  # no RRP: blank
+    assert all(r["Variant Compare At Price"] == f"=P{rows.index(r) + 2}" for r in new)  # copies its own row's price
     assert sum(r["Order Qty"] for r in rows) == 6
     assert [c["Check"] for c in checks if c["Result"] == "FAIL"] == ["Every NEW row has a retail price"]
     price = {(x["Column"], x["Source"], x["Colour"], x["Why"]) for x in review
              if x["Code"] == "S99WS0001P0001 900" and x["Column"] in ("Variant Price", "Variant Compare At Price")}
-    assert price == {(c, "price needed", "red", "price needed, no RRP from brand")
-                     for c in ("Variant Price", "Variant Compare At Price")}
+    assert price == {("Variant Price", "price needed", "red", "price needed, no RRP from brand"),
+                     ("Variant Compare At Price", "price needed", "red", "price needed, no RRP from brand; this cell "
+                      "copies Variant Price (a formula): type the price there")}
     sources = {(x["Column"], x["Source"]) for x in review if x["Code"] == "S99WS0001P0001 900"}
     assert ("Title", "guess") in sources and ("Variant SKU", "rule") in sources  # stem is live, colour name is not
     why = {x["Why"] for x in review if x["Column"] == "Published" and x["Code"] == "S99WS0001P0001 900"}
@@ -138,10 +140,10 @@ def test_draft_merge_and_new(catalog_path):
 
 def test_sku_allocation_skips_catalog(catalog_path):
     cat = catm.load(catalog_path)
-    cat.skus.add("MMSS27001")
+    cat.skus.add("ZXSS27001")
     R = Resolver(BRAND, cat, _hist(), _tags())
-    assert R.next_sku()[0] == "MMSS27002"
-    assert R.next_sku()[0] == "MMSS27003"
+    assert R.next_sku()[0] == "ZXSS27002"
+    assert R.next_sku()[0] == "ZXSS27003"
 
 
 def _hand_po(path, cat_rows):
@@ -180,7 +182,7 @@ def test_complete_keeps_human_cells_and_finalize_is_safe(catalog_path, tmp_path)
     assert by[("NEW", "41")]["Body HTML"] == "<p>hand</p>"
     assert by[("NEW", "41")]["Variant Price"] == 800
     assert by[("NEW", "41")]["_raw"]["Variant Compare At Price"].startswith("=P")
-    assert by[("MERGE", "43")]["Variant SKU"].startswith("MMSS27")
+    assert by[("MERGE", "43")]["Variant SKU"].startswith("ZXSS27")
     assert by[("MERGE", "41")]["Variant SKU"] == "ZXFW26101"
     assert by[("MERGE", "41")][poxlsx.MADE_IN] == "Italy"
     review = openpyxl.load_workbook(out)["Review"]
@@ -200,7 +202,7 @@ def test_complete_keeps_human_cells_and_finalize_is_safe(catalog_path, tmp_path)
                       "Metafield: title_tag"):
         assert forbidden not in pu_merge.columns and forbidden not in rb.columns
     sizes = pd.read_excel(prefix + "PU-merge-new-sizes.xlsx", dtype=str)
-    assert list(sizes["Option2 Value"]) == ["43"] and sizes["Variant SKU"][0].startswith("MMSS27")
+    assert list(sizes["Option2 Value"]) == ["43"] and sizes["Variant SKU"][0].startswith("ZXSS27")
     assert list(sizes["Command"]) == ["UPDATE"] and list(sizes["Variant Command"]) == ["MERGE"]
     assert list(sizes["Variant Cost"]) == ["300"]  # the OC cost (EUR 200 x 1.5), not the siblings' live 310
     pu_new = pd.read_excel(prefix + "PU-new.xlsx", dtype=str)
@@ -231,7 +233,7 @@ def _finalize_po(tmp_path, title="Replica Sneaker in Black", option1="BLACK", bo
             "Published": False, "Option1 Value": option1, poxlsx.CODE: "S99WS0001P0001 900", poxlsx.MADE_IN: "Italy",
             "Body HTML": body, "Variant Price": 800.0, "Variant Compare At Price": 800.0,
             poxlsx.TITLE_TAG: f"MAISON MARGIELA - {title} |MARAIS"}
-    rows = [dict(base, **{"Option2 Value": s, "Variant SKU": f"MMSS2709{s}", "Order Qty": 2, "Total Order": 400.0})
+    rows = [dict(base, **{"Option2 Value": s, "Variant SKU": f"ZXSS2709{s}", "Order Qty": 2, "Total Order": 400.0})
             for s in ("41", "42")]
     po = tmp_path / "po.xlsx"
     _hand_po(po, rows)
@@ -317,7 +319,7 @@ def _merge_po(tmp_path, po_cost=300.0, cost_price="EUR 200"):
             poxlsx.MADE_IN: "Italy", "Variant Price": 800.0, "Variant Compare At Price": 800.0,
             "Wholesale Price": 200.0, "Variant Cost": po_cost, poxlsx.COST_PRICE: cost_price, "Order Qty": 1,
             "Total Order": 200.0}
-    rows = [dict(base, **{"Option2 Value": s, "Variant SKU": sku}) for s, sku in (("41", "ZXFW26101"), ("43", "MMSS27001"))]
+    rows = [dict(base, **{"Option2 Value": s, "Variant SKU": sku}) for s, sku in (("41", "ZXFW26101"), ("43", "ZXSS27001"))]
     po = tmp_path / "merge-po.xlsx"
     _hand_po(po, rows)
     return str(po)
@@ -383,7 +385,7 @@ def test_cost_overwrite_check_names_each_failure(split_catalog_path):
     assert "cost 310.0" in result(rows([300.0, 310.0, 300.0]))["Detail"]
     assert "not a variant of product 1" in result(rows([300.0] * 3) + rows([300.0], ("3S",)))["Detail"]
     assert "not re-bought are touched: ['3']" in result(rows([300.0] * 3) + rows([300.0], ("3S",), "3"))["Detail"]
-    assert "new size MMSS27001" in result(rows([300.0] * 3), [{"ID": "1", "Variant SKU": "MMSS27001", "Variant Cost": 310.0}])["Detail"]
+    assert "new size ZXSS27001" in result(rows([300.0] * 3), [{"ID": "1", "Variant SKU": "ZXSS27001", "Variant Cost": 310.0}])["Detail"]
 
 
 def _cells(ws, col):

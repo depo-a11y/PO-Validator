@@ -83,6 +83,8 @@ def fixed_reader_row(name):
     return _check(READER_CHECK, "INFO", f"read by the built-in reader for {LAYOUTS[name]}, which reads the PDF's "
                                         "text by position; no AI was used")
 RED_WARNING = "Types and size runs of new styles will rest on the catalog alone."
+MISSING_ADVICE = ("Ask Colwyn to fix the brand file. Or upload every past season PO for this brand, not only the "
+                  "missing ones: an upload replaces the brand config's whole list.")
 
 SEASON_RE = re.compile(r"\b(S/S|F/W|A/W)\s*(\d{2})\b")
 FILE_SEASON_RE = re.compile(r"(?<![A-Z])(SS|FW|AW)[\s_-]?(\d{2})(?!\d)", re.I)
@@ -304,12 +306,11 @@ def plan_history(brand_cfg, history_paths=None):
         return [], _check(HISTORY_CHECK, "WARN",
                           f"the brand config names {len(missing)} ({', '.join(h['label'] for h in missing)}), but a "
                           "config from an upload or the app's secrets never opens files on the server. "
-                          f"{RED_WARNING} Upload them as past season POs to fix this.")
+                          f"{RED_WARNING} Upload all of them as past season POs to fix this.")
     if missing:
         return present, _check(HISTORY_CHECK, "WARN",
                                f"{len(missing)} of {len(missing) + len(present)} in the brand config are not on this "
-                               f"computer ({', '.join(h['label'] for h in missing)}). {RED_WARNING} "
-                               "Upload them as past season POs to fix this.")
+                               f"computer ({', '.join(h['label'] for h in missing)}). {RED_WARNING} {MISSING_ADVICE}")
     if not present:
         return [], _check(HISTORY_CHECK, "WARN", f"none in the brand config and none uploaded. {RED_WARNING}")
     return present, _check(HISTORY_CHECK, "INFO", f"{len(present)} from the brand config")

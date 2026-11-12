@@ -12,11 +12,13 @@ always the OC's; a cart wholesale that differs is reported, never used.
 import collections
 
 from .brand import ColourCodeError, code_for, unmapped_colours
-from .poxlsx import PO_HEADER, CODE, MADE_IN, SEASON, NEW_SALE, COST_PRICE, TITLE_TAG, review_row
+from .poxlsx import PO_HEADER, CODE, MADE_IN, SEASON, NEW_SALE, COST_PRICE, TITLE_TAG, review_row, col_letter
 from .resolve import Resolver, COLOUR, AI_OC, AI_NEW_SIZE, NO_RRP, split_code, worse
 
 PRICE_CHECK = "Every NEW row has a retail price"
 from .util import norm_size, sort_sizes, size_key, fmt_money, cost_currency, slug
+
+PRICE_COL = col_letter(PO_HEADER, "Variant Price")
 
 
 def oc_lines(docs, brand=None):
@@ -157,10 +159,12 @@ def build(docs, brand, catalog, history, tag_lookup, cart=None):
             sku, s_, why = R.next_sku()
             cell(row, "Variant SKU", sku, s_, why)
             cell(row, "Variant Price", price, p_src, p_why)
+            compare = f"={PRICE_COL}{len(rows) + 2}"   # this row's Variant Price, so a typed price is copied
             if price is None:
-                cell(row, "Variant Compare At Price", None, p_src, p_why)
+                cell(row, "Variant Compare At Price", compare, p_src,
+                     f"{p_why}; this cell copies Variant Price (a formula): type the price there")
             else:
-                cell(row, "Variant Compare At Price", price, "rule", "compare-at = price at creation")
+                cell(row, "Variant Compare At Price", compare, "rule", "compare-at = price at creation (a formula)")
             _money_cells(cell, row, R, brand, eur, l["sizes_norm"].get(size, 0))
             cell(row, CODE, code, "OC", f"{l['doc']} line {l['line_no']} ({l['product_class']})")
             cell(row, SEASON, brand["season"], "rule", "brand config")

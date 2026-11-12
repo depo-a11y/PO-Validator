@@ -3,6 +3,7 @@ unless theres an rrp"). Synthetic data only; every multiplier is a round test va
 import copy
 import csv
 import io
+import zipfile
 
 import openpyxl
 import pandas as pd
@@ -37,6 +38,7 @@ def _draft(tmp_path, docs, brand=None, cart=None):
     rows, review, checks, fills = draftm.build(docs, brand or base.BRAND, _catalog(tmp_path), base._hist(),
                                                base._tags(), cart=cart)
     new = [r for r in rows if r["Command"] == "NEW"]
+    assert all(r["Variant Compare At Price"] == f"=P{rows.index(r) + 2}" for r in new)  # copies its row's price
     cells = {(x["Column"]): x for x in review if x["Code"] == NEW_CODE
              and x["Column"] in ("Variant Price", "Variant Compare At Price")}
     return new, cells, {c["Check"]: c for c in checks}
@@ -45,15 +47,17 @@ def _draft(tmp_path, docs, brand=None, cart=None):
 # ---- where a NEW price may come from --------------------------------------------------------------
 def test_no_rrp_leaves_both_price_cells_blank_and_red(tmp_path):
     new, cells, checks = _draft(tmp_path, _docs())
-    assert {(r["Variant Price"], r["Variant Compare At Price"]) for r in new} == {(None, None)}
+    assert {r["Variant Price"] for r in new} == {None}
     for col in ("Variant Price", "Variant Compare At Price"):
-        assert (cells[col]["Source"], cells[col]["Colour"], cells[col]["Why"]) == (NEEDED, "red", NO_RRP)
+        assert (cells[col]["Source"], cells[col]["Colour"]) == (NEEDED, "red") and cells[col]["Why"].startswith(NO_RRP)
+    assert cells["Variant Price"]["Why"] == NO_RRP
     assert NO_RRP == "price needed, no RRP from brand" and COLOUR[NEEDED] == "red"
 
 
 def test_an_aud_rrp_on_the_oc_is_the_price(tmp_path):
     new, cells, checks = _draft(tmp_path, _docs(rrp=950.0, cur="AUD"))
-    assert {(r["Variant Price"], r["Variant Compare At Price"]) for r in new} == {(950.0, 950.0)}
+    assert {r["Variant Price"] for r in new} == {950.0}
+    assert cells["Variant Compare At Price"]["Why"] == "compare-at = price at creation (a formula)"
     assert cells["Variant Price"]["Source"] == "OC" and cells["Variant Price"]["Colour"] == "green"
     assert cells["Variant Price"]["Why"] == "brand RRP A$950 (SS - 1 line 2)"
     assert checks["Every NEW row has a retail price"]["Result"] == "PASS"
@@ -219,7 +223,7 @@ def test_an_ungrounded_or_unmarked_ai_rrp_leaves_the_price_blank(tmp_path, monke
 def _hand(tmp_path, price):
     row = {"Command": "NEW", "Title": "Replica Sneaker in Black", "Vendor": "MAISON MARGIELA", "Status": "Active",
            "Type": "MEN SHOES SNEAKERS", "Published": False, "Option1 Name": "Colour", "Option1 Value": "BLACK",
-           "Option2 Name": "Size", "Option2 Value": "41", "Variant SKU": "MMSS27091", "Variant Price": price,
+           "Option2 Name": "Size", "Option2 Value": "41", "Variant SKU": "ZXSS27091", "Variant Price": price,
            poxlsx.CODE: NEW_CODE, "Order Qty": 2, "Wholesale Price": 200.0, "Total Order": 400.0,
            "Variant Cost": 300.0, poxlsx.COST_PRICE: "EUR 200", poxlsx.MADE_IN: "Italy", poxlsx.SEASON: "S/S 27",
            poxlsx.NEW_SALE: "NEW", "Body HTML": "<p>x</p>", poxlsx.TITLE_TAG: "MAISON MARGIELA - Replica Sneaker in Black |MARAIS"}
@@ -250,7 +254,7 @@ def test_finalize_refuses_a_blank_new_price_naming_rows_and_skus(tmp_path):
     by = {c["Check"]: c for c in checks}
     f = by["Every NEW row has a retail price"]
     assert f["Result"] == "FAIL"
-    assert f["Detail"] == "fill the retail price: 1 NEW row(s) have none, PO rows 2 (SKUs MMSS27091)"
+    assert f["Detail"] == "fill the retail price: 1 NEW row(s) have none, PO rows 2 (SKUs ZXSS27091)"
     assert not (tmp_path / "x-PU-new.xlsx").exists()
     assert "PU-new passes the po-validator gate (validator_core.run_gate)" not in by
 
@@ -276,3 +280,124 @@ def test_complete_marks_an_ai_read_aud_rrp_amber(tmp_path):
     po = openpyxl.load_workbook(out).worksheets[0]
     col = {c.value: c.column for c in po[1] if c.value}
     assert po.cell(2, col["Variant Price"]).fill.fgColor.rgb == "00FFEB9C"
+
+
+# ---- an AI-read RRP must be labelled as one and not be the line's own price (review 2026-11-12-buyer-1) ----------
+def _aud_read(tmp_path, monkeypatch, lines, rrp_text):
+    """The synthetic OC billed in AUD (as Diesel and Kenzo bill), line 1's RRP read by the AI as `rrp_text`."""
+    monkeypatch.setenv(ai.KEY_NAME, "sk-ant-test")
+    pdf = make_pdf(tmp_path / "aud.pdf", [l.replace("EUR", "AUD") for l in lines])
+    cfg = dict(_cfg(), cost_currency="AUD")
+
+    def f(d, doc, ls):
+        doc.update(currency="AUD", net_total_text=doc["net_total_text"].replace("EUR", "AUD"))
+        for l in ls:
+            l.update(price_text=l["price_text"].replace("EUR", "AUD"),
+                     line_value_text=l["line_value_text"].replace("EUR", "AUD"))
+        ls[0].update(rrp_text=rrp_text, rrp_currency="AUD")
+    docs, _, _ = ai.read(pdf, cfg, factory=FakeClient(message(_mut(f))).factory)
+    return docs[0]["lines"][0]
+
+
+LABELLED = [l.replace("Qty Unit Price Total", "Qty Unit Price Total RRP", 1).replace("EUR 480,00", "EUR 480,00 EUR 980,00")
+            for l in PDF_LINES]
+
+
+@pytest.mark.parametrize("text,what", [("AUD 480,00", "line value"), ("AUD 120,00", "unit price")])
+def test_an_ai_rrp_that_is_the_lines_own_price_or_value_is_never_used(tmp_path, monkeypatch, text, what):
+    line = _aud_read(tmp_path, monkeypatch, LABELLED, text)
+    assert (line["rrp"], line["rrp_currency"]) == (None, None)
+    assert line["rrp_note"] == f"the AI read an RRP '{text}' that is this line's {what}; not used"
+    line = _aud_read(tmp_path, monkeypatch, LABELLED, "AUD 980,00")   # the labelled RRP itself is kept
+    assert (line["rrp"], line["rrp_currency"]) == (980.0, "AUD")
+
+
+HEADER_LABEL = PDF_LINES[:2] + ["Qty Unit Price Total RRP"] + [l.replace("EUR 480,00", "EUR 480,00 EUR 980,00")
+                                                               for l in PDF_LINES[2:]]
+
+
+@pytest.mark.parametrize("lines,kept", [
+    ([l.replace("EUR 480,00", "EUR 480,00 EUR 980,00") for l in PDF_LINES], False),   # an amount with no label
+    (HEADER_LABEL, True),                                                              # label in the column header
+    ([l.replace("EUR 480,00", "EUR 480,00 RRP EUR 980,00") for l in PDF_LINES], True),  # label in its line
+])
+def test_an_ai_rrp_needs_an_rrp_label_in_its_line_or_column_header(tmp_path, monkeypatch, lines, kept):
+    line = _aud_read(tmp_path, monkeypatch, lines, "AUD 980,00")
+    assert (line["rrp"], line["rrp_currency"]) == ((980.0, "AUD") if kept else (None, None))
+    if not kept:
+        assert line["rrp_note"] == ("the AI read an RRP 'AUD 980,00', but no RRP, MSRP, retail, suggested or "
+                                    "recommended label is printed in its line or its column header; not used")
+
+
+def test_an_rrp_label_is_a_retail_price_word_not_the_retailer():
+    from oc.util import rrp_label
+    assert all(map(rrp_label, ["RRP", "MSRP", "Retail", "Sugg.", "Recommended", "RRP(AUD)", "RetailPrice", "r.r.p."]))
+    assert not any(map(rrp_label, ["Retailer", "Retailer:", "RETAILERS", "Price", "Total", "Wholesale", "Unit"]))
+
+
+@pytest.mark.parametrize("word,read", [("MSRP", True), ("RETAIL", True), ("MARKUP", False)])
+def test_fog_takes_its_rrp_only_from_a_column_labelled_as_one(tmp_path, monkeypatch, word, read):
+    monkeypatch.setattr(oc_synth, "FOG_COLS", tuple((word if w == "MSRP" else w, x) for w, x in oc_synth.FOG_COLS))
+    pdf = str(tmp_path / "fog.pdf")
+    if read:
+        lines = [l for d in fog.parse_checked(oc_synth.fog_pdf(pdf)) for l in d["lines"]]
+        assert [l["rrp"] for l in lines] == [m for *_, m in oc_synth.FOG_LINES] and any(l["rrp"] for l in lines)
+    else:
+        with pytest.raises(fog.GateError, match="matches no free PRICE/TOTAL column"):  # an amount there is refused
+            fog.parse_checked(oc_synth.fog_pdf(pdf))
+        blank = [l[:-1] + (None,) for l in oc_synth.FOG_LINES]
+        lines = [l for d in fog.parse_checked(oc_synth.fog_pdf(pdf, lines=blank)) for l in d["lines"]]
+        assert {l["rrp"] for l in lines} == {None}
+
+
+# ---- a NEW compare-at copies the price a person types (review 2026-11-12-buyer-1) ---------------------------------
+def _typed_draft(tmp_path, price, cache):
+    """The draft as Step 1 writes it; a person types `price` into each NEW row's Variant Price (only there), names
+    the colour in the title and its family in Option1, and saves. `cache`: None as openpyxl saves (no cached values), else the value a
+    spreadsheet program stored with each compare-at formula."""
+    rows, review, checks, fills = draftm.build(base._docs(), base.BRAND, _catalog(tmp_path), base._hist(), base._tags())
+    path = tmp_path / "draft.xlsx"
+    poxlsx.write_po(str(path), poxlsx.PO_HEADER, rows, review, checks, fills)
+    wb = openpyxl.load_workbook(path)
+    ws = wb.worksheets[0]
+    col = {c.value: c.column for c in ws[1] if c.value}
+    new = [r for r in range(2, ws.max_row + 1) if ws.cell(r, col["Command"]).value == "NEW"]
+    for r in new:
+        assert ws.cell(r, col["Variant Compare At Price"]).data_type == "f"
+        ws.cell(r, col["Variant Price"]).value = price
+        ws.cell(r, col["Option1 Value"]).value = "BLACK"
+        for key in ("Title", poxlsx.TITLE_TAG):
+            ws.cell(r, col[key]).value = ws.cell(r, col[key]).value.replace(" in 900", " in Black")
+    wb.save(path)
+    if cache is not None:
+        with zipfile.ZipFile(path) as z:
+            parts = {n: z.read(n) for n in z.namelist()}
+        xml = parts["xl/worksheets/sheet1.xml"].decode()
+        for r in new:
+            xml = xml.replace(f"<f>P{r}</f><v></v>", f"<f>P{r}</f><v>{cache}</v>", 1)
+        assert xml.count("</f><v>") == len(new)
+        parts["xl/worksheets/sheet1.xml"] = xml.encode()
+        with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
+            for n, b in parts.items():
+                z.writestr(n, b)
+    return path
+
+
+@pytest.mark.parametrize("cache", [None, 950, 111])   # openpyxl-saved; cached as Excel saves it; a stale cache
+def test_a_typed_new_price_reaches_compare_at_with_or_without_cached_values(tmp_path, cache):
+    checks = finalize.run(str(_typed_draft(tmp_path, 950, cache)), base.BRAND, _catalog(tmp_path),
+                          str(tmp_path / "x-"))
+    assert not [c for c in checks if c["Result"] == "FAIL"], [c for c in checks if c["Result"] == "FAIL"]
+    pu_new = pd.read_excel(tmp_path / "x-PU-new.xlsx", dtype=str)
+    assert set(pu_new["Variant Price"]) == set(pu_new["Variant Compare At Price"]) == {"950"}
+
+
+def test_only_the_rows_own_price_formula_is_saved_as_a_formula(tmp_path):
+    rows = [{"Command": "NEW", "Variant Price": 950, "Variant Compare At Price": v, "Title": t}
+            for v, t in (("=P2", "=P2"), ("=P2", "=A1"), ("=SUM(A1:A9)", "x"))]
+    path = tmp_path / "po.xlsx"
+    poxlsx.write_po(str(path), poxlsx.PO_HEADER, rows)
+    ws = openpyxl.load_workbook(path).worksheets[0]
+    col = {c.value: c.column for c in ws[1] if c.value}
+    got = [(ws.cell(r, col["Variant Compare At Price"]).data_type, ws.cell(r, col["Title"]).data_type) for r in (2, 3, 4)]
+    assert got == [("f", "s"), ("s", "s"), ("s", "s")]   # row 3's '=P2' points at another row's price: text

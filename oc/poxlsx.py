@@ -160,6 +160,9 @@ def write_po(path, header, rows, review=None, checks=None, fills=None, title="Sh
         excel_row = i + 2
         for j, h in enumerate(header):
             cell = ws.cell(excel_row, j + 1)
+            if h == "Variant Compare At Price" and "Variant Price" in header and \
+                    cell.value == f"={col_letter(header, 'Variant Price')}{excel_row}":
+                cell.data_type = "f"   # the draft's compare-at copies its own row's price, the one formula kept
             if h in AUD_COLS or (h is None and j > 0 and header[j - 1] in AUD_COLS):
                 cell.number_format = AUD_FMT
             elif h in EUR_COLS:

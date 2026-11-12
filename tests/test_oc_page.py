@@ -165,7 +165,7 @@ def test_the_page_says_prices_are_blank_without_an_rrp_and_step_2_wants_them(tmp
     at.session_state["draft"] = dict(po=b"x", review=review, checks=[price], file="x.xlsx", made_from="oc.pdf")
     at.session_state["final"] = dict(zip=None, errors=pd.DataFrame(), file="x.zip", run="r", made_from="po.xlsx",
                                      checks=[dict(price, Detail="fill the retail price: 1 NEW row(s) have none, PO rows 2 "
-                                                                "(SKUs MMSS27091)")])
+                                                                "(SKUs ZXSS27091)")])
     at.run()
     assert not at.exception
     assert any("Retail prices of new products are blank unless the brand gave a retail price (RRP) in Australian "

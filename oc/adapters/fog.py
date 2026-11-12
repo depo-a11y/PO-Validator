@@ -22,7 +22,9 @@ repeated address block.
 
 FOG Essentials prints MSRP; Fear of God LLC leaves it blank. Amounts are
 assigned to PRICE / MSRP / TOTAL by the x-centre of this line's header, so a
-missing MSRP cannot shift TOTAL into its place.
+missing MSRP cannot shift TOTAL into its place. The RRP is the amount under the
+header word that labels one (util.rrp_label: MSRP here); a header with no such
+word gives no RRP.
 
 Fabric content and colour wrap inside narrow columns, sometimes mid-word
 ("WASHE" / "D INK" / "BLACK"). The PDF draws the space glyphs, so each cell is
@@ -36,6 +38,7 @@ Total Amount, so a non-zero Discount Total is refused.
 import re
 
 from .otb import GateError, gate_problems, xc  # noqa: F401  (GateError re-exported)
+from ..util import rrp_label
 
 TOL = 4.0
 ROW_TOL = 3.0
@@ -225,11 +228,13 @@ def _finish(d, cur):
     qtys = [w for w in row if X_SIZES_LO <= w["x0"] and w["x1"] < units_x0 - 2]
     units = [w for w in row if abs(xc(w) - cols["UNITS"]) <= 8 and w["x0"] >= units_x0 - 10 and w["text"].isdigit()]
     amounts = {}
+    rrp_col = next((k for k in cols if rrp_label(k)), None)
+    names = tuple(k for k in ("PRICE", rrp_col, "TOTAL") if k)
     for w in row:
         if w["text"].startswith("$"):
-            name, dist = min(((k, abs(xc(w) - cols[k])) for k in ("PRICE", "MSRP", "TOTAL")), key=lambda t: t[1])
+            name, dist = min(((k, abs(xc(w) - cols[k])) for k in names), key=lambda t: t[1])
             if dist > 15 or name in amounts:
-                problems.append(f"{tag}: amount {w['text']}@{xc(w):.0f} matches no free PRICE/MSRP/TOTAL column")
+                problems.append(f"{tag}: amount {w['text']}@{xc(w):.0f} matches no free {'/'.join(names)} column")
                 continue
             amounts[name] = money(w["text"])
     for name in ("PRICE", "TOTAL"):
@@ -261,8 +266,8 @@ def _finish(d, cur):
     return dict(line_no=n, style=style, fabric=None, colour=code, colour_code=code,
                 colour_name=squash(col_text), composition=squash("".join(cur["fab"])), product_class=None,
                 sizes={s: q for s, q in hit.items() if q}, size_run=[s for s, _ in cells],
-                qty=int(units[0]["text"]), price=amounts["PRICE"], msrp=amounts.get("MSRP"),
-                rrp=amounts.get("MSRP"), rrp_currency=d["currency"],
+                qty=int(units[0]["text"]), price=amounts["PRICE"], msrp=amounts.get(rrp_col),
+                rrp=amounts.get(rrp_col), rrp_currency=d["currency"],
                 line_value=amounts["TOTAL"], deliver_from=d["start_ship"], deliver_to=d["cancel_date"],
                 page=cur["pno"]), problems
 

@@ -9,7 +9,7 @@ def _sheet(**over):
     row = {"Command": "NEW", "Title": "Tabi Ballerina in Black", "Vendor": "MAISON MARGIELA",
            "Type": "WOMEN SHOES BALLERINAS", "Body HTML": "<p>Composition: leather</p>", "Status": "Active",
            "Published": False, "Option1 Name": "Colour", "Option1 Value": "BLACK", "Option2 Name": "Size",
-           "Option2 Value": "38", "Variant SKU": "MMSS27001", "Variant Price": 400, "Variant Compare At Price": 400,
+           "Option2 Value": "38", "Variant SKU": "ZXSS27001", "Variant Price": 400, "Variant Compare At Price": 400,
            "Variant Cost": 150.0, "Metafield: my_fields.manufacture_code": "S99WZ0004P0004 T0004",
            "Metafield: custom.product_season [single_line_text_field]": "S/S 27",
            "Metafield: custom.new_sale [single_line_text_field]": "NEW",
@@ -23,7 +23,7 @@ def test_run_gate_clean_sheet():
     df, errors, _ = core.run_gate(_sheet(), typo_check=False)
     assert errors == []
     r = df.iloc[0]
-    assert r["Variant Barcode"] == "MMSS27001"
+    assert r["Variant Barcode"] == "ZXSS27001"
     assert r["Metafield: custom.brand_color_id [single_line_text_field]"] == "T0004"
     assert r["Metafield: custom.size_scale [single_line_text_field]"] == "WOMEN SHOES EUROPE"
     assert r["Metafield: custom.local_market_price [single_line_text_field]"] == pytest.approx(540.0)

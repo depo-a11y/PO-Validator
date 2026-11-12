@@ -38,7 +38,7 @@ import time
 from pathlib import Path
 
 from . import otb
-from ..util import cost_currency, currency_off, iso_currency
+from ..util import cost_currency, currency_off, iso_currency, rrp_label
 
 MODEL = "claude-opus-5-5"
 PRICE_USD_PER_MTOK = (4.0, 20.0)    # claude-opus-5-5 input, output (thinking is billed as output)
@@ -466,9 +466,10 @@ class Pages:
             doc_top = starts[first_page - 1]
             doc_first = min([x for x in found if doc_top <= x < starts[first_page]] or [doc_top])
             text = l.get("rrp_text")
+            header = toks[page_start:first] + toks[doc_top:doc_first]
             rrp.append(dict(
                 grounded=text is not None and bool(_flat(_bare(text))) and _flat(_bare(text)) in joined,
-                marks=currency_marks(block + toks[page_start:first] + toks[doc_top:doc_first])))
+                labelled=any(map(rrp_label, block + header)), marks=currency_marks(block + header)))
         return out, rrp
 
 
@@ -603,17 +604,28 @@ def page_problems(data, pages):
 
 
 def rrp_evidence(doc_lines, raw_lines, found):
-    """An AI-read RRP is kept only as far as the PDF prints it: its text in the line's own part (else no RRP),
-    and its currency only with a mark printed in that part, the page's column header or the document's header
-    (else unknown, so never an AUD price). Notes go to the Review through `rrp_note` and `rrp_found`."""
+    """An AI-read RRP is kept only as far as the PDF prints it: its text in the line's own part, not the line's
+    own unit price or line value, and an RRP label (RRP, MSRP, Retail, Sugg., Recommended) in that part or the
+    column header above it (else no RRP); its currency only with a mark printed in that part, the page's column
+    header or the document's header (else unknown, so never an AUD price). Notes go to the Review through
+    `rrp_note` and `rrp_found`."""
     for dl, l, info in zip(doc_lines, raw_lines, found or []):
         text = l.get("rrp_text")
         if text is None:
             continue
         claimed = iso_currency(l.get("rrp_currency"))
+        same = [what for what, v in (("unit price", dl.get("price")), ("line value", dl.get("line_value")))
+                if dl.get("rrp") is not None and v is not None and abs(dl["rrp"] - v) < 0.005]
         if not info or not info["grounded"]:
             dl.update(rrp=None, rrp_currency=None,
                       rrp_note=f"the AI read an RRP '{text}' that is not printed in this line's part of the PDF; not used")
+        elif same:
+            dl.update(rrp=None, rrp_currency=None,
+                      rrp_note=f"the AI read an RRP '{text}' that is this line's {same[0]}; not used")
+        elif not info["labelled"]:
+            dl.update(rrp=None, rrp_currency=None,
+                      rrp_note=f"the AI read an RRP '{text}', but no RRP, MSRP, retail, suggested or recommended label "
+                               "is printed in its line or its column header; not used")
         elif claimed and claimed not in info["marks"]:
             dl.update(rrp_currency=None,
                       rrp_note=f"the AI read the RRP '{text}' as {claimed}, but no {claimed} mark is printed with it "

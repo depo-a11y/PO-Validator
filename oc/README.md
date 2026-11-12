@@ -11,18 +11,23 @@ Pure Python, files in and files out. Nothing here talks to Shopify, Matrixify or
   catalog), amber (past POs or a brand rule) or red (a guess, or a value a person must supply), and the
   `Review` sheet says why.
 
-**Retail price (Colwyn, 2026-11-12: "we can keep price blank unless theres an rrp").** A NEW product's
-`Variant Price` and `Variant Compare At Price` are written only from a brand RRP in AUD: the OC line's own RRP
-column (fog prints one as MSRP, in the document's currency; the AI reader returns `rrp_text` and `rrp_currency`;
-otb, admilano and adidas print none), else a nonzero `Sugg. Retail` in the cart, in the cart's `Currency`. An RRP
-in another or an unknown currency is never the price: the Review sheet names it. With no usable RRP both cells
-are blank and red, "price needed, no RRP from brand", and the check "Every NEW row has a retail price" is a FAIL
-fixed in the sheet. A brand RRP is never raised: under the margin floor it stays as given and "NEW rows clear the
-Nx margin" is a FAIL, also fixed in the sheet, because Step 2's margin gate would refuse it. `finalize` refuses
-any NEW row without a price ("fill the retail price", with its PO rows and SKUs). MERGE rows are unchanged:
-PU-merge never writes price. Live siblings, other styles at the same cost, past POs and ratio fits no longer
-price anything. The "same style, live sibling price" source was 10/10 right on the Margiela SS27 test and is now
-off by Colwyn's rule of 2026-11-12.
+**Retail price (Colwyn, 2026-11-12: "we can keep price blank unless theres an rrp").** A NEW product's `Variant
+Price` and `Variant Compare At Price` are written only from a brand RRP in AUD: the OC line's own RRP column (fog
+prints one as MSRP, in the document's currency; the AI reader returns `rrp_text` and `rrp_currency`; otb, admilano
+and adidas print none), else a nonzero `Sugg. Retail` in the cart, in the cart's `Currency`. An RRP in another or an
+unknown currency is never the price: the Review sheet names it. An RRP counts only under an RRP label (RRP, MSRP,
+Retail, Sugg., Recommended; not Retailer): fog's is the amount under the header word that is one, and an AI-read RRP
+needs the label printed in its line or its column header, its text printed in its line, and must not be the line's
+own unit price or line value (on an AUD OC those carry an AUD mark too), else it is not used and the Review says
+why. With no usable RRP the price is blank and red, "price needed, no RRP from brand", and the check "Every NEW row
+has a retail price" is a FAIL fixed in the sheet. A NEW row's `Variant Compare At Price` is the formula `=P<row>`,
+its own row's price, so a typed price is copied; `finalize` reads the formula, never a cached value, so it works
+whether the sheet was last saved by Excel or by openpyxl. A brand RRP is never raised: under the margin floor it
+stays as given and "NEW rows clear the Nx margin" is a FAIL, also fixed in the sheet, because Step 2's margin gate
+would refuse it. `finalize` refuses any NEW row without a price ("fill the retail price", with its PO rows and
+SKUs). MERGE rows are unchanged: PU-merge never writes price. Live siblings, other styles at the same cost, past POs
+and ratio fits no longer price anything. The "same style, live sibling price" source was 10/10 right on the Margiela
+SS27 test and is now off by Colwyn's rule of 2026-11-12.
 - `complete` fills the blanks of a PO someone started by hand and never changes a typed cell, except a
   wholesale price named with `--set-price`, which must equal the OC's.
 - `finalize` turns a reviewed PO into `PU-new.xlsx` (through `validator_core.run_gate`, the same gate as
@@ -160,7 +165,9 @@ name them by path. A config from secrets or an upload never has its paths opened
 otherwise make the app read any file on its server; upload the past POs on the page instead. Uploads replace the
 config's list. Each is labelled with the config's label for a file of the same name, else its season column, else
 a season in its file name, and they are read newest first. When past POs are missing the page warns before the
-run, and the draft's first check says Types and size runs will rest on the catalog alone.
+run, and the draft's first check says Types and size runs will rest on the catalog alone, and to ask Colwyn to fix
+the brand file or upload every past PO for the brand (an upload replaces the whole list, so uploading only the
+missing one would drop the rest).
 
 **Local use.** The page runs on one laptop (Colwyn, 2026-11-12). `.streamlit/config.toml` binds it to 127.0.0.1,
 headless, so nobody else on the network can open it or spend on the API key; hosting must revisit that file, with

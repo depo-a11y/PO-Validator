@@ -12,7 +12,7 @@ from oc import poxlsx
 from oc.resolve import Resolver
 
 BRAND = dict(
-    vendor="MAISON MARGIELA", adapter="otb", season="S/S 27", sku_prefix="MMSS27", sku_digits=3,
+    vendor="MAISON MARGIELA", adapter="otb", season="S/S 27", sku_prefix="ZXSS27", sku_digits=3,
     cost_currency="EUR", cost_multiplier=1.5, margin_floor=2.25, price_round=50, status="Active",
     published_new=False, published_merge=True, new_sale="NEW", option1_name="Colour", option2_name="Size",
     title_tag="{vendor} - {title} |MARAIS",

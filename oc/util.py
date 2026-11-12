@@ -91,6 +91,15 @@ def iso_currency(text):
     return t if re.fullmatch(r"[A-Z]{3}", t) else CURRENCY_NAMES.get(t)
 
 
+RRP_LABEL = re.compile(r"rrp|msrp|recommended|sugg|retail(?!er)")
+
+
+def rrp_label(word):
+    """A printed word that labels a recommended retail price: RRP, MSRP, Retail, Sugg., Recommended, also run into
+    their neighbours ('RRP(AUD)', 'RetailPrice'). Not 'Retailer', which names the buyer."""
+    return bool(RRP_LABEL.search(re.sub(r"[^a-z]", "", str(word).casefold())))
+
+
 def cost_currency(brand):
     """The brand's cost_currency as an ISO code, the currency every OC for it must be in."""
     raw = (brand or {}).get("cost_currency") or "EUR"

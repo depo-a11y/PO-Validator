@@ -130,6 +130,10 @@ def test_missing_config_history_is_a_visible_warning_not_a_crash(tmp_path, oc_st
     h = checks[0]
     assert po is not None and h["Check"] == service.HISTORY_CHECK and h["Result"] == "WARN"
     assert "1 of 1" in h["Detail"] and "F/W 26" in h["Detail"] and service.RED_WARNING in h["Detail"]
+    # an upload replaces the whole list, so uploading only the missing one would drop the others
+    assert h["Detail"].endswith("Ask Colwyn to fix the brand file. Or upload every past season PO for this brand, not "
+                                "only the missing ones: an upload replaces the brand config's whole list.")
+    assert "Upload them" not in h["Detail"]
 
 
 def test_uploaded_past_pos_replace_the_config_list_newest_first(tmp_path, oc_stub):
@@ -164,7 +168,7 @@ def _full_po(tmp_path, new_title="Replica Sneaker in Black"):
              poxlsx.CODE: "S99WS0001P0001 101", poxlsx.MADE_IN: "Italy", "Order Qty": 1, "Total Order": 200.0}
     rows = [{k: v for k, v in r.items() if not k.startswith("_")} for r in new_rows]
     rows += [dict(merge, **{"Option2 Value": "41", "Variant SKU": "ZXFW26101"}),
-             dict(merge, **{"Option2 Value": "43", "Variant SKU": "MMSS27101"})]
+             dict(merge, **{"Option2 Value": "43", "Variant SKU": "ZXSS27101"})]
     po = tmp_path / "full_po.xlsx"
     base._hand_po(po, rows)
     return str(po)
@@ -180,7 +184,7 @@ def test_finalize_zips_every_file_with_dated_names(tmp_path):
     assert pu_new.max_row == 3
     sizes = openpyxl.load_workbook(io.BytesIO(zf.read(PREFIX + "PU-merge-new-sizes.xlsx")))["Products"]
     row = dict(zip([c.value for c in sizes[1]], [c.value for c in sizes[2]]))
-    assert sizes.max_row == 2 and row["Option2 Value"] == "43" and row["Variant SKU"] == "MMSS27101"
+    assert sizes.max_row == 2 and row["Option2 Value"] == "43" and row["Variant SKU"] == "ZXSS27101"
     ck = openpyxl.load_workbook(io.BytesIO(zf.read(PREFIX + "finalize-checks.xlsx")))["Checks"]
     details = [str(r[2].value) for r in ck.iter_rows(min_row=2)]
     assert any(d.startswith(PREFIX + "PU-new.xlsx: ") for d in details)
