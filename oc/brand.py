@@ -21,12 +21,13 @@ past POs uploaded on the page can still be matched to their season labels.
 Which OCs a config accepts: `oc_supplier` names the issuer as printed and `oc_label` the
 label, for an issuer with several (adidas AG: Y-3, Willy Chavarria, RS). Every reader
 returns both per document and an OC that does not match the config is refused. fog needs
-`oc_supplier` (one reader for FOG Essentials and Fear of God LLC); adidas and otb need
-`oc_label` (otb's is the collection's first word: MM or MM6); for admilano and ai the
-check runs when the key is set.
+`oc_supplier` (one reader for FOG Essentials and Fear of God LLC); adidas, otb and thugclub
+need `oc_label` (otb's is the collection's first word: MM or MM6; thugclub's is THUG CLUB or
+a collaboration such as TC x AI); for admilano and ai the check runs when the key is set.
 
 `adapter` picks the OC reader: a built-in reader for one known layout (`otb` Maison
-Margiela/MM6, `admilano` AD Milano, `adidas` adidas AG, `fog` Fear of God), `sheet` (an OC sent
+Margiela/MM6, `admilano` AD Milano, `adidas` adidas AG, `fog` Fear of God, `thugclub` THUG CLUB
+Corp. proforma invoices), `sheet` (an OC sent
 as a spreadsheet, read by the config's `sheet:` column mapping; oc/adapters/sheet.py) or `ai` (any
 layout, read by Claude; oc/adapters/ai.py). An `ai` brand must name `oc_supplier`
 (the company printed as the issuer on its OCs) and `join_key`; a `sheet` brand `join_key` and `sheet:`.
@@ -65,7 +66,8 @@ DEFAULTS = dict(
 REQUIRED = ["vendor", "adapter", "season", "sku_prefix", "cost_multiplier",
             "cost_currency", "margin_floor"]
 
-FIXED = ("otb", "admilano", "adidas", "fog")   # built-in readers, one per known layout (oc/adapters/<name>.py)
+# built-in readers, one per known layout (oc/adapters/<name>.py)
+FIXED = ("otb", "admilano", "adidas", "fog", "thugclub")
 FIXED += ("sheet",)   # built-in too: a spreadsheet OC of any layout, read by the brand config's sheet: mapping
 ADAPTERS = FIXED + ("ai",)
 JOIN_FIELDS = ("style", "fabric", "colour", "colour_code")
@@ -90,6 +92,9 @@ FIXED_NEEDS = {
                            "Willy Chavarria or RS); one adidas AG reader serves all three"},
     "sheet": {"join_key": "join_key: how the store's manufacture_code is built from a sheet line, e.g. \"{style} "
                           "{colour}\" ({colour} is the sheet's colour_code column when it is mapped)"},
+    "thugclub": {"oc_label": "oc_label: THUG CLUB for the house line, and a collaboration's label as printed at the "
+                             "start of its product names (TC x AI for Thug Club x Alpha Industries) to accept that "
+                             "too; one THUG CLUB Corp. reader serves both"},
 }
 
 

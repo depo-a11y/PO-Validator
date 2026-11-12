@@ -10,6 +10,7 @@ import pytest
 
 import oc_synth
 import test_oc_tool as base
+import thug_synth
 from oc import brand as brandm, cli, complete, finalize, poxlsx, service
 from oc.adapters import otb
 from oc.resolve import Resolver
@@ -17,8 +18,10 @@ from oc.util import fmt_eur, fmt_money, iso_currency
 from test_oc_ai import PDF_LINES, make_pdf
 
 USD = dict(base.BRAND, vendor="EXAMPLE USD BRAND", sku_prefix="EXUS27", cost_currency="USD", _name="ex", _path="t")
-FIXED = {"admilano": oc_synth.admilano_pdf, "adidas": oc_synth.adidas_pdf, "fog": oc_synth.fog_pdf}
-LAYOUT_WORDS = {"otb": "Maison Margiela, MM6", "admilano": "AD Milano", "adidas": "adidas AG", "fog": "Fear of God"}
+FIXED = {"admilano": oc_synth.admilano_pdf, "adidas": oc_synth.adidas_pdf, "fog": oc_synth.fog_pdf,
+         "thugclub": thug_synth.portrait_pdf}
+LAYOUT_WORDS = {"otb": "Maison Margiela, MM6", "admilano": "AD Milano", "adidas": "adidas AG", "fog": "Fear of God",
+                "thugclub": "THUG CLUB Corp."}
 
 
 def _catalog(tmp_path):
@@ -42,14 +45,14 @@ def _usd_docs(currency="US Dollar"):
 @pytest.mark.parametrize("name", brandm.ADAPTERS)
 def test_every_reader_loads_and_the_service_knows_it(name):
     extra = dict(ai=dict(oc_supplier="X Ltd", join_key="{style}"), fog=dict(oc_supplier="X Ltd"),
-                 adidas=dict(oc_label="Y-3"),
+                 adidas=dict(oc_label="Y-3"), thugclub=dict(oc_label="THUG CLUB"),
                  sheet=dict(join_key="{style} {colour}", sheet=dict(
                      currency="EUR", columns=dict(style="Style", colour_code="Colour", size="Size", qty="Qty",
                                                   price="Price", label="Label")))).get(name, {})
     cfg = brandm.from_mapping(dict(base.BRAND, adapter=name, **extra), "t")
     assert cfg["adapter"] == name
     assert service.adapter(cfg) is importlib.import_module(f"oc.adapters.{name}")
-    assert brandm.ADAPTERS == ("otb", "admilano", "adidas", "fog", "sheet", "ai")
+    assert brandm.ADAPTERS == ("otb", "admilano", "adidas", "fog", "thugclub", "sheet", "ai")
 
 
 def test_an_unknown_reader_is_refused_by_the_service_too():
@@ -73,7 +76,7 @@ def test_the_cli_reads_each_fixed_layout_through_the_service(tmp_path, capsys, n
     pdf = FIXED[name](str(tmp_path / f"{name}.pdf"))
     cfg = tmp_path / f"{name}.yaml"
     cur = "EUR" if name == "admilano" else "USD"
-    who = dict(adidas="oc_label: Y-3\n", fog="oc_supplier: TEST Essentials\n").get(name, "")
+    who = dict(adidas="oc_label: Y-3\n", fog="oc_supplier: TEST Essentials\n", thugclub="oc_label: THUG CLUB\n").get(name, "")
     cfg.write_text(f"vendor: X\nadapter: {name}\nseason: S/S 27\nsku_prefix: XX\ncost_multiplier: 1.5\n"
                    f"cost_currency: {cur}\nmargin_floor: 2.5\n{who}")
     assert cli.main(["read", pdf, "--brand-config", str(cfg)]) == 0

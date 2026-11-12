@@ -1,4 +1,4 @@
-"""Fixed-layout OC adapters: AD Milano, adidas AG, Fear of God.
+"""Fixed-layout OC adapters: AD Milano, adidas AG, Fear of God, THUG CLUB Corp. (tests/test_oc_thugclub.py has its own).
 
 Synthetic PDFs (tests/oc_synth.py) always. Real PDFs only when OC_FIXED_PDF_DIR
 points at a local folder of them, because order data is never committed to this
@@ -11,14 +11,16 @@ import pdfplumber
 import pytest
 
 import oc_synth
+import thug_synth
 from oc import service
-from oc.adapters import admilano, adidas, fog, otb
+from oc.adapters import admilano, adidas, fog, otb, thugclub
 from oc.brand import code_for
 from oc.util import join_key
 
 ADAPTERS = {"admilano": (admilano, oc_synth.admilano_pdf),
             "adidas": (adidas, oc_synth.adidas_pdf),
-            "fog": (fog, oc_synth.fog_pdf)}
+            "fog": (fog, oc_synth.fog_pdf),
+            "thugclub": (thugclub, thug_synth.portrait_pdf)}
 
 
 @pytest.fixture(scope="module")
@@ -69,7 +71,7 @@ def test_service_names_each_adapter(name):
 
 
 @pytest.mark.parametrize("name,want", [("admilano", (1, 3, 14, 10550.0)), ("adidas", (1, 4, 29, 2260.0)),
-                                       ("fog", (1, 3, 24, 430.0))])
+                                       ("fog", (1, 3, 24, 430.0)), ("thugclub", (1, 4, 17, 1653.0))])
 def test_synthetic_reproduces_printed_totals(pdfs, name, want):
     mod = ADAPTERS[name][0]
     t = mod.totals(mod.parse_checked(pdfs[name]))
@@ -312,7 +314,8 @@ def test_adidas_size_cell_wrapped_onto_the_composition_row_is_read(build):
 
 # ---- real PDFs, local only ------------------------------------------------------
 REAL = os.environ.get("OC_FIXED_PDF_DIR")
-GLOBS = {"admilano": "OC *.pdf", "adidas": "OrderConfirmation_*.pdf", "fog": "SO*_order_confirmation.pdf"}
+GLOBS = {"admilano": "OC *.pdf", "adidas": "OrderConfirmation_*.pdf", "fog": "SO*_order_confirmation.pdf",
+         "thugclub": "*_OC_*TC*.pdf"}
 
 
 @pytest.mark.skipif(not REAL, reason="set OC_FIXED_PDF_DIR to a local folder of real order-confirmation PDFs")

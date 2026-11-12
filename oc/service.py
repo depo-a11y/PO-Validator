@@ -71,18 +71,20 @@ CURRENCY_CHECK = "Order confirmation is in the brand's cost currency"
 IDENTITY_CHECK = "Order confirmation is for the brand picked (issuer and label)"
 TOTALS_CHECK = "Order confirmation totals printed by the brand"
 NOTES_CHECK = "Order confirmation values the tool did not use"
-# A fixed reader's problem that is not a layout change: the arithmetic gates, a discount and a number format the
-# reader will not guess. Every other problem (no confirmation found, a moved header, a quantity off its column)
-# gets the hint to read the OC with AI. The sheet reader words its grand-total gate ": parsed ..., printed ..." and its
+# A fixed reader's problem that is not a layout change: the arithmetic gates, a discount, a number format the reader
+# will not guess, and a document the reader knows is not an order (thugclub: a commercial invoice, packing list or
+# deposit proforma). Every other problem (no confirmation found, a moved header, a quantity off its column) gets the
+# hint to read the OC with AI. The sheet reader words its grand-total gate ": parsed ..., printed ..." and its
 # number-format refusal "... number format (decimal mark ...)".
 NOT_LAYOUT = re.compile(r": sizes sum | != line value |: its lines add up to |: parsed |discount|: number format: "
-                        r"|number format \(", re.I)
+                        r"|number format \(|not an order confirmation", re.I)
 GATE_CHECK = "Order confirmation passes its gates (parsed = printed)"
 AI_HINT = ("If this is the right brand and its layout changed, tick 'Read the OC with AI' and build again "
            "(the box needs oc_supplier in the brand's config).")
 LAYOUTS = {"otb": "the OTB layout (Maison Margiela, MM6)", "admilano": "the AD Milano layout (Ann Demeulemeester)",
            "adidas": "the adidas AG layout (Y-3, Willy Chavarria, RS)",
-           "fog": "the Fear of God layout (FOG Essentials, Fear of God LLC)"}
+           "fog": "the Fear of God layout (FOG Essentials, Fear of God LLC)",
+           "thugclub": "the THUG CLUB Corp. proforma invoice layout (Thug Club, Thug Club x Alpha Industries)"}
 
 
 def fixed_reader_row(name):
