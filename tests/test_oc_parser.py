@@ -2,11 +2,15 @@
 OC_PDF (and OC_GOLDEN for the by_size comparison) point at local files, because
 order data is never committed to this public repo."""
 import copy
+import glob
 import os
 
 import openpyxl
 import pytest
 
+import oc_synth
+import test_oc_tool as base
+from oc import service
 from oc.adapters import otb
 
 
@@ -99,3 +103,65 @@ def test_real_pdf_by_size_equals_golden():
     for a, b in zip(rows, gold):
         assert {k: (float(v) if isinstance(v, (int, float)) else v) for k, v in a.items()} == \
                {k: (float(v) if isinstance(v, (int, float)) else v) for k, v in b.items()}
+
+
+# ---- number format, decided per confirmation (F/W 26 OTB OCs print 1,234.56 and 03/23/2026) ----------
+def test_otb_reads_either_number_format_to_the_same_confirmation(tmp_path):
+    eu = otb.parse(oc_synth.otb_pdf(str(tmp_path / "eu.pdf"), "eu"))
+    us = otb.parse(oc_synth.otb_pdf(str(tmp_path / "us.pdf"), "us"))
+    assert eu == us and eu[1] == []
+    d = us[0][0]
+    assert (d["date"], d["printed"], d["total_qty"], d["gross"], d["net"]) == ("15/01/2099", "01/02/2099", 8, 6250.0,
+                                                                                6250.0)
+    assert [(l["qty"], l["price"], l["line_value"], l["deliver_from"], l["deliver_to"]) for l in d["lines"]] == [
+        (4, 1250.0, 5000.0, "15/07/2099", "15/10/2099"), (4, 312.5, 1250.0, "15/07/2099", "15/10/2099")]
+
+
+@pytest.mark.parametrize("fmt,odd", [("eu", "us"), ("us", "eu")])
+def test_otb_refuses_a_confirmation_printed_in_two_number_formats(tmp_path, fmt, odd):
+    path = oc_synth.otb_pdf(str(tmp_path / "odd.pdf"), fmt, odd=odd)
+    docs, problems = otb.parse(path)
+    assert len(problems) == 1 and problems[0].startswith("SS - 2099/01-62-0001: number format: its amounts are "
+                                                         "printed as ")
+    assert "1.234,56 (" in problems[0] and "1,234.56 (" in problems[0] and problems[0].endswith(
+        "so the tool will not guess how to read it. Ask Colwyn")
+    assert docs[0]["lines"] == [] and docs[0]["net"] is None
+    _, checks, _ = service.read_oc(path, dict(base.BRAND))   # not a layout change: no hint to read it with AI
+    assert [c["Detail"] for c in service.fails(checks)] == problems
+
+
+@pytest.mark.parametrize("fmt,deliver_from,shown", [("us", "07/15/2099", "15/07/2099"), ("eu", "15/13/2099", "15/13/2099")])
+def test_otb_refuses_a_date_that_is_not_in_its_amounts_format(tmp_path, fmt, deliver_from, shown):
+    dates = ("15/01/2099", "01/02/2099", deliver_from, "15/10/2099")
+    _, problems = otb.parse(oc_synth.otb_pdf(str(tmp_path / "d.pdf"), fmt, dates=dates))
+    name = otb.FORMAT_NAMES[fmt]
+    assert problems == [f"SS - 2099/01-62-0001: number format: its amounts are printed as {name} but date '{shown}' "
+                        "is not a date in that format, so the tool will not guess how to read it. Ask Colwyn"]
+
+
+def test_number_format_is_one_format_or_none():
+    nf = otb.number_format
+    assert nf([]) == "eu" and nf(["1.446,00", "828,00"]) == "eu" and nf(["828.00", "17,780.00"]) == "us"
+    assert nf(["1.446,00", "828.00"]) is None and nf(["1,446,00"]) is None and nf(["1.446.00"]) is None
+    assert otb.count("1.334", "eu") == 1334 and otb.count("1,334", "us") == 1334
+    assert otb.count("1,334", "eu") is None and otb.count("1.334", "us") is None
+
+
+def test_otb_refuses_a_quantity_grouped_in_the_other_format():
+    raw = [dict(doc="SS - 1", total_qty="1,007", gross="1.250,00", net="1.250,00",
+                lines=[dict(qty="5", price="250,00", line_value="1.250,00", deliver_from=None, deliver_to=None)])]
+    assert otb.read_numbers(raw) == ["SS - 1: number format: its amounts are printed as 1.234,56 but quantity '1,007' "
+                                     "is not, so the tool will not guess how to read it. Ask Colwyn"]
+    assert raw[0]["lines"] == [] and raw[0]["total_qty"] is None
+
+
+OTB_DIR = os.environ.get("OC_OTB_DIR")
+
+
+@pytest.mark.skipif(not OTB_DIR, reason="set OC_OTB_DIR to a local folder of real OTB order-confirmation PDFs")
+def test_real_otb_pdfs_of_every_season_reproduce_printed_totals():
+    files = sorted(glob.glob(os.path.join(OTB_DIR, "*.pdf")))
+    assert files, f"no PDFs in {OTB_DIR}"
+    for f in files:
+        t = otb.totals(otb.parse_checked(f))
+        assert t["units"] == t["printed_units"] and t["value"] == t["printed_value"], f

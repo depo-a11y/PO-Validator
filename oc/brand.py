@@ -48,7 +48,7 @@ from pathlib import Path
 
 import yaml
 
-from .util import norm_code
+from .util import norm_code, norm_size
 
 BRANDS = Path(__file__).resolve().parent / "brands"
 
@@ -240,6 +240,12 @@ def _reader_keys(cfg, data, source):
         raise BrandError(f"{source}: join_key uses {{colour_code}} but there is no colour_codes table "
                          "(OC colour: store code, e.g. GREY: GR)")
     cfg["colour_codes"] = {norm_colour(k): str(v).strip() for k, v in codes.items()}
+    sizes = cfg.get("size_map") or {}
+    if not isinstance(sizes, Mapping) or not all(isinstance(x, (str, int)) and not isinstance(x, bool) and str(x).strip()
+                                                 for kv in sizes.items() for x in kv):
+        raise BrandError(f"{source}: size_map is a list of 'printed size: store size' lines, each a word or number "
+                         f"(e.g. 31x34: 31), got {sizes!r}")
+    cfg["size_map"] = {norm_size(k): norm_size(v) for k, v in sizes.items()}
 
 
 def _numbers(cfg, source):

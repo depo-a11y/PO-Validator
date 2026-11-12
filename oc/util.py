@@ -27,6 +27,59 @@ def norm_size(s):
     return t
 
 
+ONE_SIZE = {"OS", "OSFM", "O/S", "F"}   # printed one-size names; "F" only ever matched, never rewritten on its own
+
+
+def size_alias(s):
+    """The form two printed names of one size share, for comparison only: OS, OSFM, O/S and F; 'IT 42' and '42';
+    'S - M' and 'S-M'. A size is never written in this form."""
+    t = re.sub(r"\s*-\s*", "-", norm_size(s))
+    if t in ONE_SIZE:
+        return "OS"
+    m = re.fullmatch(r"IT\s*(\d+(?:\.5)?)", t)
+    return m.group(1) if m else t
+
+
+def store_sizes(ordered, known, size_map=None):
+    """{printed size: qty} -> {store size: qty}. A printed size goes through the brand's size_map first, then keeps
+    its own name if the store knows it, else takes the one known store name of the same size (size_alias). `known`
+    is a list of sets of live size names, closest first (the product's own, its siblings', its kind of item's); the
+    first set that knows the size decides. When a set holds two names for it, nothing is rewritten."""
+    out = {}
+    for size, q in ordered.items():
+        t = norm_size((size_map or {}).get(norm_size(size), size))
+        for names in known:
+            if t in names:
+                break
+            same = {n for n in names if size_alias(n) == size_alias(t)}
+            if same:
+                t = same.pop() if len(same) == 1 else t
+                break
+        out[t] = out.get(t, 0) + q
+    return out
+
+
+def one_name_per_size(run, ordered):
+    """A size run with one name per size. Where siblings spell a size two ways (one live product 'IT 40', another
+    '40'), the name the ordered sizes use wins: their own name if ordered, else the same form (bare or not)."""
+    bare = [norm_size(s) == size_alias(s) for s in ordered]
+    want_bare = bare.count(True) >= bare.count(False)
+    groups = {}
+    for s in run:
+        groups.setdefault(size_alias(s), []).append(s)
+    pick = {a: next((n for n in g if n in ordered), next((n for n in g if (norm_size(n) == a) == want_bare), g[0]))
+            for a, g in groups.items()}
+    return [s for s in run if pick[size_alias(s)] == s]
+
+
+def size_clashes(sizes):
+    """Groups of two or more names in `sizes` that are one size: [['42', 'IT 42'], ...]."""
+    groups = {}
+    for s in sizes:
+        groups.setdefault(size_alias(s), set()).add(norm_size(s))
+    return [sorted(g) for g in groups.values() if len(g) > 1]
+
+
 def size_key(s):
     s = norm_size(s)
     if s in ALPHA:

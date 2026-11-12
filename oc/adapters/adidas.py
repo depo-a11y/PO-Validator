@@ -17,8 +17,10 @@ and nowhere else.
 
 Each size cell carries its own label ("S/3"), so a quantity cannot drift into
 a neighbouring size the way a separate header row allows. Every token in the
-size band must still read as SIZE/QTY, and nothing may sit in that band on a
-composition row, or the line is refused rather than guessed.
+size band must still read as SIZE/QTY. A long run of cells can wrap onto the
+composition row (a Y-3 S/S 25 OC printed a ninth cell '11/1' there); those cells count
+only when they are new sizes and the line's Tot. Qty is short without them and
+exact with them. Anything else in that band is refused rather than guessed.
 
 The article number is unique per colourway: no fabric or colour code is
 printed, and the line's fabric and colour are None. A non-zero discount is
@@ -190,12 +192,21 @@ def _line(d, pno, head, cont):
         sizes[m.group(1)] = int(m.group(2))
     if not sizes:
         problems.append(f"{tag}: no size cells")
-    comp = []
+    comp, wrapped = [], []
     for row in cont:
         stray = [w["text"] for w in row if w["x0"] >= X_SIZES[0]]
-        if stray:
+        cells = [CELL.match(w["text"]) for w in row if X_SIZES[0] <= w["x0"] < X_SIZES[1]]
+        if stray and len(cells) == len(stray) and all(cells):
+            wrapped.append((stray, {m.group(1): int(m.group(2)) for m in cells}))
+        elif stray:
             problems.append(f"{tag}: unexpected {' '.join(stray)} right of the composition row")
         comp += [w["text"] for w in row if w["x0"] < X_SIZES[0]]
+    for stray, more in wrapped:
+        total = None if qty is None else int(qty.replace(",", ""))
+        if not (more.keys() & sizes.keys()) and sum(sizes.values()) != total == sum(sizes.values()) + sum(more.values()):
+            sizes.update(more)   # cells wrapped onto the composition row
+        else:
+            problems.append(f"{tag}: unexpected {' '.join(stray)} right of the composition row")
     if disc is not None and num(disc) != 0:
         problems.append(f"{tag}: {disc}% discount; this reader does not apply discounts")
     if None in (qty, price, net):

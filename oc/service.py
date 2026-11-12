@@ -68,9 +68,10 @@ HISTORY_CHECK = "Past season POs (Types and size runs)"
 READER_CHECK = "Order confirmation reader"
 CURRENCY_CHECK = "Order confirmation is in the brand's cost currency"
 IDENTITY_CHECK = "Order confirmation is for the brand picked (issuer and label)"
-# A fixed reader's problem that is not a layout change: the arithmetic gates and a discount. Every other problem
-# (no confirmation found, a moved header, a quantity off its column) gets the hint to read the OC with AI.
-NOT_LAYOUT = re.compile(r": sizes sum | != line value |: parsed |discount", re.I)
+# A fixed reader's problem that is not a layout change: the arithmetic gates, a discount and a number format the
+# reader will not guess. Every other problem (no confirmation found, a moved header, a quantity off its column)
+# gets the hint to read the OC with AI.
+NOT_LAYOUT = re.compile(r": sizes sum | != line value |: parsed |discount|: number format: ", re.I)
 GATE_CHECK = "Order confirmation passes its gates (parsed = printed)"
 AI_HINT = ("If this is the right brand and its layout changed, tick 'Read the OC with AI' and build again "
            "(the box needs oc_supplier in the brand's config).")
@@ -355,7 +356,7 @@ def draft(oc_path, catalog_path, brand_cfg, cart_path=None, history_paths=None, 
     core = _core()
     try:
         items, hcheck = plan_history(brand_cfg, history_paths)
-        hist = histm.load(items)
+        hist = histm.load(items, brand_cfg["vendor"])
     except Exception as e:
         return None, empty, [_check(HISTORY_CHECK, "FAIL", f"could not read a past PO: {type(e).__name__}: {e}")]
     pre = [_history_detail(hcheck, hist)]

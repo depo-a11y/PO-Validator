@@ -31,6 +31,15 @@ Fabric content and colour wrap inside narrow columns, sometimes mid-word
 rebuilt from its characters line by line with no separator: "WASHED INK BLACK".
 The colour code (0001) is the join key; the name is informational.
 
+S/S 26 OCs share the grid and differ in the cells. The STYLE cell can wrap:
+100SP0001 over 01F (apparel) and ZX80A-10 over 0EVA (footwear) are the store's
+100SP000101F and ZX80A-100EVA, so a style is every word in its column, joined.
+A colour code is only what is printed before the colon ("0293 :", "250 :").
+The join token `colour` is that code; with none printed it is None when the
+style wrapped (the wrapped style carries the colourway) and the printed name
+when it did not (Summer 2026 ": GREY", for a join_key on {colour_code}).
+These OCs print ORDER # alone, the number at the end of an address row.
+
 Zero quantities are printed for unordered sizes. `sizes` keeps the ordered
 sizes; `size_run` keeps the printed header. The gate compares the lines to
 Total Amount, so a non-zero Discount Total is refused.
@@ -43,8 +52,10 @@ from ..util import rrp_label
 TOL = 4.0
 ROW_TOL = 3.0
 STYLE = re.compile(r"^[A-Z]{2}\d{4,6}$")
+OLD_STYLE = re.compile(r"^(?=.*\d)[A-Z0-9][A-Z0-9-]{4,}$")   # S/S 26 heads: 100SP0001, ZX80A-10, ZX00266
 X_STYLE = (65, 115)
 X_FAB, X_COL = (115, 210), (210, 290)
+X_FABRIC, X_CONTENT = (115, 155), (155, 210)   # Spring 2026 prints a fabric word ("Knit") left of the content
 X_SIZES_LO = 280
 CURRENCIES = {"US Dollar": "USD", "Euro": "EUR"}
 
@@ -99,7 +110,7 @@ def parse(pdf_path):
     with pdfplumber.open(pdf_path) as pdf:
         for pno, page in enumerate(pdf.pages, 1):
             t = page.extract_text() or ""
-            m = re.search(r"ORDER #\s*(\S+)", t)
+            m = re.search(r"ORDER #\s*(SO\d+)", t) or ("ORDER #" in t and re.search(r"\b(SO\d{6,})\b", t))
             if not m or "Order Confirmation" not in t:
                 continue
             rows = rows_of(page.extract_words())
@@ -196,33 +207,46 @@ def _read(d, stream):
                 problems.append(f"{d['doc']} p{pno}: size header carries {stray} outside the size band")
             continue
         if state == "line":
-            style = next((w for w in row if X_STYLE[0] <= w["x0"] < X_STYLE[1] and STYLE.match(w["text"])), None)
+            style = next((w for w in row if X_STYLE[0] <= w["x0"] < X_STYLE[1] and is_style(w["text"])), None)
             if style is None:
                 problems.append(f"{d['doc']} p{pno}: expected an order line under the size header, got '{t[:40]}'")
                 state = None
                 continue
             cur = dict(n=len(d["lines"]) + 1, pno=pno, row=row, sizes_row=sizes_row, cols=cols,
-                       fab=[cell_text(chars, *X_FAB)], col=[cell_text(chars, *X_COL)])
+                       style=[style["text"]], fabric=[cell_text(chars, *X_FABRIC)], fab=[cell_text(chars, *X_CONTENT)],
+                       col=[cell_text(chars, *X_COL)])
             state = "cont"
             continue
         if state == "cont":
+            wrap = [w for w in row if X_STYLE[0] <= w["x0"] < X_STYLE[1]]
+            cur["style"] += [w["text"] for w in wrap]   # the style cell wrapped (100SP0001 over 01F)
+            row = [w for w in row if not any(w is x for x in wrap)]
             stray = [w["text"] for w in row if not (X_FAB[0] <= w["x0"] < X_COL[1])]
             if stray:
                 problems.append(f"{d['doc']} p{pno}: unexpected {stray} under line {cur['n']}")
-            cur["fab"].append(cell_text(chars, *X_FAB))
+            cur["fabric"].append(cell_text(chars, *X_FABRIC))
+            cur["fab"].append(cell_text(chars, *X_CONTENT))
             cur["col"].append(cell_text(chars, *X_COL))
     close()
     return problems
 
 
+def is_style(text):
+    return bool(STYLE.match(text) or OLD_STYLE.match(text))
+
+
 def _finish(d, cur):
     row, cols, n = cur["row"], cur["cols"], cur["n"]
-    style = next(w["text"] for w in row if X_STYLE[0] <= w["x0"] < X_STYLE[1] and STYLE.match(w["text"]))
+    style = "".join(cur["style"])
     tag = f"{d['doc']} p{cur['pno']} line {n} {style}"
     problems = []
     code = next((w["text"] for w in row if X_COL[0] <= w["x0"] < X_COL[1] - 40 and re.fullmatch(r"\d{2,5}", w["text"])),
                 None)
-    if code is None:
+    raw = "".join(cur["col"])
+    col_text = re.sub(r"^\s*(\d{2,5})?\s*:\s*", "", raw)
+    name_only = code is None and re.match(r"\s*:", raw) is not None and squash(col_text) is not None
+    colour = code if code else None if len(cur["style"]) > 1 else squash(col_text)
+    if code is None and not name_only:
         problems.append(f"{tag}: no colour code")
     units_x0 = cols["UNITS_X0"]
     qtys = [w for w in row if X_SIZES_LO <= w["x0"] and w["x1"] < units_x0 - 2]
@@ -259,11 +283,9 @@ def _finish(d, cur):
             problems.append(f"{tag}: two quantities under size {best}")
             continue
         hit[best] = int(w["text"])
-    if code is None or len(units) != 1 or "PRICE" not in amounts or "TOTAL" not in amounts:
+    if (code is None and not name_only) or len(units) != 1 or "PRICE" not in amounts or "TOTAL" not in amounts:
         return None, problems
-    col_text = "".join(cur["col"])
-    col_text = re.sub(r"^\s*\d{2,5}\s*:\s*", "", col_text)
-    return dict(line_no=n, style=style, fabric=None, colour=code, colour_code=code,
+    return dict(line_no=n, style=style, fabric=squash("".join(cur["fabric"])), colour=colour, colour_code=code,
                 colour_name=squash(col_text), composition=squash("".join(cur["fab"])), product_class=None,
                 sizes={s: q for s, q in hit.items() if q}, size_run=[s for s, _ in cells],
                 qty=int(units[0]["text"]), price=amounts["PRICE"], msrp=amounts.get(rrp_col),

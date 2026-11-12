@@ -53,7 +53,11 @@ SS27 test and is now off by Colwyn's rule of 2026-11-12.
 - OC PDF: read by the brand config's `adapter`. The built-in readers read the text layer by position, one known
   layout each: `otb` (Maison Margiela, MM6), `admilano` (AD Milano / Ann Demeulemeester), `adidas` (adidas AG: Y-3,
   Willy Chavarria, RS) and `fog` (FOG Essentials, Fear of God LLC). `ai` reads any layout (see "AI reader" below).
-  All share `otb.gate_problems`, whose three gates hard-fail. Whatever the reader, an OC whose currency is not the
+  All share `otb.gate_problems`, whose three gates hard-fail. Each has read every season to hand (backtest
+  2026-11-12): otb decides each confirmation's number format from its own amounts (1.234,56 and 23/03/2026, or
+  F/W 26's 1,234.56 and 03/23/2026) and refuses one that mixes them, without the AI hint; fog reads the S/S 26
+  cells (a style wrapped over two rows, a colour name with no code, ORDER # alone on its row); adidas reads a size
+  cell wrapped onto the composition row when the line's Tot. Qty needs it. Whatever the reader, an OC whose currency is not the
   brand's `cost_currency` is refused (printed names are normalised: otb's "European Euro" is EUR), and so is one
   from another issuer or label: every reader returns both per document (fog the issuer; admilano the issuer and
   its Brand field; adidas "adidas AG" and the label at the start of the line descriptions, Y-3, Willy Chavarria
@@ -159,7 +163,14 @@ nothing is written into the repo and nothing talks to Shopify.
 
 The page names the config it uses (source, vendor, season), never its contents.
 
-**Past season POs** feed the Type and the size run of new styles, never their price. Only a config file on the
+**Sizes** keep one name per product. A printed size keeps its name when the store knows it, else takes the store's
+name for the same size (IT 42 = 42; OSFM, O/S, F and OS; S-M = S - M) from the live product, its live siblings or
+live products of its Type, in that order, and never when the store holds two names for it. A brand's `size_map`
+(printed: store) applies first. "Each size has one name per product" WARNs on any product that still has two.
+
+**Past season POs** feed the Type and the size run of new styles, never their price. Only the config vendor's rows
+are read (an Adidas PO also holds Y-3, Willy Chavarria, Song for the Mute and Wales Bonner rows), and a code column
+headed `Metafield: my_fields.manu`, cut short, is still found. Only a config file on the
 computer running the app may
 name them by path. A config from secrets or an upload never has its paths opened, because an upload could
 otherwise make the app read any file on its server; upload the past POs on the page instead. Uploads replace the

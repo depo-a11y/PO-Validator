@@ -31,7 +31,7 @@ def _common(args):
     b = brandm.load(args.brand, args.brand_config)
     print(f"brand config: {b['_path']}")
     cat = catm.load(args.catalog)
-    hist = histm.load(b["history"])
+    hist = histm.load(b["history"], b["vendor"])
     tags = validator_core.load_tag_lookup(str(REPO / "expected_tags.xlsx"))
     return b, cat, hist, tags
 

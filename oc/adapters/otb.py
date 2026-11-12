@@ -20,6 +20,11 @@ Gates (all hard): each line's size cells sum to its printed Tot. Qty;
 Tot. Qty x Price == Line value; per document the lines sum to the printed
 Total order q.ty and Total net value. `gate_problems` re-derives all three from
 the parsed data, so a mutated copy can be re-checked.
+
+Number format, per document: S/S 26, F/W 25 and S/S 27 print 1.446,00 and
+23/03/2026; F/W 26 prints 1,446.00 and 03/23/2026. Each confirmation's amounts
+are read as printed and decide its format; amounts in both formats, or in
+neither, refuse the confirmation. Dates come back day first either way.
 """
 import re
 
@@ -41,6 +46,41 @@ def xc(w):
 
 def eur(s):
     return float(s.replace(".", "").replace(",", "."))
+
+
+AMOUNT = r"\d[\d.,]*[.,]\d\d"
+COUNT = r"\d{1,3}(?:[.,]\d{3})+|\d+"
+FORMATS = {"eu": (re.compile(r"\d{1,3}(?:\.\d{3})+,\d\d|\d+,\d\d"), ".", ","),
+           "us": (re.compile(r"\d{1,3}(?:,\d{3})+\.\d\d|\d+\.\d\d"), ",", ".")}
+NUMBER_FORMAT = "number format"   # the word service.py keys on: a format refusal is not a layout change
+FORMAT_NAMES = {"eu": "1.234,56", "us": "1,234.56"}
+
+
+def number_format(amounts):
+    """'eu' (1.234,56) or 'us' (1,234.56) when every amount is printed in that one format; None when they mix
+    formats or one is in neither. No amounts at all reads as 'eu', the format the reader always had."""
+    kinds = {next((k for k, (pat, _, _) in FORMATS.items() if pat.fullmatch(a)), None) for a in amounts}
+    return "eu" if not kinds else kinds.pop() if len(kinds) == 1 and None not in kinds else None
+
+
+def money(s, fmt):
+    _, thousands, decimal = FORMATS[fmt]
+    return float(s.replace(thousands, "").replace(decimal, "."))
+
+
+def count(s, fmt):
+    """A printed quantity: digits grouped by the format's thousands mark only, else None."""
+    _, thousands, decimal = FORMATS[fmt]
+    return None if decimal in s else int(s.replace(thousands, ""))
+
+
+def day_first(date, fmt):
+    """'03/23/2026' in a 'us' document -> '23/03/2026'; None when it is not a date of that format."""
+    m = re.fullmatch(r"(\d\d)/(\d\d)/(\d{4})", date or "")
+    if not m:
+        return date
+    day, month = (m.group(2), m.group(1)) if fmt == "us" else (m.group(1), m.group(2))
+    return f"{day}/{month}/{m.group(3)}" if 1 <= int(month) <= 12 and 1 <= int(day) <= 31 else None
 
 
 def lines_of(page, ytol=2.0):
@@ -99,8 +139,7 @@ def parse(pdf_path):
                              ("net", r"Total net value\s+([\d.,]+)")):
                 mm = re.search(pat, text)
                 if mm:
-                    d[key] = eur(mm.group(1)) if key != "total_qty" \
-                        else int(mm.group(1).replace(".", ""))
+                    d[key] = mm.group(1)   # as printed, read once the document's number format is known
             if "GENERAL TERMS" in text:
                 continue
 
@@ -120,11 +159,11 @@ def parse(pdf_path):
 
                 tq = price = val = None
                 for _, row in block:
-                    a = near(row, X_TOTQ, r"[\d.]+")
-                    b = near(row, X_PRICE, r"[\d.]+,\d\d")
-                    c2 = near(row, X_VAL, r"[\d.]+,\d\d")
+                    a = near(row, X_TOTQ, COUNT)
+                    b = near(row, X_PRICE, AMOUNT)
+                    c2 = near(row, X_VAL, AMOUNT)
                     if a and b and c2:
-                        tq, price, val = int(a.replace(".", "")), eur(b), eur(c2)
+                        tq, price, val = a, b, c2
                 if tq is None:
                     problems.append(f"{tag}: no totals")
                     continue
@@ -166,7 +205,49 @@ def parse(pdf_path):
     for d in out:
         d["gender"] = collection_gender(d["collection"])
         d["label"] = doc_label(d)
-    return out, problems + gate_problems(out)
+    unread = read_numbers(out)
+    return out, problems + unread + gate_problems([d for d in out if not d.get("unread")])
+
+
+def read_numbers(docs):
+    """Read each document's amounts, quantities and dates in its own number format (in place). -> problems for
+    the documents whose format cannot be told; those keep no lines and no totals, so nothing is guessed."""
+    problems = []
+    for d in docs:
+        printed = [x for l in d["lines"] for x in (l["price"], l["line_value"])] + \
+                  [d[k] for k in ("gross", "net") if d.get(k) is not None]
+        fmt = number_format(printed)
+        dates = [(d, k) for k in ("date", "printed") if d.get(k)] + \
+                [(l, k) for l in d["lines"] for k in ("deliver_from", "deliver_to") if l.get(k)]
+        counts = [c for c in [d.get("total_qty")] + [l["qty"] for l in d["lines"]] if c is not None]
+        why = None
+        if fmt is None:
+            seen = {}
+            for x in printed:
+                seen.setdefault(next((k for k, (pat, _, _) in FORMATS.items() if pat.fullmatch(x)), None), x)
+            why = "its amounts are printed " + " and ".join(
+                f"as {FORMAT_NAMES[k]} ('{x}')" if k else f"in neither format ('{x}')" for k, x in seen.items())
+        elif any(day_first(o[k], fmt) is None for o, k in dates):
+            bad = next(o[k] for o, k in dates if day_first(o[k], fmt) is None)
+            why = f"its amounts are printed as {FORMAT_NAMES[fmt]} but date '{bad}' is not a date in that format"
+        elif any(count(c, fmt) is None for c in counts):
+            bad = next(c for c in counts if count(c, fmt) is None)
+            why = f"its amounts are printed as {FORMAT_NAMES[fmt]} but quantity '{bad}' is not"
+        if why:
+            problems.append(f"{d['doc']}: {NUMBER_FORMAT}: {why}, so the tool will not guess how to read it. "
+                            "Ask Colwyn")
+            d.update(unread=True, lines=[], total_qty=None, gross=None, net=None)
+            continue
+        for o, k in dates:
+            o[k] = day_first(o[k], fmt)
+        for k in ("gross", "net"):
+            if d.get(k) is not None:
+                d[k] = money(d[k], fmt)
+        if d.get("total_qty") is not None:
+            d["total_qty"] = count(d["total_qty"], fmt)
+        for l in d["lines"]:
+            l.update(qty=count(l["qty"], fmt), price=money(l["price"], fmt), line_value=money(l["line_value"], fmt))
+    return problems
 
 
 def doc_label(d):

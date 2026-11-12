@@ -16,6 +16,10 @@ oc_label: EX                   # the label, for a reader that serves several: ot
 # colour_codes:                # {colour_code}: OC colour (any case) -> store colour code; an OC colour
 #   GREY: GR                   # missing here stops the draft and is named
 #   BLACK: BK
+# size_map:                    # printed OC size -> the store's size, applied before sizes are matched to live
+#   31x34: 31                  # variants (each a word or number). Without it a printed size keeps its own name
+                               # unless the store holds the same size spelled differently: IT 42 = 42, OSFM = O/S
+                               # = F = OS, S-M = S - M, matched against the live product, its siblings, its Type
 season: S/S 27                 # Marais season label (slash form)
 sku_prefix: EXSS27             # new SKUs continue after the highest existing one
 sku_digits: 3

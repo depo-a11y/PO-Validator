@@ -267,6 +267,46 @@ def test_fog_one_reader_for_both_issuers(build):
     assert docs[0]["brand"] == "TEST of God LLC" and len(lines(docs)) == 3
 
 
+# ---- the S/S 26 shapes (backtest 2026-11-12: every FOG S/S 26 and one Y-3 S/S 25 OC were refused) -----------
+def _ss26(style, code, col, fabric=None):
+    """One FOG line in an S/S 26 shape: `style` a str or a tuple of wrapped rows, `code` None for ': NAME'."""
+    sizes, xs = ["S", "M", "L"], [304.0, 336.0, 368.0]
+    return [(style, code, ["100% ", "COTTON"], col, sizes, xs, [1, 2, 1], 40.0, None)]
+
+
+@pytest.mark.parametrize("line,style,colour,code,name", [
+    pytest.param(_ss26(("ZX1SP0001", "01F"), None, ["FADED ", "BLACK"]), "ZX1SP000101F", None, None, "FADED BLACK",
+                 id="wrapped apparel style, name only: the style carries the colourway"),
+    pytest.param(_ss26(("ZX80A-10", "0EVA"), "250", ["BEIGE"]), "ZX80A-100EVA", "250", "250", "BEIGE",
+                 id="wrapped footwear style with a printed colour code"),
+    pytest.param(_ss26("ZX00266", None, ["IRON ", "GREY"]), "ZX00266", "IRON GREY", None, "IRON GREY",
+                 id="one-row style, name only: the name is the colour, for colour_codes"),
+])
+def test_fog_reads_the_ss26_style_and_colour_cells(build, line, style, colour, code, name):
+    docs = fog.parse_checked(build("fog", lines=line, order_alone=True, fabric="Knit"))
+    (l,) = lines(docs)
+    assert (l["style"], l["colour"], l["colour_code"], l["colour_name"]) == (style, colour, code, name)
+    assert (l["fabric"], l["composition"]) == ("Knit", "100% COTTON")   # the fabric word stays out of the content
+    assert docs[0]["doc"] == "SO9999999"   # not 558, the street number that follows ORDER # on its own row
+
+
+def test_fog_refuses_a_colour_cell_with_an_unread_code(build):
+    probs = fog.parse(build("fog", lines=_ss26("ZX00001", "A1", ["BLACK"])))[1]
+    assert any("ZX00001: no colour code" in p for p in probs)
+
+
+def test_adidas_other_text_in_the_size_band_of_a_composition_row_is_refused(build):
+    probs = adidas.parse(build("adidas", stray=2, stray_text="NOTE"))[1]
+    assert any("ZZ0002: unexpected NOTE right of the composition row" in p for p in probs)
+
+
+def test_adidas_size_cell_wrapped_onto_the_composition_row_is_read(build):
+    docs = adidas.parse_checked(build("adidas", wrap=3))   # line 3's 11/1 printed under its 7/1
+    l = lines(docs)[2]
+    assert l["sizes"] == {"7": 1, "8": 2, "9": 3, "10": 2, "11": 1} and l["size_run"] == ["7", "8", "9", "10", "11"]
+    assert (l["composition"], l["made_in"]) == ("U:LE L:TE S:RU", "VN")
+
+
 # ---- real PDFs, local only ------------------------------------------------------
 REAL = os.environ.get("OC_FIXED_PDF_DIR")
 GLOBS = {"admilano": "OC *.pdf", "adidas": "OrderConfirmation_*.pdf", "fog": "SO*_order_confirmation.pdf"}

@@ -1,7 +1,9 @@
 """Past season POs for the brand: the Types and size runs of past products.
 
 Each PO is the house 29/30-column buy sheet (`<Brand>_<SEASON>_PO.xlsx`). Paths come
-from the brand config, newest first; nothing here is committed. Past retail prices are
+from the brand config, newest first; nothing here is committed. A PO can carry other
+labels' rows (the Adidas POs hold Y-3, Willy Chavarria, Song for the Mute and Wales
+Bonner), so only rows of the config's vendor are read; a row with no Vendor is kept. Past retail prices are
 not read: since 2026-11-12 a NEW product's price comes only from a brand RRP in AUD.
 """
 import collections
@@ -11,6 +13,14 @@ import openpyxl
 from .util import norm_code, norm_size, money, title_colour
 
 MCODE = "Metafield: my_fields.manufacture_code"
+MCODE_SHORT = "Metafield: my_fields.manu"   # Y-3 FW25 PO heads its code column with the name cut short here
+
+
+def code_column(hdr):
+    """The manufacture_code column: by its full name, with a type suffix, or cut short, never shorter than
+    MCODE_SHORT."""
+    return next((h for h in hdr if h and (h.startswith(MCODE) or (len(h) >= len(MCODE_SHORT) and MCODE.startswith(h)))),
+                None)
 
 
 class History:
@@ -39,7 +49,7 @@ def _k(s):
     return size_key(s)
 
 
-def _load_one(path, label):
+def _load_one(path, label, vendor=None):
     wb = openpyxl.load_workbook(path, data_only=True, read_only=True)
     ws = wb.worksheets[0]
     it = ws.iter_rows(values_only=True)
@@ -53,12 +63,15 @@ def _load_one(path, label):
                 return r[i]
         return None
 
-    rows = []
+    rows, mcode, want = [], code_column(hdr), str(vendor or "").strip().upper()
     for r in it:
         if not any(v is not None for v in r):
             continue
-        code = g(r, MCODE)
+        code = g(r, mcode)
         if not code:
+            continue
+        sold_by = str(g(r, "Vendor") or "").strip().upper()
+        if want and sold_by and sold_by != want:
             continue
         title = g(r, "Title")
         stem, colour = title_colour(title)
@@ -71,9 +84,9 @@ def _load_one(path, label):
     return rows
 
 
-def load(paths):
-    """paths: list of {label, path} newest first."""
+def load(paths, vendor=None):
+    """paths: list of {label, path} newest first; vendor: the brand config's, whose rows alone are read."""
     seasons = []
     for item in paths:
-        seasons.append((item["label"], _load_one(item["path"], item["label"])))
+        seasons.append((item["label"], _load_one(item["path"], item["label"], vendor)))
     return History(seasons)

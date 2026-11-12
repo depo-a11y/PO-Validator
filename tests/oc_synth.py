@@ -198,10 +198,11 @@ def _adidas_footer(p):
     p.words(2.9, 555.5, ["The", "general", "terms", "and", "conditions", "shall", "apply."], GAP, 8)
 
 
-def adidas_pdf(path, discount=None, stray=None, bad_cell=None, lines=ADIDAS_LINES):
+def adidas_pdf(path, discount=None, stray=None, bad_cell=None, wrap=None, lines=ADIDAS_LINES, stray_text="XL/1"):
     """Three lines on page 1 (the third's composition row on page 2) and one on page 2.
     discount=(line, pct); stray=line: a size cell on that line's composition row;
-    bad_cell=(line, text): that line's first cell printed as `text`."""
+    bad_cell=(line, text): that line's first cell printed as `text`; wrap=line: that line's last
+    cell printed on its composition row instead (as on the real Y-3 S/S 25 OC)."""
     p1, p2 = Page(841.92, 595.32, 8), Page(841.92, 595.32, 8)
     p1.words(11.4, 7.8, ["adidas", "AG"], GAP)
     p1.words(11.4, 19.8, ["Luxury", "Fashion", "Sales"], GAP)
@@ -234,13 +235,15 @@ def adidas_pdf(path, discount=None, stray=None, bad_cell=None, lines=ADIDAS_LINE
         p.text(45.4, top, art)
         p.words(93.6, top, desc, GAP)
         p.right(AD_X1["qty"], top, str(qty))
-        p.words(336.1, top, cells, 4.5)
+        p.words(336.1, top, cells[:-1] if wrap == n else cells, 4.5)
         for key, v in (("price", price), ("gross", gross), ("disc", pct), ("net", net)):
             p.right(AD_X1[key], top, _usd(v))
         cp, ct = (p2, 165.0) if n == 3 else (p, top + 14.2)
         cp.words(95.9, ct, comp, GAP)
         if stray == n:
-            cp.text(336.1, ct, "XL/1")
+            cp.text(336.1, ct, stray_text)
+        if wrap == n:
+            cp.text(336.1, ct, cells[-1])
     p2.words(93.6, 492.7, ["T60", "1", "10", "days", "1%,", "net", "60", "days", "Quantity"], GAP)
     p2.right(320.3, 492.7, str(units))
     p2.words(560.4, 492.7, ["Order", "Value"], GAP)
@@ -268,13 +271,21 @@ FOG_LINES = [  # (style, colour code, fabric lines, colour lines, sizes, x-centr
 ]
 
 
-def _fog_page_header(p, brand):
+def _fog_page_header(p, brand, order_alone=False):
     p.text(333.0, 50.5, "Order Confirmation")
     p.text(40.8, 72.7, "FROM")
     p.text(220.8, 72.7, "SHIP TO")
     p.text(400.8, 72.7, "BILL TO")
     p.text(41.6, 88.0, brand)
     p.text(221.6, 88.0, "Test Customer")
+    if order_alone:   # S/S 26: ORDER # on its own row, the number at the end of an address row
+        p.text(648.7, 91.2, "ORDER #")
+        p.text(644.6, 104.0, "SO9999999")
+        p.text(41.6, 96.0, "558 Test Street")
+        p.text(41.6, 112.0, "Test Country")
+        p.text(586.4, 121.7, "Customer PO # 12345678")
+        p.text(586.4, 137.0, "SHIP TERMS: EXW TEST")
+        return
     p.text(586.4, 91.2, "ORDER # SO9999999")
     p.text(41.6, 96.0, "1 Test Street")
     p.text(586.4, 106.4, "Customer PO # 12345678")
@@ -290,13 +301,16 @@ def _fog_block(p, top, sizes, xs):
         p.centre(x, top + 15.1, s)
 
 
-def fog_pdf(path, shift=None, drop=None, discount=0.0, brand="TEST Essentials", lines=FOG_LINES):
+def fog_pdf(path, shift=None, drop=None, discount=0.0, brand="TEST Essentials", lines=FOG_LINES, order_alone=False,
+            fabric=None):
     """Lines 1 and 2 on page 1; line 3's table header and size header at the foot of
     page 1, its row on page 2 under the repeated address block, and no MSRP.
-    Line 2's S M L header sits at the x of line 1's 2XS XS S."""
+    Line 2's S M L header sits at the x of line 1's 2XS XS S. The S/S 26 shapes: a style given as a
+    tuple of rows is printed wrapped, a colour code of None prints ': NAME', `fabric` prints a fabric word
+    left of the content, and order_alone prints ORDER # on its own row."""
     p1, p2 = Page(792, 612), Page(792, 612)
-    _fog_page_header(p1, brand)
-    _fog_page_header(p2, brand)
+    _fog_page_header(p1, brand, order_alone)
+    _fog_page_header(p2, brand, order_alone)
     for word, x in (("ORDER DATE", 47.0), ("START SHIP DATE", 122.1), ("SEASON", 644.1), ("CONTACT", 701.0)):
         p1.text(x, 193.7, word)
     p1.text(41.6, 209.8, "1/2/2099")
@@ -311,8 +325,11 @@ def fog_pdf(path, shift=None, drop=None, discount=0.0, brand="TEST Essentials", 
     units = value = 0
     for n, ((style, code, fab, col, sizes, xs, qtys, price, msrp), (hp, ht, lp, lt)) in enumerate(zip(lines, where), 1):
         _fog_block(hp, ht, sizes, xs)
-        lp.text(73.6, lt, style)
-        lp.text(213.6, lt, f"{code} : ")
+        for k, part in enumerate((style,) if isinstance(style, str) else style):
+            lp.text(73.6, lt + 7.0 * k, part)
+        lp.text(213.6, lt, f"{code} : " if code is not None else ": ")
+        if fabric:
+            lp.text(121.6, lt, fabric)
         for k, (x, q) in enumerate(zip(xs, qtys)):
             if drop == (n, k):
                 continue
@@ -336,3 +353,53 @@ def fog_pdf(path, shift=None, drop=None, discount=0.0, brand="TEST Essentials", 
         p2.right(750.3, 300 + 16 * k, v)
     p2.text(41.6, 400, "No Changes can be made to Sales Orders after 5 days of buyer signing order confirmations.")
     return write(path, [p1, p2])
+
+
+# ---- OTB (Maison Margiela, MM6) -------------------------------------------------
+OTB_LINES = [  # (style, fabric, colour, product class, sizes, qtys, price)
+    ("S99WS0001", "P0001", "T0001", "SNEAKERS", ["41", "42", "43"], [1, 2, 1], 1250.0),
+    ("S99WR0002", "P0002", "H0002", "MOCASSIN", ["40", "43"], [2, 2], 312.5),
+]
+OTB_DATES = ("15/01/2099", "01/02/2099", "15/07/2099", "15/10/2099")   # confirmation, printed, deliver from, to
+
+
+def otb_amount(v, fmt):
+    whole, cents = f"{v:.2f}".split(".")
+    return f"{int(whole):,}".replace(",", ".") + "," + cents if fmt == "eu" else f"{int(whole):,}.{cents}"
+
+
+def otb_date(day_first, fmt):
+    d, m, y = day_first.split("/")
+    return f"{m}/{d}/{y}" if fmt == "us" else day_first
+
+
+def otb_pdf(path, fmt="eu", odd=None, dates=OTB_DATES, lines=OTB_LINES):
+    """One confirmation in `fmt` ('eu' 1.234,56 and 23/03/2026, 'us' 1,234.56 and 03/23/2026), at the x positions
+    of the real layout. `odd`: line 1's value printed in that other format. `dates` are given day first."""
+    p = Page(612, 792)
+    conf, printed, frm, to = (otb_date(x, fmt) for x in dates)
+    p.text(40.0, 40.0, f"Printed at {printed}")
+    p.text(40.0, 60.0, f"Order confirmation SS - 2099/01-62-0001 Of {conf}")
+    p.text(40.0, 80.0, "Agent/Seller TS0001 TEST S.A. Currency European Euro")
+    p.text(40.0, 100.0, "Collection MM MALE SHOES AVP")
+    top, units, value = 150.0, 0, 0.0
+    for n, (style, fab, col, pclass, sizes, qtys, price) in enumerate(lines, 1):
+        p.text(19.4, top, str(n))
+        for x, word in ((98.4, style), (189.0, fab), (222.1, col), (254.7, frm), (305.2, to), (359.6, pclass)):
+            p.text(x, top, word)
+        for x, word in ((385.3, "Tot."), (402.2, "Qty"), (477.0, "Price"), (566.3, "Line"), (584.9, "value")):
+            p.text(x, top + 15.5, word)
+        for k, (s, q) in enumerate(zip(sizes, qtys)):
+            xc = 14.9 + 21.55 * k
+            p.centre(xc, top + 16.5, s)
+            p.centre(xc, top + 29.3, str(q))
+        qty = sum(qtys)
+        units, value = units + qty, value + qty * price
+        p.right(413.9, top + 28.1, str(qty))
+        p.right(495.0, top + 28.1, otb_amount(price, fmt))
+        p.right(603.8, top + 28.1, otb_amount(qty * price, odd if odd and n == 1 else fmt))
+        top += 44.0
+    p.text(40.0, top + 20, f"Total order q.ty {units}")
+    p.text(40.0, top + 32, f"Total gross value {otb_amount(value, fmt)}")
+    p.text(40.0, top + 44, f"Total net value {otb_amount(value, fmt)}")
+    return write(path, [p])

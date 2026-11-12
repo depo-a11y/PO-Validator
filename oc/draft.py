@@ -16,9 +16,20 @@ from .poxlsx import PO_HEADER, CODE, MADE_IN, SEASON, NEW_SALE, COST_PRICE, TITL
 from .resolve import Resolver, COLOUR, AI_OC, AI_NEW_SIZE, NO_RRP, split_code, worse
 
 PRICE_CHECK = "Every NEW row has a retail price"
-from .util import norm_size, sort_sizes, size_key, fmt_money, cost_currency, slug
+from .util import norm_size, sort_sizes, size_key, fmt_money, cost_currency, slug, store_sizes, size_clashes, \
+    one_name_per_size
 
 PRICE_COL = col_letter(PO_HEADER, "Variant Price")
+SIZE_NAMES_CHECK = "Each size has one name per product"
+
+
+def _live_size_names(R, code, ptype):
+    """The store's size names nearest a NEW product, closest first: its live same-fabric and same-style siblings',
+    then those of the brand's live products of its Type (its kind of item)."""
+    live = [p for p in R.cat.products.values() if p["status"].upper() != "ARCHIVED"]
+    sib = [{v["size"] for p in R.siblings(code, level) if p["status"].upper() != "ARCHIVED" for v in p["variants"]
+            if v["size"]} for level in ("fabric", "style")]
+    return sib + [{v["size"] for p in live if ptype and p["type"] == ptype for v in p["variants"] if v["size"]}]
 
 
 def oc_lines(docs, brand=None):
@@ -67,6 +78,7 @@ def build(docs, brand, catalog, history, tag_lookup, cart=None):
         common = {}
         if product is not None:
             live = {v["size"]: v for v in product["variants"]}
+            l["sizes_norm"] = store_sizes(l["sizes_norm"], [set(live)], brand.get("size_map"))   # never a 2nd name
             run = sort_sizes(set(live) | set(l["sizes_norm"]))
             run_src, run_why = "catalog", f"live sizes of {product['title']} plus ordered sizes"
             ptype, title = product["type"], product["title"]
@@ -123,6 +135,7 @@ def build(docs, brand, catalog, history, tag_lookup, cart=None):
         title, ti_src, ti_why = R.title(code, pclass, cname)
         if worse(cn_src, ti_src) == cn_src and COLOUR[cn_src] != COLOUR[ti_src]:
             ti_src, ti_why = cn_src, f"{ti_why}; colour name: {cn_why}"
+        l["sizes_norm"] = store_sizes(l["sizes_norm"], _live_size_names(R, code, ptype), brand.get("size_map"))
         pending.append(dict(
             l=l, code=code, eur=eur, gender=gender, ptype=(ptype, t_src, t_why), title=[title, ti_src, ti_why],
             fam=R.colour_family(code, cname), run=R.size_run(code, l["sizes_norm"], ptype),
@@ -136,6 +149,7 @@ def build(docs, brand, catalog, history, tag_lookup, cart=None):
         ptype, t_src, t_why = n["ptype"]
         fam, f_src, f_why = n["fam"]
         run, run_src, run_why = n["run"]
+        run = one_name_per_size(run, l["sizes_norm"])   # siblings that spell a size two ways give it one name
         price, p_src, p_why = n["price"]
         made, made_src, made_why = n["made"]
         comp, comp_src, comp_why = n["comp"]
@@ -173,6 +187,14 @@ def build(docs, brand, catalog, history, tag_lookup, cart=None):
             cell(row, TITLE_TAG, R.title_tag(title), ti_src, "house title_tag template over the drafted title")
             rows.append(row)
 
+    names = collections.defaultdict(set)
+    for r in rows:
+        names[r.get(CODE)].add(r.get("Option2 Value"))
+    clash = [f"{c}: " + ", ".join(" and ".join(g) for g in size_clashes(ss)) for c, ss in names.items() if size_clashes(ss)]
+    if clash:
+        checks.append(dict(Check=SIZE_NAMES_CHECK, Result="WARN", Detail=(
+            f"{len(clash)} product(s) carry one size under two names, because the live product holds both: "
+            + "; ".join(clash) + ". Keep the store's name and move the quantity onto it.")))
     if cart is not None:
         checks += cart_checks(lines, cart, brand)
     checks = _draft_checks(docs, lines, rows, R, brand, catalog, tag_lookup, dup) + checks
