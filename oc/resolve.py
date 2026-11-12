@@ -277,16 +277,17 @@ class Resolver:
         an unknown currency is named in the Why and never used; it is never raised to the margin floor either."""
         offers = []
         if line and line.get("rrp"):
-            offers.append(("OC", line["rrp"], line.get("rrp_currency"), f"{line['doc']} line {line['line_no']}"))
+            where = f"{line['doc']} line {line['line_no']}" + (f", {line['rrp_found']}" if line.get("rrp_found") else "")
+            offers.append(("OC", line["rrp"], line.get("rrp_currency"), where))
         row = self.cart_row(code)
         if row and row.get("rrp"):
             offers.append(("cart", row["rrp"], row.get("rrp_currency"), self.cart_why(row, "Sugg. Retail")))
         for src, value, cur, where in offers:
             if iso_currency(cur) == "AUD":
                 return value, src, f"brand RRP A${value:g} ({where})"
-        seen = "; ".join(f"the brand's RRP is {iso_currency(cur) or 'in an unknown currency'} {value:g} ({where}), "
-                         "not an AUD price" for _, value, cur, where in offers)
-        return None, NEEDED, NO_RRP + (f"; {seen}" if seen else "")
+        seen = [f"the brand's RRP is {iso_currency(cur) or 'in an unknown currency'} {value:g} ({where}), not an AUD "
+                "price" for _, value, cur, where in offers] + ([line["rrp_note"]] if line and line.get("rrp_note") else [])
+        return None, NEEDED, NO_RRP + (f"; {'; '.join(seen)}" if seen else "")
 
     # ---- made in / composition ---------------------------------------------
     def made_in_of(self, p):

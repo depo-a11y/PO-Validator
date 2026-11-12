@@ -150,12 +150,69 @@ def test_the_ai_reader_returns_an_rrp_with_its_currency(tmp_path, monkeypatch):
             "items"]["required"]
 
 
-def test_an_ai_rrp_must_be_printed_in_its_lines_part_of_the_pdf(tmp_path, monkeypatch):
+def _ai_pdf(tmp_path, printed):
+    """The synthetic OC with line 1's RRP printed as `printed` (or not at all) right after its line value."""
+    lines = [l.replace("EUR 480,00", f"EUR 480,00 {printed}") if printed else l for l in PDF_LINES]
+    return make_pdf(tmp_path / "rrp.pdf", lines)
+
+
+@pytest.mark.parametrize("printed,claimed,rrp,cur,note", [
+    (None, "AUD", None, None, "the AI read an RRP 'AUD 980,00' that is not printed in this line's part of the PDF"),
+    ("RRP 980,00", "AUD", 980.0, None, "the AI read the RRP '980,00' as AUD, but no AUD mark is printed"),
+    ("RRP $980,00", "AUD", 980.0, None, "a bare $ names no currency"),
+    ("RRP AUD 980,00", "AUD", 980.0, "AUD", None),
+])
+def test_an_ai_rrp_counts_only_as_far_as_the_pdf_prints_it(tmp_path, monkeypatch, printed, claimed, rrp, cur, note):
     monkeypatch.setenv(ai.KEY_NAME, "sk-ant-test")
-    pdf = make_pdf(tmp_path / "plain.pdf", PDF_LINES)
-    with pytest.raises(ai.ReadRefused) as e:
-        _ai_read(pdf, "AUD 980,00", "AUD")
-    assert any("rrp 'AUD 980,00'" in c["Detail"] for c in e.value.checks if c["Check"] == ai.GROUNDING_CHECK)
+    text = "AUD 980,00" if printed in (None, "RRP AUD 980,00") else printed.replace("RRP ", "")
+    docs, warns, _ = _ai_read(_ai_pdf(tmp_path, printed), text if printed else "AUD 980,00", claimed)
+    line = docs[0]["lines"][0]
+    assert (line["rrp"], line["rrp_currency"]) == (rrp, cur)
+    if note:
+        assert note in line["rrp_note"]
+    else:
+        assert "rrp_note" not in line and "printed in its line as 'AUD 980,00' with a AUD mark" in line["rrp_found"]
+
+
+def test_currency_marks_name_a_currency_only_when_unambiguous():
+    marks = ai.currency_marks
+    assert marks("rrp aud 980,00".split()) == {"AUD"} and marks(["a$980.00"]) == {"AUD"} and marks(["au$"]) == {"AUD"}
+    assert marks("australian dollar".split()) == {"AUD"} and marks(["(aud)"]) == {"AUD"}
+    assert marks(["$980.00"]) == set() and marks(["audio"]) == set() and marks(["us$10"]) == {"USD"}
+
+
+def _ai_draft(tmp_path, monkeypatch, printed, claimed):
+    monkeypatch.setenv(ai.KEY_NAME, "sk-ant-test")
+    pdf = _ai_pdf(tmp_path, printed)
+
+    def f(d, doc, ls):
+        ls[0].update(rrp_text="AUD 980,00", rrp_currency=claimed)
+    cfg = _cfg()
+    po, review, checks = service.draft(pdf, _empty_catalog(tmp_path), cfg,
+                                       ai_factory=FakeClient(message(_mut(f))).factory)
+    return review[(review["Code"] == "EXJK01 GR") & (review["Column"] == "Variant Price")]
+
+
+def _empty_catalog(tmp_path):
+    p = tmp_path / "catalog.csv"
+    with open(p, "w", encoding="utf-8-sig", newline="") as fh:
+        csv.DictWriter(fh, fieldnames=base.CAT_COLS).writeheader()
+    return str(p)
+
+
+def test_a_grounded_aud_rrp_from_an_ai_read_is_the_price_but_amber(tmp_path, monkeypatch):
+    cells = _ai_draft(tmp_path, monkeypatch, "RRP AUD 980,00", "AUD")
+    assert set(cells["Value"]) == {980.0} and set(cells["Source"]) == {"OC (AI read)"} and set(cells["Colour"]) == {"amber"}
+    why = cells["Why"].iloc[0]
+    assert why.startswith("read by AI from SO-90001 line 1; brand RRP A$980 (SO-90001 line 1, read by AI, printed in "
+                          "its line as 'AUD 980,00' with a AUD mark)")
+
+
+@pytest.mark.parametrize("printed", [None, "RRP 980,00", "RRP $980,00"])
+def test_an_ungrounded_or_unmarked_ai_rrp_leaves_the_price_blank(tmp_path, monkeypatch, printed):
+    cells = _ai_draft(tmp_path, monkeypatch, printed, "AUD")
+    assert cells["Value"].isna().all() and set(cells["Colour"]) == {"red"}
+    assert cells["Why"].iloc[0].startswith(NO_RRP)
 
 
 # ---- complete and finalize ---------------------------------------------------------------------------------
@@ -201,3 +258,21 @@ def test_finalize_refuses_a_blank_new_price_naming_rows_and_skus(tmp_path):
 def test_finalize_takes_a_price_a_person_filled_in(tmp_path):
     checks = finalize.run(str(_hand(tmp_path, 800.0)), base.BRAND, _catalog(tmp_path), str(tmp_path / "x-"))
     assert {c["Check"]: c for c in checks}["Every NEW row has a retail price"]["Result"] == "PASS"
+
+
+def test_complete_marks_an_ai_read_aud_rrp_amber(tmp_path):
+    docs = _docs(rrp=950.0, cur="AUD")
+    for l in docs[0]["lines"]:
+        l["reader"] = "ai"
+    docs[0]["lines"][1]["rrp_found"] = "read by AI, printed in its line as 'AUD 950,00' with a AUD mark"
+    out = tmp_path / "po.xlsx"
+    complete.run(str(_hand(tmp_path, None)), docs, base.BRAND, _catalog(tmp_path), base._hist(), base._tags(), str(out))
+    ws = openpyxl.load_workbook(out)["Review"]
+    hdr = [c.value for c in ws[1]]
+    rows = [dict(zip(hdr, [c.value for c in r])) for r in ws.iter_rows(min_row=2)]
+    (price,) = [r for r in rows if r["Column"] == "Variant Price"]
+    assert (price["Value"], price["Source"], price["Colour"]) == (950, "OC (AI read)", "amber")
+    assert price["Why"].startswith("read by AI from SS - 1 line 2; brand RRP A$950 (SS - 1 line 2, read by AI")
+    po = openpyxl.load_workbook(out).worksheets[0]
+    col = {c.value: c.column for c in po[1] if c.value}
+    assert po.cell(2, col["Variant Price"]).fill.fgColor.rgb == "00FFEB9C"

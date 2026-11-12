@@ -92,6 +92,9 @@ def run(po_path, docs, brand, catalog, history, tag_lookup, out, price_overrides
             if code not in priced:
                 priced[code] = R.retail(code, by_code.get(code))
             price, s, why = priced[code]
+            l = by_code.get(code)
+            if s == "OC" and l and l.get("reader") == "ai":   # an AI-read RRP is never green
+                s, why = AI_OC, f"read by AI from {l['doc']} line {l['line_no']}; {why}"
             if price is not None:
                 put(r, "Variant Price", price, s, why)
         if blank(ws.cell(r, col["Variant Compare At Price"]).value) and not blank(get(r, "Variant Price")):

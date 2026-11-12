@@ -374,6 +374,28 @@ def has_size(toks, label):
     return bool(lab) and (any(t == lab or cell.fullmatch(t) for t in toks) or find_run(toks, label, 0, len(toks)) >= 0)
 
 
+ISO_CODES = {"AUD", "USD", "EUR", "GBP", "JPY", "CHF", "CNY", "HKD", "NZD", "SGD", "CAD", "KRW", "SEK", "DKK", "NOK"}
+CURRENCY_SYMBOLS = (("au$", "AUD"), ("a$", "AUD"), ("us$", "USD"), ("€", "EUR"), ("£", "GBP"))
+CURRENCY_NAMES = (("australiandollar", "AUD"), ("usdollar", "USD"), ("unitedstatesdollar", "USD"),
+                  ("poundsterling", "GBP"))
+
+
+def currency_marks(toks):
+    """Currencies printed unambiguously among these words: an ISO code ('AUD', 'AUD980,00'), a symbol that names
+    one currency ('A$', 'AU$', 'US$', '€', '£') or the currency's name ('Australian Dollar'). A bare '$' names
+    none: it is the US, Australian and other dollars alike."""
+    found = set()
+    for t in toks:
+        w = t.strip("()[]{}:;,")
+        m = re.match(r"([a-z]{3})(?=[\d.,]|$)", w)
+        if m and m.group(1).upper() in ISO_CODES:
+            found.add(m.group(1).upper())
+        found |= {cur for sym, cur in CURRENCY_SYMBOLS if sym in w and not (sym == "a$" and "au$" in w)}
+    flat = "".join(toks)
+    found |= {cur for name, cur in CURRENCY_NAMES if name in flat}
+    return found
+
+
 class Pages:
     """The PDF's words page by page, case-folded: from pdfplumber's default extraction and, when given, a tight
     one (x_tolerance=1, which keeps words apart where the default runs them together), each as printed and with
@@ -399,11 +421,11 @@ class Pages:
     def misses(self, raw):
         """Per line (document order), what is not where it should be, on the variant that misses least."""
         lines = [(d, i, l) for d in raw for i, l in enumerate(d["lines"], 1)]
-        best = None
+        best, self.rrp_found = None, None
         for v in range(len(self.variants)):
-            got = self._misses(v, lines)
+            got, rrp = self._misses(v, lines)
             if best is None or sum(map(len, got)) < sum(map(len, best)):
-                best = got
+                best, self.rrp_found = got, rrp
         return lines, best
 
     def _misses(self, v, lines):
@@ -416,16 +438,17 @@ class Pages:
             found.append(j)
             if j >= 0:
                 pos = j + 1
-        out = []
+        out, rrp = [], []
         for k, ((d, i, l), j) in enumerate(zip(lines, found)):
             miss = []
             if j < 0:
                 out.append([f"style '{l['style']}' is not on page {l['page']} after the previous line"])
+                rrp.append(None)
                 continue
             end = next((x for x in found[k + 1:] if x >= 0), len(toks))
             block = toks[j:end]
             joined = "".join(block)
-            for field in ("price_text", "line_value_text", "rrp_text"):
+            for field in ("price_text", "line_value_text"):
                 if l.get(field) is not None and _flat(_bare(l[field])) not in joined:
                     miss.append(f"{field.replace('_text', '').replace('_', ' ')} '{l[field]}'")
             for field in ("fabric", "colour"):
@@ -439,7 +462,14 @@ class Pages:
                 if not has_size(near, sz["size"]):
                     miss.append(f"size '{sz['size']}' (not near the line)")
             out.append(miss)
-        return out
+            first_page = min(d["pages"]) if d.get("pages") and 1 <= min(d["pages"]) <= self.n else l["page"]
+            doc_top = starts[first_page - 1]
+            doc_first = min([x for x in found if doc_top <= x < starts[first_page]] or [doc_top])
+            text = l.get("rrp_text")
+            rrp.append(dict(
+                grounded=text is not None and bool(_flat(_bare(text))) and _flat(_bare(text)) in joined,
+                marks=currency_marks(block + toks[page_start:first] + toks[doc_top:doc_first])))
+        return out, rrp
 
 
 def _shape(text, exact_digits=False):
@@ -572,6 +602,26 @@ def page_problems(data, pages):
     return out
 
 
+def rrp_evidence(doc_lines, raw_lines, found):
+    """An AI-read RRP is kept only as far as the PDF prints it: its text in the line's own part (else no RRP),
+    and its currency only with a mark printed in that part, the page's column header or the document's header
+    (else unknown, so never an AUD price). Notes go to the Review through `rrp_note` and `rrp_found`."""
+    for dl, l, info in zip(doc_lines, raw_lines, found or []):
+        text = l.get("rrp_text")
+        if text is None:
+            continue
+        claimed = iso_currency(l.get("rrp_currency"))
+        if not info or not info["grounded"]:
+            dl.update(rrp=None, rrp_currency=None,
+                      rrp_note=f"the AI read an RRP '{text}' that is not printed in this line's part of the PDF; not used")
+        elif claimed and claimed not in info["marks"]:
+            dl.update(rrp_currency=None,
+                      rrp_note=f"the AI read the RRP '{text}' as {claimed}, but no {claimed} mark is printed with it "
+                               "(a bare $ names no currency)")
+        else:
+            dl["rrp_found"] = f"read by AI, printed in its line as '{text}'" + (f" with a {claimed} mark" if claimed else "")
+
+
 def interpret(data, brand_cfg, pages, tight=None):
     """Model JSON -> (docs, fails, warns). docs have the otb shape plus reader='ai' on every line.
     `pages` is the PDF's text page by page (a single string counts as one page); `tight` the same with words kept
@@ -678,6 +728,7 @@ def interpret(data, brand_cfg, pages, tight=None):
     for (d, i, l), miss in zip(lines, misses):
         if miss:
             missing.append(f"{d['number']} line {l['line_no'] or i} ({l['style']}): " + ", ".join(miss))
+    rrp_evidence([x for dd in docs for x in dd["lines"]], [l for _, _, l in lines], pg.rrp_found)
     if missing:
         fails.append(_check(GROUNDING_CHECK, "FAIL", (
             f"{len(missing)} line(s) or document(s) where what the AI read is not in that part of the PDF text, so "
