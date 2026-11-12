@@ -393,7 +393,7 @@ def test_every_layout_problem_of_a_fixed_reader_points_at_the_ai_box(monkeypatch
                 "9001 line 1 Z1: qty 2@300 is 40.0pt from column 36",
                 "9001 line 1 Z1: sizes sum 4 != Tot. Qty 3",
                 "9001 line 1 Z1: 1 x 2.0 = 2.00 != line value 3.0",
-                "9001: parsed EUR 1.00, printed net 2.00",
+                "9001: its lines add up to EUR 1.00, but it prints a net total of EUR 2.00",
                 "9001: document discount 10.00 is not applied to any line; ask"]
 
     def parse_checked(path):

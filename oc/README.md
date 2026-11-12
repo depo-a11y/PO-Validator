@@ -55,7 +55,9 @@ SS27 test and is now off by Colwyn's rule of 2026-11-12.
   Willy Chavarria, RS) and `fog` (FOG Essentials, Fear of God LLC). `ai` reads any layout (see "AI reader" below).
   All share `otb.gate_problems`, whose three gates hard-fail. Each has read every season to hand (backtest
   2026-11-12): otb decides each confirmation's number format from its own amounts (1.234,56 and 23/03/2026, or
-  F/W 26's 1,234.56 and 03/23/2026) and refuses one that mixes them, without the AI hint; fog reads the S/S 26
+  F/W 26's 1,234.56 and 03/23/2026) and refuses one that mixes them, without the AI hint. A confirmation whose
+  own lines do not add up to its printed total is refused with the figures and "ask the brand for a corrected OC,
+  or ask Colwyn"; fog reads the S/S 26
   cells (a style wrapped over two rows, a colour name with no code, ORDER # alone on its row); adidas reads a size
   cell wrapped onto the composition row when the line's Tot. Qty needs it. Whatever the reader, an OC whose currency is not the
   brand's `cost_currency` is refused (printed names are normalised: otb's "European Euro" is EUR), and so is one
@@ -164,9 +166,12 @@ nothing is written into the repo and nothing talks to Shopify.
 The page names the config it uses (source, vendor, season), never its contents.
 
 **Sizes** keep one name per product. A printed size keeps its name when the store knows it, else takes the store's
-name for the same size (IT 42 = 42; OSFM, O/S, F and OS; S-M = S - M) from the live product, its live siblings or
-live products of its Type, in that order, and never when the store holds two names for it. A brand's `size_map`
-(printed: store) applies first. "Each size has one name per product" WARNs on any product that still has two.
+name for the same size (IT 42 = 42; OSFM, O/S, F and OS; S-M = S - M) from the live product or its live same-style
+siblings, and never when they hold two names for it. Past those, only a clear brand-wide majority renames (90% of the
+brand's live products carrying that size, and at least 10 of them); a product's Type is no guide (one IT-sized
+dress once renamed four bare-sized ones). A brand's `size_map` (printed: store) applies first. A renamed size is
+amber with both names ("printed '40', named 'IT 40' as on ..."), never green as read from the OC. "Each size has one
+name per product" WARNs on any product that still has two.
 
 **Past season POs** feed the Type and the size run of new styles, never their price. Only the config vendor's rows
 are read (an Adidas PO also holds Y-3, Willy Chavarria, Song for the Mute and Wales Bonner rows), and a code column

@@ -23,13 +23,24 @@ PRICE_COL = col_letter(PO_HEADER, "Variant Price")
 SIZE_NAMES_CHECK = "Each size has one name per product"
 
 
-def _live_size_names(R, code, ptype):
-    """The store's size names nearest a NEW product, closest first: its live same-fabric and same-style siblings',
-    then those of the brand's live products of its Type (its kind of item)."""
-    live = [p for p in R.cat.products.values() if p["status"].upper() != "ARCHIVED"]
-    sib = [{v["size"] for p in R.siblings(code, level) if p["status"].upper() != "ARCHIVED" for v in p["variants"]
-            if v["size"]} for level in ("fabric", "style")]
-    return sib + [{v["size"] for p in live if ptype and p["type"] == ptype for v in p["variants"] if v["size"]}]
+def _live_size_names(R, code, vendor):
+    """The store's size names a NEW product may take: its live same-fabric, then same-style siblings' ({name: the
+    sibling}), and the brand-wide count of live products carrying each name, for a rename only a clear majority
+    supports. A product's Type is no guide: one live dress in IT sizes renamed four bare-sized ones (2026-11-13)."""
+    sib = []
+    for level in ("fabric", "style"):
+        names = {}
+        for p in R.siblings(code, level):
+            if p["status"].upper() != "ARCHIVED":
+                for v in p["variants"]:
+                    if v["size"]:
+                        names.setdefault(v["size"], f"live sibling {p['title']}")
+        sib.append(names)
+    counts = collections.Counter()
+    for p in R.cat.products.values():
+        if p["status"].upper() != "ARCHIVED" and (p.get("vendor") or "").upper() == (vendor or "").upper():
+            counts.update({v["size"] for v in p["variants"] if v["size"]})
+    return sib, counts
 
 
 def oc_lines(docs, brand=None):
@@ -78,7 +89,8 @@ def build(docs, brand, catalog, history, tag_lookup, cart=None):
         common = {}
         if product is not None:
             live = {v["size"]: v for v in product["variants"]}
-            l["sizes_norm"] = store_sizes(l["sizes_norm"], [set(live)], brand.get("size_map"))   # never a 2nd name
+            l["sizes_norm"], l["size_notes"] = store_sizes(l["sizes_norm"], [{s: f"the live product {product['title']}"
+                                                                     for s in live}], brand.get("size_map"))
             run = sort_sizes(set(live) | set(l["sizes_norm"]))
             run_src, run_why = "catalog", f"live sizes of {product['title']} plus ordered sizes"
             ptype, title = product["type"], product["title"]
@@ -101,7 +113,8 @@ def build(docs, brand, catalog, history, tag_lookup, cart=None):
                 cell(row, "Option1 Value", (v or {}).get("colour") or colour, "catalog", "live colour option")
                 cell(row, "Option2 Name", brand["option2_name"], "rule", "house option order")
                 if v:
-                    cell(row, "Option2 Value", size, "catalog", "live variant")
+                    cell(row, "Option2 Value", size, *(("rule", l["size_notes"][size]) if size in l["size_notes"]
+                                                       else ("catalog", "live variant")))
                 elif l.get("reader") == "ai":
                     cell(row, "Option2 Value", size, AI_NEW_SIZE,
                          f"read by AI from {l['doc']} line {l['line_no']}; ordered size the live product does not "
@@ -135,7 +148,8 @@ def build(docs, brand, catalog, history, tag_lookup, cart=None):
         title, ti_src, ti_why = R.title(code, pclass, cname)
         if worse(cn_src, ti_src) == cn_src and COLOUR[cn_src] != COLOUR[ti_src]:
             ti_src, ti_why = cn_src, f"{ti_why}; colour name: {cn_why}"
-        l["sizes_norm"] = store_sizes(l["sizes_norm"], _live_size_names(R, code, ptype), brand.get("size_map"))
+        sib, counts = _live_size_names(R, code, brand.get("vendor"))
+        l["sizes_norm"], l["size_notes"] = store_sizes(l["sizes_norm"], sib, brand.get("size_map"), counts)
         pending.append(dict(
             l=l, code=code, eur=eur, gender=gender, ptype=(ptype, t_src, t_why), title=[title, ti_src, ti_why],
             fam=R.colour_family(code, cname), run=R.size_run(code, l["sizes_norm"], ptype),
@@ -168,8 +182,8 @@ def build(docs, brand, catalog, history, tag_lookup, cart=None):
             cell(row, "Option1 Name", brand["option1_name"], "rule", "house option order")
             cell(row, "Option1 Value", fam, f_src, f_why)
             cell(row, "Option2 Name", brand["option2_name"], "rule", "house option order")
-            cell(row, "Option2 Value", size, "OC" if size in l["sizes_norm"] else run_src,
-                 "ordered size" if size in l["sizes_norm"] else run_why)
+            cell(row, "Option2 Value", size, *(("rule", l["size_notes"][size]) if size in l["size_notes"] else
+                                               ("OC", "ordered size") if size in l["sizes_norm"] else (run_src, run_why)))
             sku, s_, why = R.next_sku()
             cell(row, "Variant SKU", sku, s_, why)
             cell(row, "Variant Price", price, p_src, p_why)

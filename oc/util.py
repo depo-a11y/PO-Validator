@@ -40,23 +40,42 @@ def size_alias(s):
     return m.group(1) if m else t
 
 
-def store_sizes(ordered, known, size_map=None):
-    """{printed size: qty} -> {store size: qty}. A printed size goes through the brand's size_map first, then keeps
-    its own name if the store knows it, else takes the one known store name of the same size (size_alias). `known`
-    is a list of sets of live size names, closest first (the product's own, its siblings', its kind of item's); the
-    first set that knows the size decides. When a set holds two names for it, nothing is rewritten."""
-    out = {}
+SIZE_QUORUM = (0.9, 10)   # a brand-wide rename needs this share of the live products carrying the size, and this many
+
+
+def store_sizes(ordered, known, size_map=None, quorum=None):
+    """{printed size: qty} -> ({store size: qty}, {store size: why it is not the printed name}).
+
+    A printed size goes through the brand's size_map first, then keeps its own name if the store knows it, else
+    takes the one store name of the same size (size_alias). `known` is a list of {live size name: where}, closest
+    first (the product's own sizes, then its live siblings'); the first that knows the size decides, and one that
+    holds two names for it renames nothing. Past those, `quorum` ({size name: live products of the brand carrying
+    it}) renames only to a name a clear majority uses (SIZE_QUORUM), never on a handful of products."""
+    out, why = {}, {}
+    share, least = SIZE_QUORUM
     for size, q in ordered.items():
-        t = norm_size((size_map or {}).get(norm_size(size), size))
+        printed = norm_size(size)
+        t = norm_size((size_map or {}).get(printed, size))
+        notes = ["by the brand's size_map"] if t != printed else []
         for names in known:
             if t in names:
                 break
-            same = {n for n in names if size_alias(n) == size_alias(t)}
+            same = [n for n in names if size_alias(n) == size_alias(t)]
             if same:
-                t = same.pop() if len(same) == 1 else t
+                if len(same) == 1:
+                    t = same[0]
+                    notes.append(f"as on {names[t]}")
                 break
+        else:
+            group = {n: c for n, c in (quorum or {}).items() if size_alias(n) == size_alias(t)}
+            best = max((n for n in group if n != t), key=lambda n: group[n], default=None)
+            if best and group[best] >= least and group[best] >= share * sum(group.values()):
+                notes.append(f"as on {group[best]} of the brand's {sum(group.values())} live products with this size")
+                t = best
         out[t] = out.get(t, 0) + q
-    return out
+        if t != printed:
+            why[t] = f"printed '{printed}', named '{t}' " + "; ".join(notes)
+    return out, why
 
 
 def one_name_per_size(run, ordered):

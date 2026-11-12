@@ -71,7 +71,7 @@ IDENTITY_CHECK = "Order confirmation is for the brand picked (issuer and label)"
 # A fixed reader's problem that is not a layout change: the arithmetic gates, a discount and a number format the
 # reader will not guess. Every other problem (no confirmation found, a moved header, a quantity off its column)
 # gets the hint to read the OC with AI.
-NOT_LAYOUT = re.compile(r": sizes sum | != line value |: parsed |discount|: number format: ", re.I)
+NOT_LAYOUT = re.compile(r": sizes sum | != line value |: its lines add up to |discount|: number format: ", re.I)
 GATE_CHECK = "Order confirmation passes its gates (parsed = printed)"
 AI_HINT = ("If this is the right brand and its layout changed, tick 'Read the OC with AI' and build again "
            "(the box needs oc_supplier in the brand's config).")

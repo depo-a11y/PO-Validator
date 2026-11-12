@@ -257,6 +257,10 @@ def doc_label(d):
     return words[0] if words else None
 
 
+NOT_ADDING_UP = ("Unless a line above could not be read, the confirmation's own lines do not add up to its printed "
+                 "total: ask the brand for a corrected OC, or ask Colwyn")
+
+
 def gate_problems(docs):
     """Re-derive the three gates from parsed data. [] means every gate holds. Money is worded in the
     document's own currency."""
@@ -277,9 +281,11 @@ def gate_problems(docs):
         q = sum(sum(l["sizes"].values()) for l in d["lines"])
         v = sum(sum(l["sizes"].values()) * l["price"] for l in d["lines"])
         if q != d["total_qty"]:
-            problems.append(f"{d['doc']}: parsed {q} units, printed {d['total_qty']}")
+            problems.append(f"{d['doc']}: its lines add up to {q} units, but it prints a total of {d['total_qty']}. "
+                            f"{NOT_ADDING_UP}")
         if abs(v - d["net"]) > 0.02:
-            problems.append(f"{d['doc']}: parsed {cur.lstrip()}{v:,.2f}, printed net {d['net']:,.2f}")
+            problems.append(f"{d['doc']}: its lines add up to {cur.lstrip()}{v:,.2f}, but it prints a net total of "
+                            f"{cur.lstrip()}{d['net']:,.2f}. {NOT_ADDING_UP}")
     return problems
 
 

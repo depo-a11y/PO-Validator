@@ -13,6 +13,7 @@ import pytest
 import oc_synth
 from oc import service
 from oc.adapters import admilano, adidas, fog, otb
+from oc.brand import code_for
 from oc.util import join_key
 
 ADAPTERS = {"admilano": (admilano, oc_synth.admilano_pdf),
@@ -158,7 +159,7 @@ def test_admilano_document_discount_is_refused_not_spread(build):
     with pytest.raises(otb.GateError) as e:
         admilano.parse_checked(build("admilano", discount=100.0))
     assert any("document discount 100.00" in p for p in e.value.problems)
-    assert any("printed net 10,450.00" in p for p in e.value.problems)
+    assert any("prints a net total of EUR 10,450.00" in p for p in e.value.problems)
 
 
 def test_admilano_moved_table_header_is_refused(pdfs, monkeypatch):
@@ -286,7 +287,9 @@ def test_fog_reads_the_ss26_style_and_colour_cells(build, line, style, colour, c
     docs = fog.parse_checked(build("fog", lines=line, order_alone=True, fabric="Knit"))
     (l,) = lines(docs)
     assert (l["style"], l["colour"], l["colour_code"], l["colour_name"]) == (style, colour, code, name)
-    assert (l["fabric"], l["composition"]) == ("Knit", "100% COTTON")   # the fabric word stays out of the content
+    assert (l["fabric_name"], l["composition"]) == ("Knit", "100% COTTON")   # the fabric word stays out of the content
+    # a fog config with no join_key falls back to "{style}{fabric} {colour}": the fabric word must not reach it
+    assert l["fabric"] is None and code_for({}, l["style"], l["fabric"], l["colour"]) == f"{style} {colour or ''}".strip()
     assert docs[0]["doc"] == "SO9999999"   # not 558, the street number that follows ORDER # on its own row
 
 

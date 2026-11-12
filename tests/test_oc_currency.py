@@ -179,11 +179,12 @@ def test_finalize_words_and_formats_the_delivery_file_in_the_brand_currency(tmp_
 def test_the_gates_word_money_in_the_documents_currency():
     d = _usd_docs()
     d[0]["net"] = 1201.0
-    assert otb.gate_problems(d) == ["SS - 1: parsed USD 1,200.00, printed net 1,201.00"]
+    tail = f". {otb.NOT_ADDING_UP}"
+    assert otb.gate_problems(d) == ["SS - 1: its lines add up to USD 1,200.00, but it prints a net total of USD 1,201.00" + tail]
     d[0]["currency"] = None
-    assert otb.gate_problems(d) == ["SS - 1: parsed 1,200.00, printed net 1,201.00"]
+    assert otb.gate_problems(d) == ["SS - 1: its lines add up to 1,200.00, but it prints a net total of 1,201.00" + tail]
     d[0]["currency"] = "European Euro"
-    assert otb.gate_problems(d) == ["SS - 1: parsed EUR 1,200.00, printed net 1,201.00"]
+    assert otb.gate_problems(d) == ["SS - 1: its lines add up to EUR 1,200.00, but it prints a net total of EUR 1,201.00" + tail]
 
 
 # ---- title_tag and body_html ------------------------------------------------------------------

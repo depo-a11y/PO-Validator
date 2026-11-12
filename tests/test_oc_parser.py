@@ -32,7 +32,7 @@ def test_perturbed_size_quantity_fails():
     d[0]["lines"][0]["sizes"]["42"] += 1
     probs = otb.gate_problems(d)
     assert any("sizes sum 4 != Tot. Qty 3" in p for p in probs)
-    assert any("parsed 8 units, printed 7" in p for p in probs)
+    assert any("its lines add up to 8 units, but it prints a total of 7" in p for p in probs)
 
 
 def test_perturbed_price_fails():
@@ -55,10 +55,11 @@ def test_each_gate_fires_alone():
     # gate 3 only: printed document totals wrong
     d = _docs()
     d[0]["total_qty"] = 8
-    assert otb.gate_problems(d) == ["SS - 1: parsed 7 units, printed 8"]
+    assert otb.gate_problems(d) == [f"SS - 1: its lines add up to 7 units, but it prints a total of 8. {otb.NOT_ADDING_UP}"]
+    assert otb.NOT_ADDING_UP.endswith("ask the brand for a corrected OC, or ask Colwyn")
     d = _docs()
     d[0]["net"] = 1851.0
-    assert len(otb.gate_problems(d)) == 1 and "printed net 1,851.00" in otb.gate_problems(d)[0]
+    assert len(otb.gate_problems(d)) == 1 and "but it prints a net total of 1,851.00" in otb.gate_problems(d)[0]
 
 
 def test_missing_printed_totals_fails():
