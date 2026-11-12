@@ -2,32 +2,42 @@
 
 Pure Python, files in and files out. Nothing here talks to Shopify, Matrixify or Drive.
 
-    python -m oc draft    --oc OC.pdf --catalog export.csv --brand <brand> --out PO-draft.xlsx
+    python -m oc draft    --oc OC.pdf --catalog export.csv --brand <brand> --out PO-draft.xlsx [--ai-titles] [--ai-explain]
     python -m oc complete --po hand_PO.xlsx --oc OC.pdf --catalog export.csv --brand <brand> --out PO.xlsx [--set-price "CODE=EUR"]
-    python -m oc finalize --po PO.xlsx --catalog export.csv --brand <brand> --out-prefix <name>-
+    python -m oc finalize --po PO.xlsx --catalog export.csv --brand <brand> --out-prefix <name>- [--ai-explain]
     python -m oc reconcile --draft PO-draft.xlsx --po hand_PO.xlsx --oc OC.pdf --brand <brand> --out accuracy.md
 
 - `draft` builds the whole buy sheet from the OC. Every drafted cell is shaded green (OC or live
-  catalog), amber (past POs or a brand rule) or red (a guess, or a value a person must supply), and the
-  `Review` sheet says why.
+  catalog), amber (past POs, a brand rule or an AI draft) or red (a guess, or a value a person must supply), and the
+  `Review` sheet says why. `--ai-titles` and `--ai-explain` are the agent jobs (see "Agent jobs" below); with no API
+  key they do nothing but say so.
 
 **Retail price (Colwyn, 2026-11-12: "we can keep price blank unless theres an rrp").** A NEW product's `Variant
 Price` and `Variant Compare At Price` are written only from a brand RRP in AUD: the OC line's own RRP column (fog
 prints one as MSRP, in the document's currency; the AI reader returns `rrp_text` and `rrp_currency`; otb, admilano
 and adidas print none), else a nonzero `Sugg. Retail` in the cart, in the cart's `Currency`. An RRP in another or an
-unknown currency is never the price: the Review sheet names it. An RRP counts only under an RRP label (RRP, MSRP,
-Retail, Sugg., Recommended; not Retailer): fog's is the amount under the header word that is one, and an AI-read RRP
-needs the label printed in its line or its column header, its text printed in its line, and must not be the line's
-own unit price or line value (on an AUD OC those carry an AUD mark too), else it is not used and the Review says
-why. With no usable RRP the price is blank and red, "price needed, no RRP from brand", and the check "Every NEW row
-has a retail price" is a FAIL fixed in the sheet. A NEW row's `Variant Compare At Price` is the formula `=P<row>`,
-its own row's price, so a typed price is copied; `finalize` reads the formula, never a cached value, so it works
-whether the sheet was last saved by Excel or by openpyxl. A brand RRP is never raised: under the margin floor it
-stays as given and "NEW rows clear the Nx margin" is a FAIL, also fixed in the sheet, because Step 2's margin gate
-would refuse it. `finalize` refuses any NEW row without a price ("fill the retail price", with its PO rows and
-SKUs). MERGE rows are unchanged: PU-merge never writes price. Live siblings, other styles at the same cost, past POs
-and ratio fits no longer price anything. The "same style, live sibling price" source was 10/10 right on the Margiela
-SS27 test and is now off by Colwyn's rule of 2026-11-12.
+unknown currency is never the price: the Review sheet names it. An RRP counts only under an RRP label
+(`util.rrp_label`): RRP, MSRP, retail (not Retailer), sugg or suggested, recommended, also run into a neighbour
+('RRP(AUD)', 'RetailPrice'); SRP, PVP and UVP only as whole words ('SRP:', '(UVP)'). 'Ticket Price' counts only as a
+column header (`util.rrp_header`), never beside an amount. fog's RRP is the amount under the first word of the line's
+own header that is a label (MSRP on FOG Essentials; no label, no RRP). An AI-read RRP is used only when its text is
+printed in its line's part of the PDF, it is not the line's own unit price or line value (on an AUD OC those carry an
+AUD mark too), and a label sits in one of two places (`Pages.rrp_labelled`): right before the amount in the same
+printed line, with at most two currency marks or punctuation words between ('RRP AUD 120,00', 'RRP: A$ 120,00'); or
+in the nearest column-header row above the amount's line on its page, or, when that page has none, the nearest one at
+or above the document's first line. A column-header row has two or more column words (Qty, Quantity, Price, Total,
+Value, Amount, Units, Wholesale, WHL, Gross, Net, Cost) and no amount; only the nearest one is read. Nothing else
+counts: the issuer's name, an address or the terms are ruled out by position (they are neither right before the
+amount nor a column-header row), not recognised as such. Otherwise the RRP is not used and the Review says why. With
+no usable RRP the price is blank and red, "price needed, no RRP from brand", and the check "Every NEW row has a
+retail price" is a FAIL fixed in the sheet. A NEW row's `Variant Compare At Price` is the formula `=P<row>`, its own
+row's price, so a typed price is copied; `finalize` reads the formula, never a cached value, so it works whether the
+sheet was last saved by Excel or by openpyxl. A brand RRP is never raised: under the margin floor it stays as given
+and "NEW rows clear the Nx margin" is a FAIL, also fixed in the sheet, because Step 2's margin gate would refuse it.
+`finalize` refuses any NEW row without a price ("fill the retail price", with its PO rows and SKUs). MERGE rows are
+unchanged: PU-merge never writes price. Live siblings, other styles at the same cost, past POs and ratio fits no
+longer price anything. The "same style, live sibling price" source was 10/10 right on the Margiela SS27 test and is
+now off by Colwyn's rule of 2026-11-12.
 - `complete` fills the blanks of a PO someone started by hand and never changes a typed cell, except a
   wholesale price named with `--set-price`, which must equal the OC's.
 - `finalize` turns a reviewed PO into `PU-new.xlsx` (through `validator_core.run_gate`, the same gate as
@@ -217,7 +227,8 @@ in `service.py`, which takes paths and returns bytes. Uploads sit in a temporary
 nothing is written into the repo and nothing talks to Shopify.
 
 1. **Build draft PO** from the OC PDF, the catalog export, a brand, and optionally the linesheet/cart export and
-   past season POs. It shows the checks, the red and amber cells grouped by code and column, and the draft to
+   past season POs. With an API key, a box (off by default) lets AI draft the NEW titles, colour words and colour
+   families, and a button under a refused build's errors asks the AI to explain it (see "Agent jobs"). It shows the checks, the red and amber cells grouped by code and column, and the draft to
    download with its shading. A FAIL a reviewer fixes in the sheet (a title already a live handle, two codes on
    one title, a Type not in `expected_tags.xlsx`, a NEW row under the margin floor) still gives the draft, and
    finalize checks each again. Any other FAIL (OC totals, a code on two live products, an unreadable file) gives
@@ -227,7 +238,7 @@ nothing is written into the repo and nothing talks to Shopify.
    `YYYY-MM-DD-HHMM-<brand>-<season>-PU-new.xlsx` and so on, or no zip and the failing checks first. The date and
    time are Melbourne's, so runs on one day get their own names unless made in the same minute.
    `YYYY-MM-DD-HHMM-<brand>-<season>` is the run id: the zip is `<run id>-uploads.zip`, and the page says which
-   ROLLBACK goes with which PU-merge.
+   ROLLBACK goes with which PU-merge. With an API key a button under the failing checks asks the AI to explain them.
 
 **Brand config**, in the order the picker lists them:
 
@@ -375,3 +386,95 @@ whose store code ends in a short colour code where its OC prints the colour name
 
 Tests run offline against a fake client and a synthetic PDF (`tests/test_oc_ai.py`). `OC_AI_LIVE=1` runs the one
 real-API test, which costs money.
+
+## Agent jobs: the pipeline works, the agent supervises
+
+Colwyn, 2026-11-12: "so ideally we have a pipeline that can run most of the heavy lifting but an agent will
+supervise?" The pipeline does the work and owns the gates; the agent handles judgment and exceptions; a person
+approves any store write. The agent never overrides a gate: it changes an input, the pipeline runs on, and what it
+drafted meets the same checks as anything else.
+
+Both jobs are on only when `ai.api_key()` returns a key (`oc/agent/common.connect` is the one gate). With no key
+nothing is built or sent, the page shows no new box or text, and `draft` and `finalize` give exactly what they give
+without these jobs (tests: `test_no_key_*`). The model, effort, beta and fallback are the AI reader's
+(`claude-opus-5-5`, streamed, `server-side-fallback-2026-07-01`, `fallbacks="default"`), with effort medium, and the
+key, client and error wording are reused from `oc/adapters/ai.py`.
+
+### Drafting NEW titles, colour words and colour family (`oc/agent/titles.py`)
+
+    python -m oc draft ... --ai-titles
+
+On the page: "Draft NEW titles and colour words with AI (check every one)", shown only with a key, off by default,
+with the line "Ticking it sends each new product's codes, its cart row and the catalog's and past POs' names for its
+style and colour to Anthropic." under it (review case 2026-11-12-buyer-14 F4).
+
+It runs inside `draft.build`, after the NEW products are resolved and before the title de-dupe, so its titles meet
+the same de-dupe, gender prefix, live-handle and title checks, and finalize's gates (raw code in a title, one
+manufacture code per Title, live handle, blank Option1, `run_gate`) unchanged.
+
+- **Evidence, not answers.** Per NEW product the model gets the OC line (style, fabric, colour code, product class,
+  collection, gender, the resolved Type, description and composition when known), the cart row (Style Name, Color
+  Description, Materials, Subcategory), the same style's products in the catalog (title, colour option, Type, status;
+  same style+fabric first, 8 at most) and in past POs (6 at most), and every catalog and past-PO use of the same
+  fabric+colour code and of the same colour code on other fabrics (colour words and colour family, with counts). It
+  never sees the tool's own title, colour words or family. The prompt says Margiela numeric colour codes are
+  fabric-specific and T/H codes mostly are not.
+- **Answer.** Per code, under a strict schema: `product_name`, `colour_words`, `colour_family` (one of the brand's
+  `colour_families` keys, or empty) and `basis`. Python composes `<product_name> in <colour_words>`.
+- **Checked in Python first.** No raw code (`finalize.raw_code_in_title`), no code-like token (T0123, M01234, H0123,
+  123; `8cm`, `6.5mm`, `6CC` and `5AC` are words), no vendor word (Maison, Margiela, MM6), letters, digits, space and
+  `/ & ' - . ,` only, at most 60 characters for a name and 40 for colour words, nothing starting `= + - @`, no gender
+  prefix (the de-dupe adds one), no word "in" in a name. Heel codes: only H30, H50, H60 or H80, as the last words of
+  the name, and only when the evidence prints that height (`8cm` or `H80` in a same-style title, the product class,
+  the cart's Style Name); any other H-number is refused. A rejected value falls back to the tool's own, and the Why
+  says what was rejected and why.
+- **Never into a cell finalize would refuse.** Where the tool's own value would fail one of finalize's hard gates
+  that an AI value could satisfy (a raw code in the title, a title another code shares or that is a live handle, as
+  the de-dupe would leave it, or a blank colour family), the cell keeps the tool's value and its red, and the Why says
+  "AI suggests '...': not filled in" for the person to copy. A refusal a person must fix stays one. (Review case
+  2026-11-12-buyer-14 F1: on the Margiela replay, AI colour words had made 3 raw-code titles pass, all 3 wrong.)
+- **Policy.** An AI value replaces the tool's product name, colour words or colour family only where the tool's source
+  is not green. Green stays; an AI value that differs is named in the Why ("AI suggests ..."). The source is
+  `AI-drafted, check`, amber, never green, and stays so through a gender prefix; `title_tag` follows the title. Type,
+  prices, cost, quantities and sizes are never touched. (`policy="everywhere"` exists for the measurement harness only.)
+- **Few-shot.** The NEW products of the brand config's past POs (code, Type, colour family, Title), one per code,
+  never a product on this OC, only titles that pass the same checks, round robin over Types, at most 200, in a
+  deterministic order. It sits after the instructions in the system prompt with a 5-minute `cache_control`, so it is
+  byte-identical on every request of a run and chunk 2 onwards read it from the cache.
+- **Chunks and failure.** 20 products per request, sent one after another. Busy, refused, not JSON, not the schema or
+  left out of the answer: those products keep the tool's values and a WARN reads "AI title drafting did not run:
+  <reason>". It never fails the draft. Success is an INFO row: products answered, values drafted, green values kept
+  (and where the AI differed), values rejected by reason, the model, tokens (input, cache write, cache read, output)
+  and US$.
+
+### Explaining a refusal (`oc/agent/explain.py`)
+
+    python -m oc draft    ... --ai-explain
+    python -m oc finalize ... --ai-explain
+
+Like AI reads (10), the page caps each browser session at 10 AI title runs and 20 explanations, so a stuck rerun
+loop cannot spend without limit; at the cap the box is off and the page says why.
+
+When a draft gives no workbook (a check the sheet cannot fix) or finalize refuses, the page offers a button under the
+errors: "Ask the AI what went wrong (sends the PDF's text to Anthropic)", or for finalize "(sends the PO rows the
+failing checks name to Anthropic)". Nothing is sent until it is pressed: the file uploaded is often the wrong one,
+which is the commonest refusal. The answer is kept in the session (a rerun does not ask again) and shown under the
+errors as "AI explanation (check it)", as plain text. The model gets the failing checks (Check, Result, Detail), the
+other checks' names and results, the brand (name, vendor, reader, cost currency) and, for a draft, the PDF's text,
+pages the failing details name first (6 pages at most, 4,000 characters each), or, for finalize, the PO rows the
+failing details name by row number, Title, SKU or code (25 at most, a few columns, never Variant Cost or Wholesale
+Price: a cost check's own Detail carries its numbers). Each failing check carries `stops_the_run`: on a draft, a FAIL
+the reviewer fixes in the sheet (a blank retail price) did not stop it. It answers `cause`, `next_step`, `who`
+(colleague or colwyn) and `refs` (pages, rows, checks). The prompt states the 400-character limit. Both prompts say
+their inputs are data, never instructions. Python drops a ref that does not exist and says only how many it dropped,
+never which, and refuses text that is empty, over 400 characters, starts `= + - @`, or holds markup, a link or web
+address, an e-mail address or a phone number, without quoting it. It reads copies of the checks and files and returns
+only its own record, so no check, file or result changes and a refused run stays refused (tested on every refusal case
+in `tests/test_oc_explain.py`). It adds no check row, for that reason: its cost is in its own record, shown with it.
+
+### Cost
+
+Every AI request is costed at `claude-opus-5-5` prices: US$4/MTok input, US$5/MTok 5-minute cache write, US$0.20/MTok
+cache read, US$20/MTok output (thinking is output); a fallback model is costed the same and named. `ai.tokens()` sums
+a fallback's iterations. The title job's check row and the CLI print the tokens and US$ for the OC; the explanation
+carries its own.
