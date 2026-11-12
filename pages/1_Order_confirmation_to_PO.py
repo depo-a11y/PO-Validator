@@ -20,6 +20,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from oc import brand as brandm, catalog as catm, service  # noqa: E402
+from oc.agent import explain as explainm  # noqa: E402
 from oc.cartorder import REFUSED_CHECK  # noqa: E402
 
 st.set_page_config(page_title="Order confirmation to PO", layout="wide")
@@ -52,6 +53,23 @@ AI_CAP = 10
 CAP_MSG = (f"This browser session has used its {AI_CAP} AI reads. Each one is paid for; ask Colwyn if you need "
            "more.")
 NO_SUPPLIER = "The AI reader is off for this brand: ask Colwyn to add oc_supplier to this brand's config."
+TITLES_BOX = "Draft NEW titles and colour words with AI (check every one)"
+TITLES_HELP = ("AI drafts each new product's name, colour words and colour family from the catalog, the cart and past "
+               "POs. It replaces only values the tool could not take from the live catalog (red or amber), and every "
+               "value it drafts is amber in the draft: check each one. A red cell Step 2 would refuse (a code in a "
+               "title, a blank colour family) stays red, with the AI's suggestion in the Review sheet. It never "
+               "touches Type, prices, quantities or sizes. It costs cents to about a dollar per order confirmation.")
+TITLES_SENDS = ("Ticking it sends each new product's codes, its cart row and the catalog's and past POs' names for its "
+                "style and colour to Anthropic.")
+EXPLAIN_DRAFT_BUTTON = "Ask the AI what went wrong (sends the PDF's text to Anthropic)"
+EXPLAIN_FINAL_BUTTON = "Ask the AI what went wrong (sends the PO rows the failing checks name to Anthropic)"
+EXPLAIN_HEAD = "AI explanation (check it)"
+# Per browser session, like AI_CAP for the AI reader, so a stuck rerun loop cannot spend without limit.
+TITLES_CAP, EXPLAIN_CAP = 10, 20
+TITLES_CAP_MSG = (f"AI title drafting is off: this browser session has used its {TITLES_CAP} AI title drafts. Each "
+                  "one is paid for; ask Colwyn if you need more.")
+EXPLAIN_CAP_MSG = (f"No AI explanation: this browser session has used its {EXPLAIN_CAP} AI explanations. Each one is "
+                   "paid for; ask Colwyn if you need more.")
 S = st.session_state
 
 
@@ -118,6 +136,38 @@ def checks_table(checks):
 def show_fails(checks):
     for c in service.fails(checks):
         st.error(f"**{c['Check']}**: {c['Detail']}")
+
+
+def explain_or_note(explain, path, checks):
+    """(the AI explanation of a refusal | None, a note | None), within this session's EXPLAIN_CAP."""
+    if S.get("ai_explains", 0) >= EXPLAIN_CAP:
+        return None, EXPLAIN_CAP_MSG
+    e = explain(path, checks, cfg)
+    if e is not None:
+        S["ai_explains"] = S.get("ai_explains", 0) + 1
+    return e, None
+
+
+def offer_explanation(record, key, label, explain, filename, data_key):
+    """Under a refusal, with a key: a button that asks the AI once (within the session cap) and keeps the answer.
+    Never automatic: what is sent is whatever file was uploaded, which is often the wrong one. A draft from a
+    spreadsheet OC or from the cart alone has no PDF to send, so it offers none."""
+    if not agent or record.get("explain") or record.get("explain_note") or record.get(data_key) is None:
+        return
+    if st.button(label, key=key):
+        with tempfile.TemporaryDirectory(prefix="oc-explain-") as tmp:
+            path = save(tmp, filename, record[data_key])
+            record["explain"], record["explain_note"] = explain_or_note(explain, path, record["checks"])
+
+
+def show_explanation(e, note=None):
+    """The AI's explanation of a refusal, as plain text: never markdown, never a link."""
+    if note:
+        st.caption(note)
+    if e is None:
+        return
+    st.markdown(f"**{EXPLAIN_HEAD}**")
+    st.text(explainm.as_text(e))
 
 
 def rows_label(rows):
@@ -248,6 +298,15 @@ elif cfg and not is_sheet:   # the AI reader reads PDFs; a sheet brand's OC is a
         st.caption(CAP_MSG)
     use_ai = use_ai and bool(cfg.get("oc_supplier")) and not capped
 blocked = bool(cfg) and cfg["adapter"] == "ai" and capped
+agent = service.agent_ready()
+titles_capped = S.get("ai_title_runs", 0) >= TITLES_CAP
+ai_titles = bool(cfg) and agent and st.checkbox(TITLES_BOX, value=False, key="w_ai_titles", help=TITLES_HELP,
+                                                disabled=titles_capped)
+if cfg and agent:
+    st.caption(TITLES_SENDS)
+if cfg and agent and titles_capped:
+    st.caption(TITLES_CAP_MSG)
+ai_titles = ai_titles and not titles_capped
 
 need = [n for n, ok in (("a brand", cfg), ("the catalog export", S.get("catalog")),
                         ("the order confirmation (or, before it arrives, the cart)", oc_up or cart_up)) if not ok]
@@ -267,11 +326,16 @@ if build:
                     save(tmp, "catalog.csv", S["catalog"][1]), cfg,
                     cart_path=save(tmp, "cart.xlsx", cart_up.getvalue()) if cart_up else None,
                     history_paths=hist_paths or None, reader="ai" if use_ai else None,
-                    prior_path=save(tmp, "prior.xlsx", prior_up.getvalue()) if prior_up and oc_up else None)
+                    prior_path=save(tmp, "prior.xlsx", prior_up.getvalue()) if prior_up and oc_up else None,
+                    ai_titles=ai_titles)
             if service.ai_read_sent(checks):
                 S["ai_reads"] = S.get("ai_reads", 0) + 1
+            if service.titles_ran(checks):
+                S["ai_title_runs"] = S.get("ai_title_runs", 0) + 1
             S["draft"] = dict(po=po, review=review, checks=checks, file=service.draft_file(cfg, checks),
-                              made_from=f"{(oc_up or cart_up).name} and {S['catalog'][0]}, brand config {cfg['_path']}")
+                              made_from=f"{(oc_up or cart_up).name} and {S['catalog'][0]}, brand config {cfg['_path']}",
+                              oc_pdf=oc_up.getvalue() if po is None and oc_up and not is_sheet else None,
+                              explain=None, explain_note=None)
         except Exception as e:
             st.error("Something went wrong building the draft. Send Colwyn the message below.")
             st.exception(e)
@@ -287,6 +351,8 @@ if S.get("draft"):
                  "would not fix them. Check you picked the right brand and files. If you did, send Colwyn "
                  "the checks below.")
         show_fails(d["checks"])
+        offer_explanation(d, "w_explain_draft", EXPLAIN_DRAFT_BUTTON, service.explain_draft, "oc.pdf", "oc_pdf")
+        show_explanation(d.get("explain"), d.get("explain_note"))
     else:
         red_df, amber_df, rule_df = review_groups(d["review"])
         n_red, n_amber = len(red_df), len(amber_df)
@@ -339,7 +405,8 @@ if st.button("Make upload files", type="primary", disabled=bool(need2)):
                 prefix = service.run_prefix(po_path, cfg, when)
             S["final"] = dict(zip=zbytes, checks=checks, errors=errors, file=service.zip_name(prefix),
                               run=prefix.rstrip("-"),
-                              made_from=f"{po_up.name} and {S['catalog'][0]}, brand config {cfg['_path']}")
+                              made_from=f"{po_up.name} and {S['catalog'][0]}, brand config {cfg['_path']}",
+                              po_xlsx=po_up.getvalue() if zbytes is None else None, explain=None, explain_note=None)
         except Exception as e:
             st.error("Something went wrong making the files. Send Colwyn the message below.")
             st.exception(e)
@@ -351,6 +418,8 @@ if S.get("final"):
         st.error(f"No files were made: {len(service.fails(f['checks']))} check(s) failed. Fix these in the PO, "
                  "save it and upload it again.")
         show_fails(f["checks"])
+        offer_explanation(f, "w_explain_final", EXPLAIN_FINAL_BUTTON, service.explain_finalize, "po.xlsx", "po_xlsx")
+        show_explanation(f.get("explain"), f.get("explain_note"))
         if not f["errors"].empty:
             st.write("Rows the po-validator gate rejected. Row numbers are rows of PU-new, which holds only the PO's "
                      "NEW rows, so find them by SKU.")
