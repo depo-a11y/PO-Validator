@@ -403,3 +403,203 @@ def otb_pdf(path, fmt="eu", odd=None, dates=OTB_DATES, lines=OTB_LINES):
     p.text(40.0, top + 32, f"Total gross value {otb_amount(value, fmt)}")
     p.text(40.0, top + 44, f"Total net value {otb_amount(value, fmt)}")
     return write(path, [p])
+
+
+# ---- JOOR order print -------------------------------------------------------
+JOOR_ORIGIN, JOOR_PITCH, JOOR_QTY = 314.0, 20.0, 427.0   # every style's size grid starts at the same x
+JOOR_STYLES = [  # name, code, collection, price, RRP, attribute rows, sizes, colours [(colour text lines, qtys)]
+    dict(name="TEST JACKET", code="ZZ-A1", coll="TEST MAIN", price=100.13, rrp="EUR 250.41",
+         attrs=["Silhouette: JACKET", "Country of Origin: TESTLAND"], sizes=["XS", "S", "M", "L", "XL"],
+         colours=[(["BLACK Z01"], [0, 1, 2, 1, 0]), (["WHITE Z02"], [1, 1, 0, 0, 0])]),
+    dict(name="TEST TROUSER", code="ZZ-A2", coll="TEST MAIN (2099_TEST)", price=50.17, rrp="EUR 125.43", attrs=[],
+         sizes=["44", "46", "48", "50", "52"], colours=[(["ZZA NOIR ZZA"], [0, 0, 2, 1, 0])], fuse=True),
+    dict(name="TEST SCARF", code="ZZ-A3", coll="TEST ACC", price=75.19, rrp="AUD 850.47", attrs=[],
+         sizes=["One Size"], colours=[(["Z9Z99-Pearl", "Grey Z9Z99"], [2]), (["CHARCOAL"], [1])],
+         wrap_amount=True, comment="01/02/2099 Test comment"),
+    dict(name="TEST BALLERINA", code="ZZ-A4", coll="TEST SHOES", price=200.23, rrp="EUR 0.00", attrs=[],
+         sizes=["35", "35.5", "36", "36.5", "37"], colours=[(["BRUN Z73"], [0, 0, 2, 0, 1])], wide=True),
+    dict(name="TEST POLO", code="ZZ-A5", price=30.29, rrp="EUR 70.49", attrs=[],
+         coll="TEST APPAREL - A LONG COLLECTION NAME THAT RUNS PAST THE WHOLESALE COLUMN",
+         sizes=["XS", "S", "M", "L", "XL"], colours=[(["9Z999-Black 9Z999"], [0, 1, 1, 0, 0])]),
+]
+JOOR_CANCELLED = dict(name="TEST LOAFER", code="ZZ-A9", coll="TEST SHOES", price=40.11, rrp="EUR 90.37", attrs=[],
+                      sizes=["36", "37"], colours=[(["BLACK Z99"], [1, 1])])
+JOOR_SECOND = dict(name="TEST SHIRT", code="ZZ-A10", coll="TEST MAIN", price=10.31, rrp="AUD 30.53", attrs=[],
+                   sizes=["S", "M", "L"], colours=[(["NAVY Z76N"], [1, 2, 1])])
+
+
+def _joor_head(p, k, n, status, po, email):
+    p.text(498.3, 28.6, f"Page {k} of {n}")
+    p.text(55.0, 36.9, "Z0000")
+    p.right(539.9, 36.9, status)
+    p.right(539.8, 45.7, po, 7)
+    p.right(539.8 - width(po, 7) - 5, 45.7, "PO#:")
+    p.text(55.0, 46.1, "TEST RETAILER", 9)
+    for x, s in ((55.0, "Order Information"), (176.0, "Brand Information"), (297.0, "Shipping Information"),
+                 (419.0, "Billing Information")):
+        p.text(x, 65.5, s, 7)
+    for k2, (order, brand, ship) in enumerate((("Created: 01/02/2099", "Contact: Test Person", "TEST BUYER"),
+                                               ("Start Ship: 02/03/2099", None, "TEST RETAILER"),
+                                               ("Complete Ship: 03/04/2099", None, "1 Test Street"),
+                                               ("Terms: TEST TERMS", None, "Testville"))):
+        top = 73.4 + 7 * k2
+        p.text(55.0, top, order)
+        if brand:
+            p.text(176.0, top, brand)
+        p.text(297.0, top, ship)
+        p.text(419.0, top, ship)
+    p.right(296.6, 80.4, email)   # ends 0.4pt short of the Shipping column, so the text layer runs it into "TEST..."
+
+
+def _joor_style(p, top, st, f, n):
+    """Draw one style block from `top`; returns the top of the next block."""
+    def fault(key, c=None):
+        v = f.get(key)
+        return v[-1] if v and v[:-1] == ((n, c) if c is not None else (n,)) else 0
+    p.text(57.0, top, st["name"], 7)
+    s = top + 12.7
+    head = f"Style #{st['code']} | {st['coll']}"
+    p.text(57.0, s, head)
+    w = s + 7 if len(st["coll"]) > 40 else s
+    cur, rrp = f.get("price_cur", (None, "EUR"))[1] if f.get("price_cur", (None,))[0] == n else "EUR", st["rrp"].split()
+    price = 0.01 if f.get("placeholder") == n else st["price"]
+    for x, t in ((57.0 + width(head, p.size) + 0.3 if st.get("fuse") else 373.0, "Wholesale:"), (409.8, cur),
+                 (426.8, f"{price:,.2f}"), (458.5, "Sugg."), (478.6, "Retail:"), (501.2, rrp[0]), (518.2, rrp[1])):
+        p.text(x, w, t)
+    y = w
+    for a in st["attrs"]:
+        y += 12.0
+        p.text(57.0, y, a)
+    h = y + 17.0
+    xs = [JOOR_ORIGIN + JOOR_PITCH * k for k in range(len(st["sizes"]))]
+    if st.get("wide"):
+        p.text(232.1, h, "Colors")
+        p.text(374.7, h, "Units")
+        p.text(522.1, h, "Total")
+    else:
+        p.text(147.0, h, "Colors")
+        p.text(502.1, h, "Total")
+        for x, sz in zip(xs, st["sizes"]):
+            if " " in sz:
+                a, b = sz.split()
+                p.centre(x, h - 3, a)
+                p.centre(x, h + 4, b)
+            else:
+                p.centre(x, h + 4, sz)
+        p.centre(JOOR_QTY, h + 4, "Qty")
+    r = h + 22.0
+    for c, (lines, qtys) in enumerate(st["colours"]):
+        qty, value = sum(qtys), sum(qtys) * st["price"]
+        for k, line in enumerate(lines):
+            p.text(201.0 if st.get("wide") else 183.0, r + 7 * k, line)
+        amount = f"{value + fault('value_off', c):,.2f}"
+        if st.get("wide"):
+            p.right(390.8, r, str(qty + fault("qty_off", c)))
+            p.text(495.0, r, "EUR")
+            p.right(538.0, r, amount)
+            sx = [219.0 + 17.0 * k for k in range(len(st["sizes"]))]
+            p.text(159.0, r + 28, "Sizes")
+            if not f.get("no_qty_row"):
+                p.text(159.0, r + 53, "Qty")
+            for k, (x, sz, q) in enumerate(zip(sx, st["sizes"], qtys)):
+                p.centre(x, r + 28, sz)
+                if q and not f.get("no_qty_row"):
+                    dx = f["shift"][3] if f.get("shift", (None,) * 4)[:3] == (n, c, k) else 0
+                    p.centre(x + dx, r + 53, str(q))
+            r += 82.0
+            continue
+        for k, (x, q) in enumerate(zip(xs, qtys)):
+            if q:
+                dx = f["shift"][3] if f.get("shift", (None,) * 4)[:3] == (n, c, k) else 0
+                p.centre(x + dx, r, str(q))
+            if f.get("extra_qty") == (n, c, k):
+                p.centre(x, r + 7, "1")
+        p.centre(JOOR_QTY, r, str(qty + fault("qty_off", c)))
+        acur = f["amount_cur"][2] if f.get("amount_cur", (None,) * 3)[:2] == (n, c) else "EUR"
+        if st.get("wrap_amount"):
+            p.right(518.0, r - 3, acur)
+            p.right(518.0, r + 4, amount)
+        else:
+            p.text(480.6, r, acur)
+            p.right(518.0, r, amount)
+        r += 29.0
+    if len(st["colours"]) > 1:
+        r -= 6.0
+        tot = [sum(q[k] for _, q in st["colours"]) for k in range(len(st["sizes"]))]
+        tot[0] += fault("subtotal_off")
+        for x, q in zip(xs, tot):
+            p.centre(x, r, str(q))
+        p.centre(JOOR_QTY, r, str(sum(sum(q) for _, q in st["colours"])))
+        p.text(449.0, r, "Total")
+        p.right(517.8, r - 3, "EUR")
+        p.right(517.8, r + 4, f"{sum(sum(q) for _, q in st['colours']) * st['price']:,.2f}")
+        r += 23.0
+    if st.get("comment"):
+        p.text(163.0, r, "Comment", 7)
+        p.text(163.0, r + 9.7, st["comment"])
+        r += 25.0
+    return r + 30.0
+
+
+def _joor_totals(p, top, units, value, grand):
+    p.text(57.0, top, "Order Comments:", 7)
+    p.text(346.0, top + 0.4, "Total Quantity:", 9)
+    p.right(537.6, top + 0.4, str(units), 9)
+    for k, (label, v) in enumerate((("Subtotal:", value), ("Grand Total:", grand))):
+        p.text(346.0, top + 10.4 + 10 * k, label, 9)
+        p.text(467.0, top + 10.4 + 10 * k, "EUR", 9)
+        p.right(537.7, top + 10.4 + 10 * k, f"{v:,.2f}", 9)
+
+
+def joor_pdf(path, styles=JOOR_STYLES, status="Pending", email="contact.person@brand.test", drop_page=None,
+             foreign=False, twice=False, after_total=False, **fault):
+    """Two orders. 99000001 (Pending): styles 1-3 on page 1, 4-5 and the totals on page 2, a cancelled style and
+    the terms on page 3. 99000002 (Approved, PO# printed "ZZ9 - 99000002"): one style on page 4.
+
+    Style 2's sizes (44..52) sit at the x of style 1's XS..XL; style 3 has a one-size header wrapped over two rows,
+    a colour name wrapped over two rows and its amount over two; style 4 prints Sizes and Qty rows; style 5's
+    Wholesale wraps onto a second row; style 2's collection runs into "Wholesale:" with no gap. fault:
+    shift=(style, colour, size, dx), qty_off/value_off=(style, colour, d), subtotal_off=(style, d), units_off,
+    value_off_doc, grand_off, price_cur=(style, cur), amount_cur=(style, colour, cur), no_qty_row (style 4),
+    extra_qty=(style, colour, size): a second quantity under that size one row down, status_p2,
+    placeholder=style: that style's wholesale printed as 0.01 (its amounts unchanged)."""
+    def page():
+        return Page(595, 842, size=6)
+    p1, p2, p3, p4 = page(), page(), page(), page()
+    for k, p in enumerate((p1, p2, p3), 1):
+        _joor_head(p, k, 3, fault.get("status_p2", status) if k == 2 else status, "99000001", email)
+    _joor_head(p4, 1, 1, "Approved", "ZZ9 - 99000002", email)
+    top = 149.7
+    for n, st in enumerate(styles[:3]):
+        top = _joor_style(p1, top, st, fault, n)
+    top = 149.7
+    for n, st in enumerate(styles[3:], 3):
+        top = _joor_style(p2, top, st, fault, n)
+    units = sum(sum(q) for st in styles for _, q in st["colours"])
+    value = sum(sum(q) * st["price"] for st in styles for _, q in st["colours"])
+    units += fault.get("units_off", 0)
+    value += fault.get("value_off_doc", 0)
+    _joor_totals(p2, top, units, value, value + fault.get("grand_off", 0))
+    if after_total:
+        _joor_style(p2, top + 50, JOOR_CANCELLED, {}, 99)
+    p3.text(57.0, 149.7, "Cancelled Styles:", 7)
+    top = _joor_style(p3, 166.7, JOOR_CANCELLED, {}, 99)
+    p3.text(346.0, top, "Cancelled Styles:")
+    p3.text(346.0, top + 7, "Total Quantity:")
+    p3.right(539.5, top + 7, "2")
+    p3.text(346.0, top + 14, "Total:")
+    p3.right(539.6, top + 14, "EUR 80.22")
+    p3.text(57.0, top + 40, "Terms and Conditions")
+    p3.text(57.0, top + 48, "GENERAL TERMS AND CONDITIONS OF SALE: THE TEST COMPANY SELLS TEST GOODS.")
+    top = _joor_style(p4, 149.7, JOOR_SECOND, {}, 98)
+    _joor_totals(p4, top, 4, 41.24, 41.24)
+    pages = [p1, p2, p3, p4]
+    if twice:
+        pages.append(p4)
+    if foreign:
+        x = page()
+        x.text(57.0, 60.0, "PACKING NOTE 1 OF 1")
+        pages.insert(1, x)
+    if drop_page:
+        pages.pop(drop_page - 1)
+    return write(path, pages)

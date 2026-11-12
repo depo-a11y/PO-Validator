@@ -101,7 +101,7 @@ def build(docs, brand, catalog, history, tag_lookup, cart=None, prior_prices=Non
     for l in lines:
         cur["line"] = l
         code, eur = l["code"], l["price"]
-        product, note, cands = catalog.match(code)
+        product, note, cands = catalog.match(code, brand.get("match_ignore") or "")
         ambiguous = note.startswith("AMBIGUOUS")
         if ambiguous:
             checks.append(dict(Check="Join key resolves to one live product", Result="FAIL",
@@ -111,6 +111,7 @@ def build(docs, brand, catalog, history, tag_lookup, cart=None, prior_prices=Non
 
         common = {}
         if product is not None:
+            l["code"] = product["code"]   # match_ignore: the store's code, as the PO rows the checks compare carry
             live = {v["size"]: v for v in product["variants"]}
             _to_store_sizes(l, [{s: f"the live product {product['title']}" for s in live}], brand.get("size_map"))
             run = sort_sizes(set(live) | set(l["sizes_norm"]))
@@ -156,7 +157,10 @@ def build(docs, brand, catalog, history, tag_lookup, cart=None, prior_prices=Non
                     cell(row, "Variant Price", price, "catalog", "live full price of the product's other sizes")
                 cell(row, "Variant Compare At Price", price, "rule", "compare-at = price on a buy sheet")
                 _money_cells(cell, row, R, brand, eur, l["sizes_norm"].get(size, 0))
-                cell(row, CODE, code, "OC", f"{l['doc']} line {l['line_no']}")
+                cell(row, CODE, product["code"], "OC" if product["code"] == code else "catalog",
+                     f"{l['doc']} line {l['line_no']}" + ("" if product["code"] == code else
+                                                         f"; the OC prints {code}, this live code once "
+                                                         f"{brand['match_ignore']!r} is left out"))
                 cell(row, SEASON, brand["season"], "rule", "carryover is re-seasoned to the buy season")
                 cell(row, MADE_IN, made, made_src, made_why)
                 cell(row, NEW_SALE, product["new_sale"] or brand["new_sale"], "catalog", "live new_sale")
@@ -400,7 +404,7 @@ def _draft_checks(docs, lines, rows, R, brand, catalog, tag_lookup, dup):
     out.append(dict(Check="One manufacture code per NEW title (Matrixify groups NEW rows by Title)",
                     Result="FAIL" if multi else "PASS", Detail=str(multi) if multi else f"{len(by_title)} titles"))
     sale = sorted({f"{p['title']} (A${v['price']:g} vs compare-at A${v['compare_at']:g})"
-                   for l in lines for p in [catalog.match(l["code"])[0]] if p is not None
+                   for l in lines for p in [catalog.match(l["code"], brand.get("match_ignore") or "")[0]] if p is not None
                    for v in p["variants"] if (v["compare_at"] or 0) > (v["price"] or 0)})
     if sale:
         out.append(dict(Check="Carryover products currently marked down", Result="WARN",

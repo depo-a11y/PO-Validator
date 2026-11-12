@@ -3,7 +3,7 @@ import collections
 
 from .draft import oc_lines
 from .poxlsx import read_po, CODE
-from .util import cost_currency, norm_size, norm_code, size_key, size_match
+from .util import code_match, cost_currency, norm_size, norm_code, size_key, size_match
 
 
 def _norm(v):
@@ -12,6 +12,11 @@ def _norm(v):
 
 def compare(draft_rows, hand_rows, docs, allow_price=(), brand=None):
     lines = oc_lines(docs, brand)
+    ign = (brand or {}).get("match_ignore") or ""
+    if ign:   # the draft wrote the store's code where match_ignore matched one; key the OC lines the same way
+        drafted = {code_match(r[CODE], ign): norm_code(r[CODE]) for r in draft_rows}
+        for l in lines:
+            l["code"] = drafted.get(code_match(l["code"], ign), l["code"])
     oc_q, oc_eur = collections.Counter(), {}
     for l in lines:
         oc_eur[l["code"]] = l["price"]

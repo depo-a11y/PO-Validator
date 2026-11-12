@@ -40,6 +40,12 @@ class GateError(Exception):
         self.problems = problems
 
 
+class NotLayout(str):
+    """A reader's problem that is not a layout change (a document that is not an order as printed, a placeholder
+    price, a gate on the document's own printed totals): service.read_oc shows it without the hint to read the OC with
+    AI. A plain problem string gets that hint unless service.NOT_LAYOUT knows its wording."""
+
+
 def xc(w):
     return (w["x0"] + w["x1"]) / 2.0
 

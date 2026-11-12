@@ -24,10 +24,14 @@ returns both per document and an OC that does not match the config is refused. f
 `oc_supplier` (one reader for FOG Essentials and Fear of God LLC); adidas, otb and thugclub
 need `oc_label` (otb's is the collection's first word: MM or MM6; thugclub's is THUG CLUB or
 a collaboration such as TC x AI); for admilano and ai the check runs when the key is set.
+joor needs `oc_supplier`, the email domain of the brand
+contact JOOR prints (the brand itself is a logo; joor reads no label). `oc_style_prefix` (any
+reader, checked when set): every OC line's style must start with one of them, so a brand sold
+through an agency, whose issuer it shares with the agency's other brands, accepts only its own.
 
 `adapter` picks the OC reader: a built-in reader for one known layout (`otb` Maison
 Margiela/MM6, `admilano` AD Milano, `adidas` adidas AG, `fog` Fear of God, `thugclub` THUG CLUB
-Corp. proforma invoices), `sheet` (an OC sent
+Corp. proforma invoices, `joor` the JOOR order print of any brand), `sheet` (an OC sent
 as a spreadsheet, read by the config's `sheet:` column mapping; oc/adapters/sheet.py) or `ai` (any
 layout, read by Claude; oc/adapters/ai.py). An `ai` brand must name `oc_supplier`
 (the company printed as the issuer on its OCs) and `join_key`; a `sheet` brand `join_key` and `sheet:`.
@@ -41,6 +45,11 @@ The template is filled by plain substitution of exactly those four tokens, never
 str.format: a config can be an upload, and a format spec such as {style:>999999999}
 would make the server build a huge string. Any other brace is refused at load.
 title_tag and body_html are filled the same way, each from its own tokens (TEXT_TEMPLATES).
+
+`match_ignore` (off unless set) is for a brand whose store codes and OC codes differ only in separators
+("ZZ-0001 A1" printed, "ZZ0001 A1" live): characters such as "-_ " left out of both sides when an OC code
+is matched to a live product (catalog.match), upper-cased. A MERGE row carries the live code; a NEW row the
+OC's. Two live codes that become equal stop the draft, naming both. Letters and digits are refused.
 """
 import copy
 import os
@@ -67,7 +76,7 @@ REQUIRED = ["vendor", "adapter", "season", "sku_prefix", "cost_multiplier",
             "cost_currency", "margin_floor"]
 
 # built-in readers, one per known layout (oc/adapters/<name>.py)
-FIXED = ("otb", "admilano", "adidas", "fog", "thugclub")
+FIXED = ("otb", "admilano", "adidas", "fog", "thugclub", "joor")
 FIXED += ("sheet",)   # built-in too: a spreadsheet OC of any layout, read by the brand config's sheet: mapping
 ADAPTERS = FIXED + ("ai",)
 JOIN_FIELDS = ("style", "fabric", "colour", "colour_code")
@@ -95,6 +104,9 @@ FIXED_NEEDS = {
     "thugclub": {"oc_label": "oc_label: THUG CLUB for the house line, and a collaboration's label as printed at the "
                              "start of its product names (TC x AI for Thug Club x Alpha Industries) to accept that "
                              "too; one THUG CLUB Corp. reader serves both"},
+    "joor": {"oc_supplier": "oc_supplier: the email domain of the Brand Information contact on this brand's JOOR "
+                            "orders (e.g. brand.com; a list if it varies; an agency's for an agency order); one JOOR "
+                            "reader serves every brand on JOOR, which prints the brand only as a logo"},
 }
 
 
@@ -225,7 +237,12 @@ def _reader_keys(cfg, data, source):
     if need:
         raise BrandError(f"{source}: adapter: {cfg['adapter']} needs {' and '.join(need)}. Add "
                          + "; ".join(FIXED_NEEDS[cfg["adapter"]][k] for k in need) + ".")
-    for key, what in (("oc_supplier", "a company name"), ("oc_label", "a label name")):
+    ign = cfg.get("match_ignore")
+    if ign is not None and (not isinstance(ign, str) or not ign or any(ch.isalnum() for ch in ign)):
+        raise BrandError(f"{source}: match_ignore is the separator characters (no letters or digits) left out of "
+                         f"both codes when matching the OC to live products, e.g. \"-_ \", got {ign!r}")
+    for key, what in (("oc_supplier", "a company name"), ("oc_label", "a label name"),
+                      ("oc_style_prefix", "a style-number prefix")):
         val = cfg.get(key)
         if val:
             val = [val] if isinstance(val, str) else list(val)

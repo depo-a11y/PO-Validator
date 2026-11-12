@@ -24,6 +24,11 @@ def run(po_path, docs, brand, catalog, history, tag_lookup, out, price_overrides
     price_overrides = {norm_code(k): v for k, v in (price_overrides or {}).items()}
     cur = cost_currency(brand)
     lines = oc_lines(docs, brand)
+    if brand.get("match_ignore"):   # a code matched through match_ignore is the store's code on the PO's rows
+        for l in lines:
+            p = catalog.match(l["code"], brand["match_ignore"])[0]
+            if p is not None:
+                l["code"] = p["code"]
     by_code = {l["code"]: l for l in lines}
     R = Resolver(brand, catalog, history, tag_lookup, lines, cart)
     wb = openpyxl.load_workbook(po_path)

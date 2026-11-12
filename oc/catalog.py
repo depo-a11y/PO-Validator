@@ -18,7 +18,7 @@ import csv
 import collections
 import re
 
-from .util import norm_code, norm_size, money, title_colour
+from .util import code_match, norm_code, norm_size, money, title_colour
 
 MCODE = "Metafield: my_fields.manufacture_code [single_line_text_field]"
 MADE_IN = "Metafield: custom.made_in [single_line_text_field]"
@@ -60,13 +60,23 @@ class Catalog:
         self.handles = {p["handle"] for p in products.values()}
 
     # ---- matching -----------------------------------------------------------
-    def match(self, code):
+    def match(self, code, ignore=""):
         """Live product for a join key. Returns (product | None, note, candidates).
 
         ARCHIVED twins are dropped. Two or more non-archived products on one key
         is a hard failure: the caller must not pick one.
+
+        `ignore` is a brand's match_ignore (e.g. "-_ "): those characters are left out of both codes, so
+        "ZZ-0001 A1" matches a live "ZZ0001 A1" (codes compare upper-cased). The caller writes the live
+        product's own code. Two or more catalog codes that are then equal, of non-archived products, is
+        AMBIGUOUS: neither is picked. Without `ignore` a code matches only as written.
         """
-        cands = self.by_code.get(norm_code(code), [])
+        if ignore:
+            cands, note = self._loose(code, ignore)
+            if note:
+                return None, note, cands
+        else:
+            cands = self.by_code.get(norm_code(code), [])
         live = [p for p in cands if p["status"].upper() != "ARCHIVED"]
         if len(live) == 1:
             note = "" if len(cands) == 1 else f"dropped {len(cands) - 1} ARCHIVED twin(s)"
@@ -76,6 +86,23 @@ class Catalog:
         if cands:
             return None, "only ARCHIVED products carry this code", cands
         return None, "", cands
+
+    def _loose(self, code, ignore):
+        """(products, note): every catalog code equal to `code` once the `ignore` characters are left out."""
+        def key(c):
+            return code_match(c, ignore)
+        if getattr(self, "_loose_ix", (None,))[0] != ignore:
+            ix = collections.defaultdict(list)
+            for c in self.by_code:
+                ix[key(c)].append(c)
+            self._loose_ix = (ignore, ix)
+        codes = self._loose_ix[1].get(key(code), [])
+        live = [c for c in codes if any(p["status"].upper() != "ARCHIVED" for p in self.by_code[c])] or codes
+        cands = [p for c in codes for p in self.by_code[c]]
+        if len(live) > 1:
+            return cands, (f"AMBIGUOUS: the catalog codes {' and '.join(sorted(live))} are both {norm_code(code)} once "
+                           f"{ignore!r} is left out; fix the store's codes, nothing is picked")
+        return cands, ""
 
     def style_family(self, prefix, exclude_archived=False):
         out = []

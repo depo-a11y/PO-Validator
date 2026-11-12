@@ -21,7 +21,7 @@ USD = dict(base.BRAND, vendor="EXAMPLE USD BRAND", sku_prefix="EXUS27", cost_cur
 FIXED = {"admilano": oc_synth.admilano_pdf, "adidas": oc_synth.adidas_pdf, "fog": oc_synth.fog_pdf,
          "thugclub": thug_synth.portrait_pdf}
 LAYOUT_WORDS = {"otb": "Maison Margiela, MM6", "admilano": "AD Milano", "adidas": "adidas AG", "fog": "Fear of God",
-                "thugclub": "THUG CLUB Corp."}
+                "thugclub": "THUG CLUB Corp.", "joor": "JOOR order print"}
 
 
 def _catalog(tmp_path):
@@ -45,14 +45,14 @@ def _usd_docs(currency="US Dollar"):
 @pytest.mark.parametrize("name", brandm.ADAPTERS)
 def test_every_reader_loads_and_the_service_knows_it(name):
     extra = dict(ai=dict(oc_supplier="X Ltd", join_key="{style}"), fog=dict(oc_supplier="X Ltd"),
-                 adidas=dict(oc_label="Y-3"), thugclub=dict(oc_label="THUG CLUB"),
+                 adidas=dict(oc_label="Y-3"), thugclub=dict(oc_label="THUG CLUB"), joor=dict(oc_supplier="x.test"),
                  sheet=dict(join_key="{style} {colour}", sheet=dict(
                      currency="EUR", columns=dict(style="Style", colour_code="Colour", size="Size", qty="Qty",
                                                   price="Price", label="Label")))).get(name, {})
     cfg = brandm.from_mapping(dict(base.BRAND, adapter=name, **extra), "t")
     assert cfg["adapter"] == name
     assert service.adapter(cfg) is importlib.import_module(f"oc.adapters.{name}")
-    assert brandm.ADAPTERS == ("otb", "admilano", "adidas", "fog", "thugclub", "sheet", "ai")
+    assert brandm.ADAPTERS == ("otb", "admilano", "adidas", "fog", "thugclub", "joor", "sheet", "ai")
 
 
 def test_an_unknown_reader_is_refused_by_the_service_too():

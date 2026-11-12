@@ -707,6 +707,14 @@ def test_a_sheet_brand_with_nothing_to_check_its_identity_says_so(tmp_path):
     assert "would be drafted as TEST BRAND" in row["Detail"]
 
 
+def test_a_style_prefix_checks_a_sheet_brands_identity(tmp_path):
+    docs, checks, _ = service.read_oc(make(tmp_path), cfg(extra=dict(oc_style_prefix=["ZZ"])))
+    assert docs is not None and not [c for c in checks if c["Check"] == service.IDENTITY_CHECK]
+    docs, checks, _ = service.read_oc(make(tmp_path), cfg(extra=dict(oc_style_prefix=["ZZ1"])))
+    (row,) = [c for c in checks if c["Check"] == service.IDENTITY_CHECK]
+    assert docs is None and row["Result"] == "FAIL" and "SO2 has 1 style(s) not starting ZZ1 (ZZ300CC003)" in row["Detail"]
+
+
 def test_the_brands_ean_prefix_anchors_its_identity(tmp_path):
     docs, checks, _ = service.read_oc(make(tmp_path), cfg(ean_prefixes=["2000000"]))
     assert docs is not None and not [c for c in checks if c["Check"] == service.IDENTITY_CHECK]

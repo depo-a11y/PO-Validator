@@ -124,6 +124,12 @@ def norm_code(code):
     return re.sub(r"\s+", " ", str(code or "").strip().upper())
 
 
+def code_match(code, ignore=""):
+    """One key for a code as the OC prints it and as the store holds it under a brand's match_ignore: the code
+    upper-cased with the `ignore` characters left out ("ZZ-0001 A1" and "ZZ0001 A1" under "-")."""
+    return "".join(ch for ch in norm_code(code) if ch not in (ignore or ""))
+
+
 def join_key(style, fabric, colour):
     return norm_code(f"{style}{fabric or ''} {colour or ''}")
 

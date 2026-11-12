@@ -50,6 +50,7 @@ from . import catalog as catm
 from . import finalize as finalizem
 from . import history as histm
 from . import poxlsx
+from .adapters.otb import NotLayout
 from .util import cost_currency, currency_off, slug
 
 REPO = Path(__file__).resolve().parent.parent
@@ -84,7 +85,8 @@ AI_HINT = ("If this is the right brand and its layout changed, tick 'Read the OC
 LAYOUTS = {"otb": "the OTB layout (Maison Margiela, MM6)", "admilano": "the AD Milano layout (Ann Demeulemeester)",
            "adidas": "the adidas AG layout (Y-3, Willy Chavarria, RS)",
            "fog": "the Fear of God layout (FOG Essentials, Fear of God LLC)",
-           "thugclub": "the THUG CLUB Corp. proforma invoice layout (Thug Club, Thug Club x Alpha Industries)"}
+           "thugclub": "the THUG CLUB Corp. proforma invoice layout (Thug Club, Thug Club x Alpha Industries)",
+           "joor": "the JOOR order print (any brand ordering through JOOR)"}
 
 
 def fixed_reader_row(name):
@@ -151,7 +153,8 @@ def read_oc(oc_path, brand_cfg, reader=None, ai_factory=None):
         docs = _parse(reader_mod, oc_path, brand_cfg)
     except Exception as e:
         problems = getattr(e, "problems", None) or [f"{type(e).__name__}: {e}"]
-        return None, [row] + [_check(GATE_CHECK, "FAIL", p if NOT_LAYOUT.search(p) else f"{p}. {hint}")
+        return None, [row] + [_check(GATE_CHECK, "FAIL", p if isinstance(p, NotLayout) or NOT_LAYOUT.search(p)
+                                                          else f"{p}. {hint}")
                               for p in problems], None
     off = currency_off(docs, cost_currency(brand_cfg))
     if off:
@@ -159,7 +162,9 @@ def read_oc(oc_path, brand_cfg, reader=None, ai_factory=None):
     wrong = identity_problems(docs, brand_cfg, oc_path)
     if wrong:
         return None, [row, _check(IDENTITY_CHECK, "FAIL", wrong)], None
-    return docs, [row] + identity_unchecked(docs, brand_cfg) + recomputed_rows(docs) + note_rows(docs), None
+    warn = getattr(reader_mod, "reader_warnings", None)   # not "warnings": a reader may import that module
+    extra = [_check(name, "WARN", detail) for name, detail in (warn(docs) if warn else [])]
+    return docs, [row] + identity_unchecked(docs, brand_cfg) + recomputed_rows(docs) + note_rows(docs) + extra, None
 
 
 def _parse(reader_mod, oc_path, brand_cfg):
@@ -175,9 +180,10 @@ def _who(ds, docs):
 
 
 def identity_unchecked(docs, brand_cfg):
-    """A WARN row naming the documents whose brand nothing checked: the config names no oc_supplier or oc_label and
-    the reader found no other anchor in the file (d["identity"], e.g. the brand's EAN prefix on every EAN)."""
-    if _listed(brand_cfg.get("oc_supplier")) or _listed(brand_cfg.get("oc_label")):
+    """A WARN row naming the documents whose brand nothing checked: the config names no oc_supplier, oc_label or
+    oc_style_prefix and the reader found no other anchor in the file (d["identity"], e.g. the brand's EAN prefix on
+    every EAN)."""
+    if any(_listed(brand_cfg.get(k)) for k in ("oc_supplier", "oc_label", "oc_style_prefix")):
         return []
     ds = [d["doc"] for d in docs if not d.get("identity")]
     if not ds:
@@ -214,11 +220,13 @@ def _listed(v):
 
 
 def identity_problems(docs, brand_cfg, oc_path, issuer=True):
-    """'' when every document is from the config's oc_supplier and oc_label (each checked only when the config
-    sets it), else what was read against what the brand accepts. A reader that does not parse its issuer (otb)
-    passes when one of the oc_supplier names is printed on the document's pages."""
+    """'' when every document is from the config's oc_supplier and oc_label and every line's style starts with one of
+    its oc_style_prefix (each checked only when the config sets it), else what was read against what the brand
+    accepts. A reader that does not parse its issuer (otb) passes when one of the oc_supplier names is printed on the
+    document's pages. oc_style_prefix tells apart brands sold by one agency, which share its issuer."""
     from .adapters import ai
     names, labels = _listed(brand_cfg.get("oc_supplier")), _listed(brand_cfg.get("oc_label"))
+    prefixes = tuple(_listed(brand_cfg.get("oc_style_prefix")))
     out, pages = [], None
     for d in docs:
         if issuer and names:
@@ -236,6 +244,9 @@ def identity_problems(docs, brand_cfg, oc_path, issuer=True):
             out.append(f"{d['doc']} is for label {d.get('label') or 'none the reader could find'!r}, "
                        f"not {' or '.join(labels)}")
         out += d.get("identity_problems") or []   # a reader's own anchor, e.g. the brand's EAN prefix
+        off = [str(l.get("style")) for l in d.get("lines") or [] if not str(l.get("style") or "").startswith(prefixes)]
+        if prefixes and off:
+            out.append(f"{d['doc']} has {len(off)} style(s) not starting {' or '.join(prefixes)} ({', '.join(off[:3])})")
     if not out:
         return ""
     return ("; ".join(out) + f". The brand picked is {brand_cfg.get('vendor')} ({brand_cfg.get('_name', 'brand')}). "
