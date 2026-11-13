@@ -47,7 +47,8 @@ def write_catalog(tmp_path, extra=()):
 
 
 BRAND = dict(base.BRAND, colour_families={"BLACK": ["black"], "WHITE": ["white"], "BEIGE": ["beige", "neutral"]},
-             product_class_types={"SNEAKERS": "SHOES SNEAKERS", "ANKLE BOOT": "SHOES BOOTS"}, _name="mm", _path="t")
+             product_class_types={"SNEAKERS": "SHOES SNEAKERS", "ANKLE BOOT": "SHOES BOOTS"}, _name="mm", _path="t",
+             heel_codes=True)
 
 
 def _line(n, style, fabric, colour, pclass, sizes, price):
@@ -164,11 +165,11 @@ def no_key(monkeypatch):
     monkeypatch.setitem(sys.modules, "streamlit", types.SimpleNamespace(secrets={}))
 
 
-def build(tmp_path, fake=None, policy="non-green", hist=None, cat_extra=(), d=None):
+def build(tmp_path, fake=None, policy="non-green", hist=None, cat_extra=(), d=None, brand=BRAND):
     cat = catm.load(write_catalog(tmp_path, cat_extra))
     hist = hist if hist is not None else past_po(tmp_path)
     titler = None if fake is None else (lambda p, R: titles.run(p, R, factory=fake.factory, policy=policy))
-    return draftm.build(d or docs(), BRAND, cat, hist, base._tags(), titler=titler)
+    return draftm.build(d or docs(), brand, cat, hist, base._tags(), titler=titler)
 
 
 def cells(review, code, column):
@@ -300,10 +301,9 @@ def test_a_green_value_is_kept_and_a_different_ai_value_named_in_the_why(tmp_pat
     assert "AI suggests colour words 'Optic White'" in t["Why"]
     f = one(review, NEW_STYLE_101, "Option1 Value")
     assert (f["Value"], f["Source"], f["Colour"]) == ("WHITE", "catalog", "green")
-    b = one(review, BOOT_T0013, "Title")
-    assert b["Value"] == "Tabi Ankle Boots 8cm in T0013"     # green name kept; its raw colour code left for a person
-    assert "AI suggests product name 'Tabi Ankle Boots H80'" in b["Why"]
-    assert "AI suggests 'Tabi Ankle Boots 8cm in Black': not filled in" in b["Why"]
+    b = one(review, BOOT_T0013, "Title")   # house style wrote the live 8cm as H80; the raw colour code is left for a person
+    assert b["Value"] == "Tabi Ankle Boots H80 in T0013" and "'8cm' written H80 (house heel code)" in b["Why"]
+    assert "AI suggests 'Tabi Ankle Boots H80 in Black': not filled in" in b["Why"]
 
 
 def test_the_measurement_policy_everywhere_also_replaces_green(tmp_path, key):
@@ -311,7 +311,7 @@ def test_the_measurement_policy_everywhere_also_replaces_green(tmp_path, key):
     assert one(review, NEW_STYLE_101, "Title")["Value"] == "Paint Sneaker in Optic White"
     # ... but never a cell finalize would refuse
     b = one(review, BOOT_T0013, "Title")
-    assert b["Value"] == "Tabi Ankle Boots 8cm in T0013" and "AI suggests 'Tabi Ankle Boots H80 in Black'" in b["Why"]
+    assert b["Value"] == "Tabi Ankle Boots H80 in T0013" and "AI suggests 'Tabi Ankle Boots H80 in Black'" in b["Why"]
     t = one(review, SNEAKER_900, "Title")
     assert t["Value"] == "Replica Sneaker in 900" and "AI suggests 'Replica Leather Sneaker in Black'" in t["Why"]
     assert titles.run.__defaults__[-1] == "non-green"
@@ -560,7 +560,7 @@ def test_the_few_shot_block_is_byte_identical_on_every_chunk_and_cached(tmp_path
     blocks = [c["system"][1] for c in fake.calls]
     assert all(b == blocks[0] for b in blocks) and blocks[0]["cache_control"] == {"type": "ephemeral"}
     assert "Old Logo Sneaker in Black" in blocks[0]["text"]
-    assert all(c["system"][0] == {"type": "text", "text": titles.SYSTEM} for c in fake.calls)
+    assert all(c["system"][0] == {"type": "text", "text": titles.system(BRAND)} for c in fake.calls)
     assert [len(sent_codes(c)) for c in fake.calls] == [titles.CHUNK, titles.CHUNK, 3]
 
 
@@ -645,8 +645,82 @@ def test_a_title_request_carries_only_what_the_page_says_it_sends(tmp_path, key)
         assert cols == "manufacture code | Type | colour family | Title" and len(examples) <= titles.FEW_SHOT_CAP == 200
 
 
+# ---- house style follows the brand config for AI values too (review 2026-11-14-buyer-1) ----------------------
+MULE = "S95ZZ0001P0001 101"   # invented: a heeled style whose OC product class prints its height
+
+
+def _mule():
+    return _pair(("MM FEMALE SHOES AVP", "WOMEN", _line(1, "S95ZZ0001", "P0001", "101", "GLIDE MULE 3CM", {"38": 1},
+                                                         200.0)))
+
+
+def _mule_answer(name, colour="White"):
+    return Fake(answers={MULE: dict(product_name=name, colour_words=colour, colour_family="WHITE", basis="b")})
+
+
+def test_with_heel_codes_an_ai_height_in_cm_is_written_as_the_house_heel_code(tmp_path, key):
+    rows, review, checks, fills = build(tmp_path, _mule_answer("Glide Mule 3cm"), d=_mule())
+    t = one(review, MULE, "Title")
+    assert (t["Value"], t["Source"]) == ("Glide Mule H30 in White", AI_DRAFT)
+    assert "product name by AI, '3cm' written H30 (house heel code)" in t["Why"]
+    rows, review, checks, fills = build(tmp_path, _mule_answer("Glide Mule 10cm"), d=_mule())
+    assert one(review, MULE, "Title")["Value"] == "Glide Mule 10cm in White"   # 10cm and up stay as printed
+    rows, review, checks, fills = build(tmp_path, _mule_answer("Glide Mule 5cm"), d=_mule())   # no 5cm in the evidence
+    t = one(review, MULE, "Title")
+    assert t["Source"] != AI_DRAFT and "heel code H50 has no height in the evidence" in t["Why"]
+
+
+def test_without_heel_codes_an_ai_heel_code_is_rejected_and_never_echoed_in_its_reason(tmp_path, key):
+    plain = dict(BRAND, heel_codes=False)
+    rows, review, checks, fills = build(tmp_path, _mule_answer("Glide Mule H30"), d=_mule(), brand=plain)
+    t = one(review, MULE, "Title")
+    assert (t["Value"], t["Source"]) == ("Glide Mule 3cm in White", "guess")   # the tool's value stays
+    reason = t["Why"].split("rejected (", 1)[1].split("); the tool's kept", 1)[0]
+    assert reason == "1 heel code(s), but this brand writes heel heights as printed (no heel_codes)"
+    assert "product name: heel code, brand writes heights as printed x1" in agent_row(checks)["Detail"]
+    rows, review, checks, fills = build(tmp_path, _mule_answer("Glide Mule 3cm"), d=_mule(), brand=plain)
+    t = one(review, MULE, "Title")
+    assert (t["Value"], t["Source"]) == ("Glide Mule 3cm in White", AI_DRAFT) and "house heel code" not in t["Why"]
+
+
+def test_ai_colour_words_take_the_brands_colour_spelling(tmp_path, key):
+    brand = dict(BRAND, colour_spelling={"Whyte": "White"})
+    fake = Fake(answers={NEW_STYLE_101: dict(product_name="Paint Sneaker", colour_words="Optic Whyte",
+                                             colour_family="WHITE", basis="b")})
+    rows, review, checks, fills = build(tmp_path, fake, policy="everywhere", brand=brand)
+    t = one(review, NEW_STYLE_101, "Title")
+    assert (t["Value"], t["Source"]) == ("Paint Sneaker in Optic White", AI_DRAFT)
+    assert "colour words by AI, 'Whyte' written 'White' (brand colour_spelling)" in t["Why"]
+
+
+def test_the_prompts_heel_paragraph_follows_heel_codes(tmp_path, key):
+    for heel, has, hasnt in ((True, "only H30, H50, H60 or H80", "never as an H-code"),
+                             (False, "never as an H-code", "only H30, H50, H60 or H80")):
+        fake = Fake()
+        build(tmp_path, fake, brand=dict(BRAND, heel_codes=heel))
+        text = " ".join(fake.calls[0]["system"][0]["text"].split())
+        assert has in text and hasnt not in text and "Maison Margiela shoe" not in text
+        assert "Prefer the cart's Color Description" not in text
+
+
+def test_a_green_name_stays_green_when_house_style_only_respells_the_colour(tmp_path, key):
+    import test_oc_cart as tc
+    from oc import cart as cartm
+    rows = [list(r) for r in tc.CART_ROWS]
+    rows[0][5] = "Wasched black"   # an invented misspelling the brand config corrects
+    brand = dict(tc.BRAND, colour_spelling={"Wasched": "Washed"})
+    cart = cartm.load(tc.write_cart(tmp_path / "c.xlsx", rows))
+    fake = Fake(answers={tc.SNEAKER: dict(product_name="Court Sneaker", colour_words="Washed Black",
+                                          colour_family="BLACK", basis="b")})
+    out = draftm.build(tc._docs(), brand, tc._catalog(tmp_path), histm.History([]), base._tags(), cart=cart,
+                       titler=lambda p, R: titles.run(p, R, factory=fake.factory))
+    t = next(x for x in out[1] if x["Code"] == tc.SNEAKER and x["Column"] == "Title")
+    assert t["Value"] == "Replica Sneaker in Washed Black"   # the live stem, green, kept
+    assert "AI suggests product name 'Court Sneaker'" in t["Why"] and "'Wasched' written 'Washed'" in t["Why"]
+
+
 def test_the_system_prompt_states_the_house_rules():
-    s = " ".join(titles.SYSTEM.split())
+    s = " ".join(titles.system(BRAND).split())
     for phrase in ("only H30, H50, H60 or H80", "never H100", "Never guess a height",
                    "name a different colour on every fabric", "Never a brand or label name",
                    "the tool adds \"Womens \" or \"Mens \" itself", "evidence, not an answer"):

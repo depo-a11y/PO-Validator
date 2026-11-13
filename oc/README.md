@@ -426,13 +426,15 @@ manufacture code per Title, live handle, blank Option1, `run_gate`) unchanged.
 - **Answer.** Per code, under a strict schema: `product_name`, `colour_words`, `colour_family` (one of the brand's
   `colour_families` keys, or empty) and `basis`. Python composes `<product_name> in <colour_words>`.
 - **Checked in Python first.** No raw code (`finalize.raw_code_in_title`), no code-like token (T0123, M01234, H0123,
-  123; `8cm`, `6.5mm`, `6CC` and `5AC` are words), no vendor word (Maison, Margiela, MM6), letters, digits, space and
-  `/ & ' - . ,` only, at most 60 characters for a name and 40 for colour words, nothing starting `= + - @`, no gender
-  prefix (the de-dupe adds one), no word "in" in a name. Heel codes: only H30, H50, H60 or H80, as the last words of
-  the name, and only when the evidence prints that height (`8cm` or `H80` in a same-style title, the product class,
-  the cart's Style Name); any other H-number is refused. A rejected value falls back to the tool's own, and the Why
-  says why it was rejected. The value is quoted only when it is plain text (no markup, link, e-mail address or phone
-  number); the reasons never quote it, and name code-like tokens and odd characters only by count.
+  123; `8cm`, `6.5mm`, `6CC` and `5AC` are words), no vendor word (Maison, Margiela, MM6), letters, digits, space
+  and `/ & ' - . ,` only, at most 60 characters for a name and 40 for colour words, nothing starting `= + - @`, no
+  gender prefix (the de-dupe adds one), no word "in" in a name. Heel codes, for a brand with `heel_codes: true`:
+  only H30, H50, H60 or H80, as the last words of the name, and only when the evidence prints that height (in cm or
+  as the H-code, in a same-style title, the product class or the cart's Style Name); any other H-number is refused.
+  A brand without `heel_codes` gets no H-code from the AI: one is refused, counted, never quoted. A rejected value
+  falls back to the tool's own, and the Why says why it was rejected. The value is quoted only when it is plain text
+  (no markup, link, e-mail address or phone number); the reasons never quote it, and name code-like tokens and odd
+  characters only by count.
 - **Never into a cell finalize would refuse.** Where the tool's own value would fail one of finalize's hard gates
   that an AI value could satisfy (a raw code in the title, a title another code shares or that is a live handle, as
   the de-dupe would leave it, or a blank colour family), the cell keeps the tool's value and its red, and the Why says
@@ -442,13 +444,16 @@ manufacture code per Title, live handle, blank Option1, `run_gate`) unchanged.
   is not green. Green stays; an AI value that differs is named in the Why ("AI suggests ..."). The source is
   `AI-drafted, check`, amber, never green, and stays so through a gender prefix; `title_tag` follows the title. Type,
   prices, cost, quantities and sizes are never touched. (`policy="everywhere"` exists for the measurement harness only.)
-- **House style and the live-title check.** House style (`oc/housestyle.py`: heel codes with `heel_codes: true`,
-  the `colour_spelling:` map, the Style Name note) shapes the tool's own title and colour words, before the agent.
-  An AI value does not pass through it: the agent's own prompt and checks hold it to the same heel codes (H30, H50,
-  H60, H80, only when the evidence prints the height) and keep brand words out, and the `colour_spelling:` map does
-  not respell AI colour words. The live-title check runs after the agent: an AI title an ACTIVE product already
-  carries keeps its source (`AI-drafted, check`, or red), gains the reason in the Why and the WARN names the handles.
-  Finalize does not refuse such a title (only a live handle is a gate), so the agent does not guard it.
+- **House style and the live-title check.** House style (`oc/housestyle.py`: heel codes with `heel_codes: true`, the
+  `colour_spelling:` map, the Style Name note) shapes the tool's own title and colour words, before the agent. Heel
+  codes and colour spellings follow the brand config for AI values too (review case 2026-11-14-buyer-1): with
+  `heel_codes: true` an AI height in cm is written as its H-code by the same `housestyle.heel_code` (10cm and up
+  stay as printed) before the checks, and without it an AI H-code is refused; the `colour_spelling:` map respells AI
+  colour words as it does the cart's. The prompt's heel paragraph follows `heel_codes` too. Brand words stay out of
+  AI values by the agent's own check. When house style changes only the colour words, the tool's name part keeps its
+  own source, so a green name stays green. The live-title check runs after the agent: an AI title an ACTIVE product
+  already carries keeps its source (`AI-drafted, check`, or red), gains the reason in the Why and the WARN names the
+  handles. Finalize does not refuse such a title (only a live handle is a gate), so the agent does not guard it.
 - **Few-shot.** The NEW products of the brand config's past POs (code, Type, colour family, Title), one per code,
   never a product on this OC, only titles that pass the same checks, round robin over Types, at most 200, in a
   deterministic order. It sits after the instructions in the system prompt with a 5-minute `cache_control`, so it is

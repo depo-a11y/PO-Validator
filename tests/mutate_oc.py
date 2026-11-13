@@ -604,6 +604,23 @@ MUTANTS = [
      "page: a spreadsheet OC offered to the AI as a PDF"),
     ("pages/1_Order_confirmation_to_PO.py", "if po is None and oc_up and not is_sheet else None,", "if po is None and not is_sheet else None,",
      "page: a draft from the cart alone breaks the page"),
+    # ---- reviewer case 2026-11-14-buyer-1: house style follows the brand config for AI values ----
+    ("oc/agent/titles.py", '    if kind == "name" and brand.get("heel_codes"):\n        styled, note = housestyle.heel_code(v)',
+     '    if False:\n        styled, note = housestyle.heel_code(v)', "titles: an AI cm height not written as the house heel code"),
+    ("oc/agent/titles.py", '    if hcodes and kind == "name" and not brand.get("heel_codes"):   # counted, never echoed',
+     "    if False:   # counted, never echoed", "titles: an AI heel code kept for a brand that writes heights as printed"),
+    ("oc/agent/titles.py", '''f"{len(hcodes)} heel code(s), but this brand writes heel heights as printed (no heel_codes)"''',
+     '''f"{', '.join(hcodes)} heel code(s), but this brand writes heel heights as printed (no heel_codes)"''',
+     "titles: a rejected heel code echoed in its reason"),
+    ("oc/agent/titles.py", '    if kind == "colour" and brand.get("colour_spelling"):', "    if False:",
+     "titles: AI colour words not respelled by the brand's colour_spelling"),
+    ("oc/agent/titles.py", "HEEL_CODES_RULE if brand.get(\"heel_codes\") else HEEL_PRINTED_RULE", "HEEL_CODES_RULE",
+     "titles: the prompt's heel paragraph ignores heel_codes"),
+    ("oc/agent/titles.py", "where they name the same colour, spell it as the catalog and past POs do.",
+     "Prefer the cart's Color Description.", "titles: the prompt prefers the cart's spelling"),
+    ("oc/draft.py",
+     "        name = (name[0], own[1], own[2]) if own[0].endswith(cut) and own[0][:-len(cut)] == name[0] else name\n",
+     "", "draft: a respelled colour makes the green name replaceable"),
     # ---- reviewer case 2026-11-12-buyer-14 (F5, F7) ----
     # ---- reviewer case 2026-11-13-buyer-9 (finding 2): no rejected value echoed through a reason ----
     ("oc/agent/explain.py", """        raise ValueError("its 'who' is not colleague or colwyn")""",

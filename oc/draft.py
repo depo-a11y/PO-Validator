@@ -241,6 +241,8 @@ def build(docs, brand, catalog, history, tag_lookup, cart=None, prior_prices=Non
         title, ti_src, ti_why = housestyle.new_title(brand, R, code, *R.title(code, pclass, cname))
         cut = f" in {cname}"   # the title is "<name> in <colour name>", in house style
         name = (title[:-len(cut)] if title.endswith(cut) else title, ti_src, ti_why)
+        own = R.title(code, pclass, cname)   # house style that left the name alone keeps the name's own source
+        name = (name[0], own[1], own[2]) if own[0].endswith(cut) and own[0][:-len(cut)] == name[0] else name
         if worse(cn_src, ti_src) == cn_src and COLOUR[cn_src] != COLOUR[ti_src]:
             ti_src, ti_why = cn_src, f"{ti_why}; colour name: {cn_why}"
         sib, counts = _live_size_names(R, code, brand.get("vendor"))

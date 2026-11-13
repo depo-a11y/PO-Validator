@@ -25,6 +25,7 @@ import json
 import re
 
 from . import common
+from .. import housestyle
 from ..finalize import raw_code_in_title
 from ..resolve import AI_DRAFT, COLOUR, GREEN, RANK, RED, split_code
 from ..util import norm_code, slug
@@ -65,14 +66,11 @@ Style Name, the product class and the description, in the style of the past POs.
 (the brand words listed are never in a title). Never a gender word or prefix: the tool adds "Womens " or "Mens " \
 itself when two titles would collide. Never a code: no style, fabric or colour code such as S99AB0123, M01234, \
 T0123, H0123 or 123. Never the word "in".
-- Heel codes: a heeled Maison Margiela shoe carries its heel height as an H-code, the height in cm times ten, as \
-the last words of product_name (right before " in"): only H30, H50, H60 or H80, and only when the evidence gives \
-that height (for example a same-style title with "8cm" or "H80", or the product class). Never guess a height. A \
-heel of 10cm or more stays as written (for example "10cm"), never H100. Flats (sneakers, loafers, derbies, \
-ballerinas without a height) get none.
+{heel}
 - colour_words: the colour as the house titles it, Title Case, for example "Medium Grey", "Mud/Ecru", \
-"Forest Green". Prefer the cart's Color Description; else the catalog's or past POs' colour words for the same \
-fabric+colour code. Maison Margiela numeric colour codes (such as 101 or 900) name a different colour on every \
+"Forest Green". Take it from the evidence: the cart's Color Description, or the catalog's or past POs' colour words \
+for the same fabric+colour code; where they name the same colour, spell it as the catalog and past POs do. The tool \
+corrects the brand's known misspellings itself. Maison Margiela numeric colour codes (such as 101 or 900) name a different colour on every \
 fabric, so the same colour code on other fabrics is weak evidence for them; codes starting T or H (leather and \
 shoes, such as T0123) mostly mean the same colour on every fabric. Never write a code as the colour. If nothing \
 tells you the colour, return "".
@@ -83,6 +81,18 @@ from the cart". Under 200 characters.
 
 Values are plain text: letters, digits, spaces and / & ' - . , only. When the evidence does not support a value, \
 return "" for it rather than guess. Answer every product code you are given, once."""
+HEEL_CODES_RULE = """- Heel codes: this brand writes a shoe's heel height as an H-code, the height in cm times ten, \
+as the last words of product_name (right before " in"): only H30, H50, H60 or H80, and only when the evidence gives \
+that height (in cm or as an H-code, in a same-style title or the product class). Never guess a height. A heel of \
+10cm or more stays as written in cm, never H100. Flats get none."""
+HEEL_PRINTED_RULE = """- Heel heights: this brand writes a heel height as the evidence prints it, in cm, and never as an \
+H-code (no H30, H50, H60, H80 or any other H followed by digits). Never guess a height."""
+
+
+def system(brand):
+    """The title prompt for this brand: its heel paragraph follows the brand config's heel_codes, as the tool's own
+    titles do (oc/housestyle.py)."""
+    return SYSTEM.replace("{heel}", HEEL_CODES_RULE if brand.get("heel_codes") else HEEL_PRINTED_RULE)
 
 
 # ---- the few-shot block ------------------------------------------------------------
@@ -215,7 +225,7 @@ def request(block, evs, brand):
             + json.dumps(dict(products=evs), ensure_ascii=False, separators=(",", ":")))
     return dict(
         model=common.MODEL, max_tokens=MAX_TOKENS,
-        system=[{"type": "text", "text": SYSTEM},
+        system=[{"type": "text", "text": system(brand)},
                 {"type": "text", "text": block, "cache_control": {"type": "ephemeral"}}],
         messages=[{"role": "user", "content": [{"type": "text", "text": body}]}],
         output_config={"effort": EFFORT, "format": {"type": "json_schema", "schema": schema(brand)}},
@@ -282,7 +292,12 @@ def _text_problems(v, brand, code, heel, kind):
         out.append(("gender prefix", f"starts with '{toks[0]}' (the tool adds a gender prefix itself)"))
     if kind == "name" and re.search(r"\bin\b", v):
         out.append(("the word 'in'", "holds the word 'in', which would split the title in the wrong place"))
-    for h in (t.upper() for t in toks if HCODE.fullmatch(t)):
+    hcodes = [t.upper() for t in toks if HCODE.fullmatch(t)]
+    if hcodes and kind == "name" and not brand.get("heel_codes"):   # counted, never echoed
+        out.append(("heel code, brand writes heights as printed",
+                    f"{len(hcodes)} heel code(s), but this brand writes heel heights as printed (no heel_codes)"))
+        hcodes = []
+    for h in hcodes:
         if kind == "colour":
             out.append(("heel code in colour", f"heel code {h} in the colour words"))
         elif kind == "name":
@@ -299,14 +314,30 @@ def _clean(v):
     return " ".join(str(v if v is not None else "").split())
 
 
+def house_style(v, kind, brand):
+    """(value, notes): an AI product name or colour words in the brand config's house style, as the tool writes its
+    own (oc/housestyle.py): with heel_codes a heel height in cm becomes its H-code (10cm and up stay as printed), and
+    colour words take the brand's colour_spelling, the same map and whole-word rule as the tool's cart colours."""
+    if kind == "name" and brand.get("heel_codes"):
+        styled, note = housestyle.heel_code(v)
+        return (styled, [note]) if note else (v, [])
+    if kind == "colour" and brand.get("colour_spelling"):
+        styled, _, why = housestyle.colour_words(brand, v, "cart", "")
+        return (styled, [why.lstrip("; ")]) if styled != v else (v, [])
+    return v, []
+
+
 def judge(a, ev, brand, code):
-    """{'name'|'colour'|'family': (value | None, reasons)} for one product's answer."""
+    """{'name'|'colour'|'family': (value | None, value as checked, reasons), 'styled': {kind: house-style notes}} for
+    one product's answer. House style applies before the checks, so they judge the value that would be used."""
     heel = heel_ok(ev)
-    out = {}
+    out, styled = {}, {}
     for part, kind in (("product_name", "name"), ("colour_words", "colour")):
         v = _clean(a.get(part))
+        v, styled[kind] = house_style(v, kind, brand) if v else (v, [])
         probs = _text_problems(v, brand, code, heel, kind) if v else []
         out[kind] = (v if v and not probs else None, v, probs)
+    out["styled"] = styled
     fam = _clean(a.get("colour_family")).upper()
     ok = fam in (brand.get("colour_families") or {})
     out["family"] = (fam if ok else None, fam,
@@ -372,7 +403,8 @@ def apply(n, verdict, a, policy, stats, guard=None):
         good, raw, probs = verdict[kind]
         if good is not None and (policy == "everywhere" or COLOUR.get(src) != GREEN):
             used[kind] = good
-            notes.append(f"{label} by AI (the tool had '{value}': {why})")
+            styled = "".join(f", {x}" for x in verdict.get("styled", {}).get(kind, []))
+            notes.append(f"{label} by AI{styled} (the tool had '{value}': {why})")
         elif good is not None:
             stats["green kept"] += 1
             if not _same(good, value):
