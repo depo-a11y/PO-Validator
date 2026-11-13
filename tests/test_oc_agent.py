@@ -719,6 +719,66 @@ def test_a_green_name_stays_green_when_house_style_only_respells_the_colour(tmp_
     assert "AI suggests product name 'Court Sneaker'" in t["Why"] and "'Wasched' written 'Washed'" in t["Why"]
 
 
+def test_with_match_ignore_the_agent_matches_codes_as_catalog_match_does(tmp_path, key):
+    """Landing 2's match_ignore: an OC code and the store's code differ only by the brand's separators. The agent's
+    evidence and its hold-out compare codes the way catalog.match does (code_match). Invented codes only."""
+    tee = ("MEN CLOTHING T-SHIRTS SHORT SLEEVE", "BLACK", "M")
+    live = base._variant("8", "Shell Test Tee in Black", tee[0], "Active", "ZQ0001AB1 K1", "BLACK", "M", "ZXFW26800",
+                         "300.00", "300.00", "90.00", True)
+    hist = past_po(tmp_path, rows=[("NEW", "ZQ0001AB1 K1", "F/W 26", "Shell Test Tee in Black", *tee),
+                                   ("NEW", "ZQ0007AB1 K1", "F/W 26", "Wide Test Tee in Black", *tee)])
+    d = [dict(doc="SS - 1", collection="MM MALE RTW AVP", gender="MEN", currency="European Euro", label="MM",
+              lines=[_line(1, "ZQ-0001", "AB1", "K1", "T-SHIRT", {"M": 1}, 100.0),
+                     _line(2, "ZQ-0001", "AB1", "K2", "T-SHIRT", {"M": 1}, 100.0)], total_qty=2, net=200.0)]
+    seen = {}
+    for ignore in ("", "-"):
+        fake = Fake()
+        rows, review, checks, fills = build(tmp_path, fake, hist=hist, cat_extra=[live], d=copy.deepcopy(d),
+                                            brand=dict(BRAND, match_ignore=ignore) if ignore else BRAND)
+        ev = {e["code"]: e for req in fake.calls for e in sent_evidence(req)}
+        block = fake.calls[0]["system"][1]["text"]
+        seen[ignore] = (ev, block)
+    ev, block = seen["-"]
+    assert set(ev) == {"ZQ-0001AB1 K2"}                       # the carryover matched its live code, so only one NEW
+    assert [p["code"] for p in ev["ZQ-0001AB1 K2"]["same_style_products"]] == ["ZQ0001AB1 K1"]
+    assert "ZQ0001AB1 K1" not in block and "ZQ0007AB1 K1" in block   # the OC's own product is never an example
+    ev, block = seen[""]                                       # without the key both codes are new and match nothing
+    assert set(ev) == {"ZQ-0001AB1 K1", "ZQ-0001AB1 K2"} and not ev["ZQ-0001AB1 K2"]["same_style_products"]
+
+
+def test_ai_titles_through_service_draft_complete_and_reconcile_with_match_ignore(tmp_path, key, monkeypatch):
+    """One probe of the seam with landing 2's match_ignore through the three entry points. Invented codes only."""
+    from oc import complete, reconcile
+    brand = dict(BRAND, match_ignore="-")
+    live = base._variant("8", "Shell Test Sneaker in Black", "MEN SHOES SNEAKERS", "Active", "ZQ0001AB1 K1", "BLACK",
+                         "42", "ZXFW26800", "300.00", "300.00", "90.00", True)
+    cat_path = write_catalog(tmp_path, [live])
+
+    def oc():
+        return [dict(doc="SS - 1", collection="MM MALE SHOES AVP", gender="MEN", currency="European Euro", label="MM",
+                     lines=[_line(1, "ZQ-0001", "AB1", "K1", "SNEAKERS", {"42": 1}, 100.0),
+                            _line(2, "ZQ-0001", "AB1", "K2", "SNEAKERS", {"42": 1}, 100.0)], total_qty=2, net=200.0)]
+    monkeypatch.setattr(service, "read_oc", lambda *a, **k: (oc(), [], None))
+    fake = Fake(answers={"ZQ-0001AB1 K2": dict(product_name="Shell Test Sneaker", colour_words="Ink Black",
+                                               colour_family="BLACK", basis="b")})
+    po, review, checks = service.draft(str(tmp_path / "oc.pdf"), cat_path, brand, ai_titles=True,
+                                       ai_factory=fake.factory)
+    assert po is not None and not service.blocking(checks), service.blocking(checks)
+    out = tmp_path / "po.xlsx"
+    out.write_bytes(po)
+    _, rows = poxlsx.read_po(str(out))
+    # the tool's own NEW-product lookup takes codes as printed, so it finds no sibling and its title keeps the raw
+    # colour code; the agent's evidence finds the live sibling, and its suggestion waits in the Why (the F1 rule)
+    assert {(r["Command"], r[poxlsx.CODE], r["Title"]) for r in rows} == {
+        ("MERGE", "ZQ0001AB1 K1", "Shell Test Sneaker in Black"), ("NEW", "ZQ-0001AB1 K2", "Sneakers in K2")}
+    t = review[(review["Code"] == "ZQ-0001AB1 K2") & (review["Column"] == "Title")].iloc[0]
+    assert t["Colour"] == "red" and "AI suggests 'Shell Test Sneaker in Ink Black': not filled in" in t["Why"]
+    done = {c["Check"]: c["Result"] for c in complete.run(str(out), oc(), brand, catm.load(cat_path), histm.History([]),
+                                                           base._tags(), str(tmp_path / "done.xlsx"))}
+    assert done["Qty per code+size equals the OC"] == "PASS"
+    assert reconcile.compare(rows, rows, oc(), brand=brand)["hand_qty_mismatch"] == []
+
+
 def test_the_system_prompt_states_the_house_rules():
     s = " ".join(titles.system(BRAND).split())
     for phrase in ("only H30, H50, H60 or H80", "never H100", "Never guess a height",

@@ -170,14 +170,42 @@ def test_a_refused_draft_is_explained_from_its_failing_check_and_pages(tmp_path,
     fake = Fake(ans)
     e = service.explain_draft(pdf, checks, _cfg(), ai_factory=fake.factory)
     p = fake.payload
-    assert dict(Check=check, Result="FAIL", Detail=str(fail["Detail"])[:explain.DETAIL_CHARS],
-                stops_the_run=True) in p["failing_checks"]
+    assert dict(Check=check, Result="FAIL", Detail=str(fail["Detail"])[:explain.DETAIL_CHARS], stops_the_run=True,
+                read_with_ai_can_fix=name == "unknown layout") in p["failing_checks"]   # the only one the tool points at AI
     assert not [c for c in p["other_checks"] if c["Result"] == "FAIL"] and all("Detail" not in c for c in p["other_checks"])
     assert [x["page"] for x in p["pdf_pages"]] == pages and p["pdf_page_count"] == max(pages)
     assert all(x["text"] == (ai.pdf_pages(pdf)[x["page"] - 1])[:explain.PAGE_CHARS] for x in p["pdf_pages"])
     assert p["brand"] == dict(name="mm", vendor="MAISON MARGIELA", adapter="otb", cost_currency="EUR")
     assert e["ok"] and e["cause"] == ans["cause"] and e["refs"]["rows"] == []
     assert e["refs"]["pages"] == [x for x in ans["refs"]["pages"] if x <= max(pages)]
+
+
+def _thug_invoice(tmp_path):
+    import test_oc_thugclub as tt
+    import thug_synth
+    pdf = thug_synth.portrait_pdf(str(tmp_path / "invoice.pdf"), title="COMMERCIAL INVOICE")
+    return pdf, tt.BRAND, service.draft(pdf, ts._catalog(tmp_path), tt.BRAND)
+
+
+@pytest.mark.parametrize("advice", ["Tick Read the OC with AI and build again.", "Try the AI reader on this file.",
+                                    "Have the AI read the PDF instead."])
+def test_a_refusal_the_ai_reader_cannot_fix_never_gets_ai_reader_advice(tmp_path, key, advice):
+    pdf, brand, (po, review, checks) = _thug_invoice(tmp_path)
+    (f,) = service.blocking(checks)
+    assert po is None and "not an order confirmation" in f["Detail"] and service.AI_HINT not in f["Detail"]
+    fake = Fake(answer("This is a commercial invoice, not an order confirmation.", advice, "colleague", pages=[1]))
+    e = service.explain_draft(pdf, checks, brand, ai_factory=fake.factory)
+    assert [x["read_with_ai_can_fix"] for x in fake.payload["failing_checks"]] == [False]
+    assert e["ok"] is False and e["reason"] == "it suggests reading the OC with AI, which cannot fix this refusal"
+    assert advice not in explain.as_text(e)
+    ok = Fake(answer("This is a commercial invoice, not an order confirmation.",
+                     "Upload the order confirmation instead.", "colleague", pages=[1]))
+    assert service.explain_draft(pdf, checks, brand, ai_factory=ok.factory)["ok"]
+
+
+def test_the_explanation_prompt_ties_ai_reader_advice_to_the_tools_own_hint():
+    s = " ".join(explain.SYSTEM.split())
+    assert "read_with_ai_can_fix" in s and "never suggest the AI reader then" in s
 
 
 def test_a_draft_explanation_says_which_failing_check_stopped_the_run(tmp_path, monkeypatch, key):

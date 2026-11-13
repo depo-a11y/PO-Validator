@@ -475,7 +475,7 @@ MUTANTS = [
     ("oc/agent/titles.py", "    if failed:\n        missed =", "    if False:\n        missed =", "titles: a failure reported as INFO"),
     ("oc/agent/titles.py", "            if len(verdicts) < len(chunk):", "            if False:",
      "titles: products left out of an answer not reported"),
-    ("oc/agent/titles.py", "            if code in exclude:\n                continue", "            if False:\n                continue",
+    ("oc/agent/titles.py", "            if code_match(code, ign) in exclude:\n                continue", "            if False:\n                continue",
      "titles: hold-out ignored (an OC product in the few-shot)"),
     ("oc/agent/titles.py", '                {"type": "text", "text": block, "cache_control": {"type": "ephemeral"}}],',
      '                {"type": "text", "text": block}],', "titles: cache_control dropped from the few-shot block"),
@@ -488,10 +488,10 @@ MUTANTS = [
      '                    n["title"] = [pre + n["title"][0], "rule",', "draft: a gender prefix drops the AI source"),
     ("oc/agent/titles.py", '        n["ai"] = True   # the de-dupe', '        pass   # the de-dupe',
      "titles: a gender prefix turns an AI title (amber or red) into an amber rule"),
-    ("oc/agent/explain.py", "                  stops_the_run=stops(c))", "                  stops_the_run=True)",
+    ("oc/agent/explain.py", "                  stops_the_run=stops(c), **(", "                  stops_the_run=True, **(",
      "explain: every failing check said to stop the run"),
-    ("oc/agent/explain.py", "    fails, others = _split(checks, lambda c: bool(service.blocking([c])))",
-     "    fails, others = _split(checks)", "explain: a draft's sheet-fixable FAILs said to stop it"),
+    ("oc/agent/explain.py", "    fails, others = _split(checks, lambda c: bool(service.blocking([c])), lambda c",
+     "    fails, others = _split(checks, lambda c: True, lambda c", "explain: a draft's sheet-fixable FAILs said to stop it"),
     ("oc/agent/explain.py", '.replace("{cap}", str(TEXT_CAP))', '.replace("{cap}", "600")',
      "explain: the prompt states a longer limit than the tool accepts"),
     ("oc/draft.py",
@@ -537,7 +537,7 @@ MUTANTS = [
     ("pages/1_Order_confirmation_to_PO.py", '        S["ai_explains"] = S.get("ai_explains", 0) + 1', "        pass",
      "page: AI explanations not counted"),
     ("oc/agent/explain.py", """    fails = [dict(Check=str(c["Check"]), Result=c["Result"], Detail=str(c["Detail"])[:DETAIL_CHARS],
-                  stops_the_run=stops(c))
+                  stops_the_run=stops(c), **({} if ai_fix is None else dict(read_with_ai_can_fix=ai_fix(c))))
              for c in copy.deepcopy(checks) if c["Result"] == "FAIL"]""",
      """    fails = [c for c in checks if c["Result"] == "FAIL"]
     for c in fails:
@@ -621,6 +621,18 @@ MUTANTS = [
     ("oc/draft.py",
      "        name = (name[0], own[1], own[2]) if own[0].endswith(cut) and own[0][:-len(cut)] == name[0] else name\n",
      "", "draft: a respelled colour makes the green name replaceable"),
+    # ---- rebase onto landing 2 (e5b8309): match_ignore and NotLayout seams ----
+    ("oc/agent/titles.py", '''    ign = brand.get("match_ignore") or ""   # an OC code and a past PO's store code, matched as catalog.match does''',
+     '''    ign = ""   # an OC code and a past PO's store code, matched as catalog.match does''',
+     "titles: the hold-out compares OC and store codes as printed under match_ignore"),
+    ("oc/agent/titles.py", '''    ign = R.b.get("match_ignore") or ""   # codes compared as catalog.match compares them (landing 2's code_match)''',
+     '''    ign = ""   # codes compared as catalog.match compares them (landing 2's code_match)''',
+     "titles: the evidence compares codes as printed under match_ignore"),
+    ("oc/agent/explain.py", '''    if not valid.get("ai_reader") and AI_READER.search(f"{data['cause']} {data['next_step']}"):''',
+     '''    if False and AI_READER.search(f"{data['cause']} {data['next_step']}"):''',
+     "explain: AI reader advice kept on a refusal the AI reader cannot fix"),
+    ("oc/agent/explain.py", '''lambda c: service.AI_HINT in str(c["Detail"]))''', "lambda c: True)",
+     "explain: every refusal flagged as one the AI reader can fix"),
     # ---- reviewer case 2026-11-12-buyer-14 (F5, F7) ----
     # ---- reviewer case 2026-11-13-buyer-9 (finding 2): no rejected value echoed through a reason ----
     ("oc/agent/explain.py", """        raise ValueError("its 'who' is not colleague or colwyn")""",

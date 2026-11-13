@@ -29,6 +29,10 @@ WHO = ("colleague", "colwyn")
 # No Variant Cost or Wholesale Price: a cost or margin check's own Detail carries the numbers it needs.
 PO_COLS = ["Command", "Title", "Type", "Option1 Value", "Option2 Value", "Variant SKU", "Variant Price",
            "Metafield: my_fields.manufacture_code", "Order Qty"]
+# Advice to read the OC with AI. The tool offers that only for a layout its reader does not know (service.AI_HINT in a
+# check's Detail); a document refused for what it is (otb.NotLayout: an invoice, a proforma, a repeat, a held brand)
+# is not something the AI reader can fix, and following such advice drafts from the refused document.
+AI_READER = re.compile(r"\bwith ai\b|\bai reader\b|\bai read", re.I)
 
 SYSTEM = """You help a buying assistant at Marais, a fashion retailer in Melbourne, understand why the \
 order-confirmation-to-PO tool refused to make a draft PO from a supplier's order confirmation (OC) PDF, or refused \
@@ -40,6 +44,11 @@ brand, and either the text of some PDF pages or the PO rows the failing checks n
 A failing check with stops_the_run true is what stopped the run; one with stops_the_run false did not stop it and \
 is fixed in the sheet afterwards (a blank retail price, for example). Explain what stopped the run first, and do \
 not blame one check on another unless the details show it.
+
+On a draft, each failing check also carries read_with_ai_can_fix. It is true only when the tool itself offers \
+ticking "Read the OC with AI" for it, because the layout looks new to the reader. When it is false, the document \
+was refused for what it is or for its own figures (an invoice, a proforma, an order printed twice, a held brand, \
+totals that do not add up): reading it with AI cannot fix that, so never suggest the AI reader then.
 
 Return:
 - cause: what went wrong, in one or two plain sentences (at most {cap} characters) a colleague who is not \
@@ -73,9 +82,9 @@ def _brand(brand_cfg):
                 cost_currency=cost_currency(brand_cfg))
 
 
-def _split(checks, stops=lambda check: True):
+def _split(checks, stops=lambda check: True, ai_fix=None):
     fails = [dict(Check=str(c["Check"]), Result=c["Result"], Detail=str(c["Detail"])[:DETAIL_CHARS],
-                  stops_the_run=stops(c))
+                  stops_the_run=stops(c), **({} if ai_fix is None else dict(read_with_ai_can_fix=ai_fix(c))))
              for c in copy.deepcopy(checks) if c["Result"] == "FAIL"]
     others = [dict(Check=str(c["Check"]), Result=c["Result"]) for c in checks if c["Result"] != "FAIL"]
     return fails, others
@@ -134,14 +143,15 @@ def request(payload):
 def draft_request(oc_path, checks, brand_cfg):
     """(request, valid refs) for a refused draft. A FAIL the reviewer fixes in the sheet did not stop it."""
     from .. import service
-    fails, others = _split(checks, lambda c: bool(service.blocking([c])))
+    fails, others = _split(checks, lambda c: bool(service.blocking([c])), lambda c: service.AI_HINT in str(c["Detail"]))
     pages = ai.pdf_pages(oc_path) or []
     sent = pick_pages(pages, " ".join(f["Detail"] for f in fails))
     payload = dict(step="build the draft PO from the order confirmation", brand=_brand(brand_cfg),
                    failing_checks=fails, other_checks=others, pdf_page_count=len(pages),
                    pdf_pages=[dict(page=p, text=pages[p - 1][:PAGE_CHARS]) for p in sent])
     return request(payload), dict(pages=set(range(1, len(pages) + 1)), rows=set(),
-                                  checks={str(c["Check"]) for c in checks})
+                                  checks={str(c["Check"]) for c in checks},
+                                  ai_reader=any(f["read_with_ai_can_fix"] for f in fails))
 
 
 def finalize_request(po_path, checks, brand_cfg):
@@ -172,6 +182,8 @@ def check_answer(data, valid):
             raise ValueError(f"its {k.replace('_', ' ')} cannot be shown as plain text ({prob})")
     if data.get("who") not in WHO:
         raise ValueError("its 'who' is not colleague or colwyn")   # never echoed: it may be planted text
+    if not valid.get("ai_reader") and AI_READER.search(f"{data['cause']} {data['next_step']}"):
+        raise ValueError("it suggests reading the OC with AI, which cannot fix this refusal")   # never echoed
     refs, dropped = {}, 0
     for k, kind in (("pages", int), ("rows", int), ("checks", str)):
         got = data["refs"].get(k) or []

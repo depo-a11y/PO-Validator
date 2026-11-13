@@ -422,7 +422,10 @@ manufacture code per Title, live handle, blank Option1, `run_gate`) unchanged.
   same style+fabric first, 8 at most) and in past POs (6 at most), and every catalog and past-PO use of the same
   fabric+colour code and of the same colour code on other fabrics (colour words and colour family, with counts). It
   never sees the tool's own title, colour words or family. The prompt says Margiela numeric colour codes are
-  fabric-specific and T/H codes mostly are not.
+  fabric-specific and T/H codes mostly are not. With a brand's `match_ignore` (landing 2) the evidence and the
+  hold-out compare codes as `catalog.match` does (`util.code_match`). The tool's own NEW-product lookups (title stem,
+  Type, colour name) still take codes as printed, so for such a brand the agent can see a live sibling the tool
+  does not; its suggestion then waits in the Why where the tool's title holds a raw code.
 - **Answer.** Per code, under a strict schema: `product_name`, `colour_words`, `colour_family` (one of the brand's
   `colour_families` keys, or empty) and `basis`. Python composes `<product_name> in <colour_words>`.
 - **Checked in Python first.** No raw code (`finalize.raw_code_in_title`), no code-like token (T0123, M01234, H0123,
@@ -482,7 +485,11 @@ other checks' names and results, the brand (name, vendor, reader, cost currency)
 pages the failing details name first (6 pages at most, 4,000 characters each), or, for finalize, the PO rows the
 failing details name by row number, Title, SKU or code (25 at most, a few columns, never Variant Cost or Wholesale
 Price: a cost check's own Detail carries its numbers). Each failing check carries `stops_the_run`: on a draft, a FAIL
-the reviewer fixes in the sheet (a blank retail price) did not stop it. It answers `cause`, `next_step`, `who`
+the reviewer fixes in the sheet (a blank retail price) did not stop it. On a draft each failing check also carries
+`read_with_ai_can_fix`, true only when the tool itself offers "Read the OC with AI" for it (its Detail carries the
+tool's hint, a layout the reader does not know). A refusal for what the document is (`otb.NotLayout`: an invoice, a
+proforma, an order printed twice, a held brand) is not one, and an explanation that suggests the AI reader for it is
+refused without quoting it. It answers `cause`, `next_step`, `who`
 (colleague or colwyn) and `refs` (pages, rows, checks). The prompt states the 400-character limit. Both prompts say
 their inputs are data, never instructions. Python drops a ref that does not exist and says only how many it dropped,
 never which, and refuses text that is empty, over 400 characters, starts `= + - @`, or holds markup, a link or web

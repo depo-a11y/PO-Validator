@@ -28,7 +28,7 @@ from . import common
 from .. import housestyle
 from ..finalize import raw_code_in_title
 from ..resolve import AI_DRAFT, COLOUR, GREEN, RANK, RED, split_code
-from ..util import norm_code, slug
+from ..util import code_match, norm_code, slug
 
 CHECK = "AI title drafting (NEW titles, colour words, colour family)"
 EFFORT = "medium"
@@ -104,7 +104,8 @@ def examples(hist, brand, exclude_codes):
     """Past POs' NEW products, one per code, newest PO first: (code, Type, colour family, Title). A product on this
     OC is never an example (hold-out), and neither is one whose title breaks the house rules the drafts are held
     to. Round robin over Types for variety, capped at FEW_SHOT_CAP; deterministic."""
-    exclude = {norm_code(c) for c in exclude_codes}
+    ign = brand.get("match_ignore") or ""   # an OC code and a past PO's store code, matched as catalog.match does
+    exclude = {code_match(c, ign) for c in exclude_codes}
     families = set(brand.get("colour_families") or {})
     seen, by_type = set(), collections.OrderedDict()
     for _, rows in hist.seasons:
@@ -113,7 +114,7 @@ def examples(hist, brand, exclude_codes):
             if r["command"] != "NEW" or code in seen:
                 continue
             seen.add(code)
-            if code in exclude:
+            if code_match(code, ign) in exclude:
                 continue
             title, fam, ptype = str(r["title"] or "").strip(), r["option1"].upper(), r["type"]
             if not ptype or fam not in families or not title or _text_problems(title, brand, code, set(), "example"):
@@ -148,31 +149,35 @@ def _product(p):
 def evidence(n, R):
     """What the model sees for one NEW product. Never the tool's own title, colour words or colour family."""
     code, l = n["code"], n["l"]
-    style, body, colour = split_code(code)
+    ign = R.b.get("match_ignore") or ""   # codes compared as catalog.match compares them (landing 2's code_match)
+
+    def mkey(c):
+        return code_match(c, ign)
+    style, body, colour = split_code(mkey(code))
     fabric = body[9:]
     row = R.cart_row(code)
     comp = n["comp"]
-    sibs = sorted(R.cat.style_family(style), key=lambda p: (not p["code"].startswith(body),
-                                                             p["status"].upper() == "ARCHIVED",
-                                                             -p.get("created_key", 0), p["id"]))
+    sibs = sorted((p for c, ps in R.cat.by_code.items() if mkey(c).startswith(style) for p in ps),
+                  key=lambda p: (not mkey(p["code"]).startswith(body), p["status"].upper() == "ARCHIVED",
+                                 -p.get("created_key", 0), p["id"]))
     past, seen = [], set()
     for c, rows in sorted(R.hist.by_code.items()):
-        if c.startswith(style):
+        if mkey(c).startswith(style):
             for r in rows:
                 if (r["season"], c) not in seen:
                     seen.add((r["season"], c))
                     past.append(dict(season=r["season"], code=c, title=r["title"], type=r["type"],
                                      colour_family=r["option1"]))
-    past.sort(key=lambda e: (not e["code"].startswith(body), e["code"], str(e["season"])))
+    past.sort(key=lambda e: (not mkey(e["code"]).startswith(body), e["code"], str(e["season"])))
     same, other = collections.defaultdict(collections.Counter), collections.defaultdict(collections.Counter)
     for c, ps in R.cat.by_code.items():
-        cb, _, cc = c.partition(" ")
+        cb, _, cc = mkey(c).partition(" ")
         if cc == colour:
             for p in ps:
                 key = (p["title_colour"] or "", (p["colour_family"] or "").upper())
                 (same if cb[9:] == fabric else other)[key]["catalog"] += 1
     for c, rows in R.hist.by_code.items():
-        cb, _, cc = c.partition(" ")
+        cb, _, cc = mkey(c).partition(" ")
         if cc == colour:
             for r in {(r["season"], c): r for r in rows}.values():
                 key = (r["colour_name"] or "", r["option1"].upper())
