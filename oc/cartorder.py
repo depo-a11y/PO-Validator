@@ -207,8 +207,13 @@ def cost_check(brand_cfg):
 
 
 def read_order(path, brand_cfg):
-    """The cart as the order, with its checks: (docs | None, checks, cart | None). docs None means a FAIL."""
+    """The cart as the order, with its checks: (docs | None, checks, cart | None). docs None means a FAIL. A config
+    on hold (brand.hold_row) is refused before the cart is read, as an OC is."""
     from . import service
+    from .brand import hold_row
+    held = hold_row(brand_cfg)
+    if held:
+        return None, [held], None
     try:
         docs, cart = read(path)
     except cartm.CartError as e:

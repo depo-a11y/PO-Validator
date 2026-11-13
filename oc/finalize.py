@@ -54,6 +54,7 @@ from openpyxl.utils import get_column_letter
 from .poxlsx import (read_po, CODE, MADE_IN, SEASON, NEW_SALE, COST_PRICE, TITLE_TAG, AUD_FMT, money_format,
                      write_table, write_frame, append_text)
 from .draft import PRICE_CHECK
+from .brand import hold_row
 from .util import blank, cost_currency, norm_code, norm_size, money, slug
 
 REPO = Path(__file__).resolve().parent.parent
@@ -119,6 +120,9 @@ def _r2(v):
 
 
 def run(po_path, brand, catalog, out_prefix):
+    held = hold_row(brand)
+    if held:
+        return [held]   # a config on hold: nothing read, nothing written
     sys.path.insert(0, str(REPO))
     import validator_core as core
 

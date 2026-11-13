@@ -17,10 +17,14 @@ from .poxlsx import (FILLS, CODE, MADE_IN, COST_PRICE, TITLE_TAG, SEASON, NEW_SA
                      resolve_formula, write_table, review_row, clean_text, as_text)
 from .draft import PRICE_CHECK
 from .resolve import Resolver, COLOUR, AI_OC, NO_RRP
+from .brand import hold_row
 from .util import blank, norm_code, norm_size, fmt_money, cost_currency, money, slug, size_match
 
 
 def run(po_path, docs, brand, catalog, history, tag_lookup, out, price_overrides=None, cart=None):
+    held = hold_row(brand)
+    if held:
+        return [held]   # a config on hold: nothing read, nothing written
     price_overrides = {norm_code(k): v for k, v in (price_overrides or {}).items()}
     cur = cost_currency(brand)
     lines = oc_lines(docs, brand)

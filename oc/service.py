@@ -73,12 +73,15 @@ IDENTITY_CHECK = "Order confirmation is for the brand picked (issuer and label)"
 TOTALS_CHECK = "Order confirmation totals printed by the brand"
 NOTES_CHECK = "Order confirmation values the tool did not use"
 SOURCE_CHECK = "Order source"
+HOLD_CHECK = brandm.HOLD_CHECK
 # A fixed reader's problem that is not a layout change: the arithmetic gates, a discount, a number format the reader
 # will not guess, and a document the reader knows is not an order (thugclub: a commercial invoice, packing list or
-# deposit proforma). Every other problem (no confirmation found, a moved header, a quantity off its column) gets the
-# hint to read the OC with AI. The sheet reader words its grand-total gate ": parsed ..., printed ..." and its
-# number-format refusal "... number format (decimal mark ...)".
-NOT_LAYOUT = re.compile(r": sizes sum | != line value |: its lines add up to |: parsed |discount|: number format: "
+# deposit proforma; sportlux: a payment request, or a confirmation printed twice). Every other problem (no
+# confirmation found, a moved header, a quantity off its column) gets the hint to read the OC with AI. The sheet
+# reader words its grand-total gate ": parsed ..., printed ..." and its number-format refusal "... number format
+# (decimal mark ...)".
+NOT_LAYOUT = re.compile(r": sizes sum | != line value |: its lines add up to |: parsed | is a payment request "
+                        r"| line for line and total for total |discount|: number format: "
                         r"|number format \(|not an order confirmation", re.I)
 GATE_CHECK = "Order confirmation passes its gates (parsed = printed)"
 AI_HINT = ("If this is the right brand and its layout changed, tick 'Read the OC with AI' and build again "
@@ -89,7 +92,8 @@ LAYOUTS = {"otb": "the OTB layout (Maison Margiela, MM6)", "admilano": "the AD M
            "thugclub": "the THUG CLUB Corp. proforma invoice layout (Thug Club, Thug Club x Alpha Industries)",
            "joor": "the JOOR order print (any brand ordering through JOOR)",
            "p3m": "the \"#3xxxxxx\" ordering-platform layout (Willy Chavarria, Gosha Rubchinskiy, Maison MIHARA "
-                  "YASUHIRO, Amiri)"}
+                  "YASUHIRO, Amiri)",
+           "sportlux": "the Sportlux layout (Palm Angels)"}
 
 
 def fixed_reader_row(name):
@@ -129,7 +133,10 @@ def read_oc(oc_path, brand_cfg, reader=None, ai_factory=None):
     docs None means a FAIL among the checks. info is the AI reader's (model, tokens, seconds, cost and its raw
     answer), None for a fixed reader. `ai_factory(key) -> client` replaces the Anthropic client (tests).
     Whatever the reader, an OC whose currency (normalised: otb prints "European Euro") is not the brand's
-    cost_currency is refused."""
+    cost_currency is refused. A config on hold (its `hold` reason) is refused before any reader runs."""
+    held = brandm.hold_row(brand_cfg)
+    if held:
+        return None, [held], None
     if (reader or brand_cfg["adapter"]) == "ai":
         from .adapters import ai
         try:
@@ -518,7 +525,11 @@ def finalize(po_path, catalog_path, brand_cfg, when=None):
     """Checked PO -> (zip of the upload and delivery files | None, checks, PU-new gate errors).
 
     All or nothing: if any check FAILs there is no zip at all. `when` names the run: pass the
-    same value to zip_name(file_prefix(brand_cfg, when)) so the zip carries the run id too."""
+    same value to zip_name(file_prefix(brand_cfg, when)) so the zip carries the run id too. A config on hold is
+    refused before anything is read."""
+    held = brandm.hold_row(brand_cfg)
+    if held:
+        return None, [held], pd.DataFrame()
     prefix = run_prefix(po_path, brand_cfg, when)
     with tempfile.TemporaryDirectory(prefix="oc-finalize-") as tmp:
         try:

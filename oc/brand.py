@@ -41,6 +41,10 @@ as a spreadsheet, read by the config's `sheet:` column mapping; oc/adapters/shee
 layout, read by Claude; oc/adapters/ai.py). An `ai` brand must name `oc_supplier`
 (the company printed as the issuer on its OCs) and `join_key`; a `sheet` brand `join_key` and `sheet:`.
 
+`hold` (a sentence, off unless set) parks a config: every path that uses it (read, draft, complete, finalize)
+refuses with that reason before reading or writing anything, e.g. until the store's codes and the OC's can be
+joined. hold_row is the one check they share, so a held config fails closed everywhere.
+
 `join_key` says how the store's manufacture_code is built from an OC line: a template
 over {style}, {fabric}, {colour} and {colour_code}. The default, for otb, is
 "{style}{fabric} {colour}" (e.g. S99ZZ0001P0001 101). {colour_code} looks the
@@ -80,8 +84,14 @@ DEFAULTS = dict(
 REQUIRED = ["vendor", "adapter", "season", "sku_prefix", "cost_multiplier",
             "cost_currency", "margin_floor"]
 
+OPTIONAL = ["oc_supplier", "oc_label", "oc_style_prefix", "join_key", "join_key_alt", "match_ignore", "size_map",
+            "colour_codes", "colour_spelling", "heel_codes", "subcategory_types", "title_prefixes", "sheet",
+            "source_kind", "hold", "price_round"]   # price_round: retired 2026-11-12, still in old configs, dropped
+
+KEYS = set(DEFAULTS) | set(REQUIRED) | set(OPTIONAL)
+
 # built-in readers, one per known layout (oc/adapters/<name>.py)
-FIXED = ("otb", "admilano", "adidas", "fog", "thugclub", "joor", "p3m")
+FIXED = ("otb", "admilano", "adidas", "fog", "thugclub", "joor", "p3m", "sportlux")
 FIXED += ("sheet",)   # built-in too: a spreadsheet OC of any layout, read by the brand config's sheet: mapping
 ADAPTERS = FIXED + ("ai",)
 JOIN_FIELDS = ("style", "fabric", "colour", "colour_code")
@@ -116,7 +126,18 @@ FIXED_NEEDS = {
     "p3m": {"oc_supplier": "oc_supplier: the company printed at the top left of this brand's order confirmations, "
                            "beside 'Order number #3...' (e.g. SOSU CO.,LTD. for Maison MIHARA YASUHIRO); one reader "
                            "serves every brand on that ordering platform"},
+    "sportlux": {"oc_supplier": "oc_supplier: the issuer printed at the top of this brand's OCs (Sportlux General "
+                                "Trading FZCO); its OCs print no label, so the issuer is what holds the config to them"},
 }
+
+
+HOLD_CHECK = "Brand config is not on hold"
+
+
+def hold_row(cfg):
+    """The FAIL row naming the reason when the config is on hold (`hold`), else None."""
+    hold = (cfg or {}).get("hold")
+    return dict(Check=HOLD_CHECK, Result="FAIL", Detail=f"This brand's config is on hold: {hold}") if hold else None
 
 
 class BrandError(Exception):
@@ -238,6 +259,10 @@ def from_mapping(data, source, name=None):
 
 def _reader_keys(cfg, data, source):
     """adapter, oc_supplier, join_key and colour_codes, checked at load so a bad config never reaches a PDF."""
+    hold = cfg.get("hold")
+    if hold is not None and (not isinstance(hold, str) or not hold.strip()):
+        raise BrandError(f"{source}: hold is the reason this brand's config must not be used yet, as a sentence "
+                         f"(the page refuses every OC for the brand while it is set), got {hold!r}")
     if cfg["adapter"] not in ADAPTERS:
         raise BrandError(f"{source}: adapter must be one of {', '.join(ADAPTERS)}, got {cfg['adapter']!r}")
     if cfg["adapter"] == "ai":
@@ -344,6 +369,11 @@ def _finish(data, source, name, paths=False):
         data = {}
     if not isinstance(data, Mapping):
         raise BrandError(f"{source}: a brand config is a set of 'key: value' lines, got {type(data).__name__}")
+    unknown = [k for k in data if k not in KEYS]
+    if unknown:   # fail closed: a misspelt key would be ignored (`on_hold:` loaded a brand unheld)
+        raise BrandError(f"{source}: unknown key{'s' if len(unknown) > 1 else ''} "
+                         f"{', '.join(repr(k) for k in unknown)}: a typo? A brand config reads only the keys "
+                         "oc/brands/example.yaml and oc/README.md describe, so nothing loads until it is fixed")
     cfg = copy.deepcopy(DEFAULTS)
     cfg.update(data)
     missing = [k for k in REQUIRED if cfg.get(k) in (None, "")]
