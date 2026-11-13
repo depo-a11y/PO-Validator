@@ -1,12 +1,14 @@
 # Shape of a brand config. Copy to <brand>.local.yaml and fill in real values.
 # *.local.yaml is gitignored: cost multipliers, history paths and price data are
 # commercial and must never be committed while this repo is public.
+# A top-level key not shown here fails the load, naming it.
 vendor: EXAMPLE BRAND          # exactly as in validator_core.APPROVED_VENDORS
 adapter: otb                   # OC reader. Built-in, one layout each: otb (Maison Margiela/MM6), admilano (AD
                                # Milano), adidas (adidas AG), fog (Fear of God), thugclub (THUG CLUB Corp.
                                # proforma invoices; needs oc_label), joor (the JOOR order print of any brand;
                                # needs oc_supplier, the brand contact's email domain), p3m (the "#3xxxxxx" ordering
-                               # platform; needs oc_supplier, the selling company). sheet: an OC sent as a
+                               # platform; needs oc_supplier, the selling company), sportlux (the Palm Angels
+                               # distributor's Order Confirmation PDFs; needs oc_supplier). sheet: an OC sent as a
                                # spreadsheet, read by a sheet: column mapping (oc/adapters/sheet.py) and join_key.
                                # Or ai: any layout, read by Claude; needs oc_supplier and join_key below, and
                                # ANTHROPIC_API_KEY in the app's secrets. With no OC yet, `draft --cart` reads the
@@ -14,10 +16,19 @@ adapter: otb                   # OC reader. Built-in, one layout each: otb (Mais
 # sheet:                       # sheet only: printed header per field, e.g. columns: {style: Style, qty: Units, ...},
 #   ean_prefixes: ["0000000"]  # the brand's GS1 company prefixes, checked against every EAN (its identity anchor);
 #   totals: none               # or a totals row / cells; none when the brand prints none (oc/adapters/sheet.py)
+#   select: {column: Customer PO, values: [AA], known: [AA, AB]}   # only these rows are this brand's; a row
+                               # whose value is in no brand's config (known) FAILs
+#   header_rows: 2             # stack_headers: true joins a header printed over the two rows
+#   price_from: line_value     # no unit price printed: line value / qty per size row
+#   columns: {qty_gross: Gross, qty_cancelled: Cancelled}   # gross - cancelled must equal qty on every row
 # oc_style_prefix: [ZZ]        # any reader: every OC line's style must start with one (a brand sharing an
                                # agency's issuer); counts as an identity check
 # match_ignore: "-_ "          # any reader: these separators are left out of both codes, upper-cased, when an
                                # OC code is matched to a live product (MERGE rows carry the live code)
+# join_key_alt: "{style} {colour}"   # any reader: a second join_key, tried only where join_key finds no live
+                               # product; may also use {style_alt} (sheet: columns: style_alt)
+# hold: the store's codes and the OC's do not join yet   # parks the config: every path refuses it
+# source_kind: SAP demand export   # the file is not the brand's own OC: a WARN names it
 # oc_supplier: Example Brand Ltd   # ai: the company printed as the issuer on the brand's OCs (a list if it varies);
                                # a PDF from any other supplier is refused. Required for ai and fog; checked for
                                # otb and admilano when set

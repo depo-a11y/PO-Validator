@@ -155,7 +155,8 @@ def test_the_expander_names_the_built_in_readers_before_ai(tmp_path, monkeypatch
     text = " ".join(m.value for m in exp.markdown)
     assert ("the built-in one if the brand's OCs are one of the known layouts (Margiela/MM6, AD Milano, adidas, "
             "Fear of God, THUG CLUB proforma invoices `thugclub`, a JOOR order print `joor`, the \"#3xxxxxx\" ordering "
-            "platform `p3m`: Willy Chavarria, Gosha Rubchinskiy, Maison MIHARA YASUHIRO, Amiri), `adapter: sheet` with "
+            "platform `p3m`: Willy Chavarria, Gosha Rubchinskiy, Maison MIHARA YASUHIRO, Amiri, the Palm Angels "
+            "distributor's order confirmations `sportlux`), `adapter: sheet` with "
             "a `sheet:` column mapping if the brand sends its OC as a spreadsheet, else `adapter: ai`") in text
     assert "for joor the brand contact's email domain" in text
 

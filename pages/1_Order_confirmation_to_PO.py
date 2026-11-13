@@ -42,7 +42,8 @@ from example.yaml. Send him one of the brand's order confirmations and ask for o
 - the margin floor
 - the reader: the built-in one if the brand's OCs are one of the known layouts (Margiela/MM6, AD Milano, \
 adidas, Fear of God, THUG CLUB proforma invoices `thugclub`, a JOOR order print `joor`, the "#3xxxxxx" ordering \
-platform `p3m`: Willy Chavarria, Gosha Rubchinskiy, Maison MIHARA YASUHIRO, Amiri), `adapter: sheet` with a \
+platform `p3m`: Willy Chavarria, Gosha Rubchinskiy, Maison MIHARA YASUHIRO, Amiri, the Palm Angels distributor's \
+order confirmations `sportlux`), `adapter: sheet` with a \
 `sheet:` column mapping if the brand sends its OC as a spreadsheet, else `adapter: ai`, so they are read by AI
 - `oc_supplier`: the company name printed on the brand's OCs, for joor the brand contact's email domain (and \
 `oc_label` for an issuer with several labels)

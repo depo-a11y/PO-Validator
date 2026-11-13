@@ -32,6 +32,11 @@ The colour cell is the colour name, then its code when the brand prints one ("BL
 a last word with a digit in it, or repeating the first, is the code (`colour`, `colour_code`), the rest is
 `colour_name`. With no code ("CHARCOAL") `colour` is the name.
 
+Gender, as printed, never from the file name: `account_gender` when the ship-to or bill-to account or the Door names
+one ("TEST RETAILER - WOMENS", a whole word), else the collection's when every line's collection names the same one
+(otb.collection_gender, or MAN / WOMAN as a whole word; a lone W or M is not read). The document's `gender` is the account's first (the order's), with `gender_from`; each line
+also carries its own collection's gender, else the account's. Neither: None, and the brand's default_gender applies.
+
 Identity. JOOR prints the brand as a logo, which has no text. What the text names is the brand's contact
 in Brand Information, so `issuer` is the domain of that contact's email (brand.com), which for an order
 placed through an agency is the agency's. `label` is None: the label is not in the text layer.
@@ -61,6 +66,7 @@ EMAIL = re.compile(r"[\w.+-]+@([\w-]+(?:\.[\w-]+)+)")
 PAGE = re.compile(r"\bPage (\d+) of (\d+)\b")
 STATUSES = ("Pending", "Approved")
 PENDING_CHECK = "Order is approved by the brand in JOOR"
+ACCOUNT_GENDER = (("WOMEN", re.compile(r"\b(?:WOMEN'?S?|LADIES|FEMALE)\b", re.I)), ("MEN", re.compile(r"\b(?:MEN'?S?|MALE)\b", re.I)))
 
 
 def rows_of(words, tol=ROW_TOL):
@@ -139,6 +145,23 @@ def _field(lines, label):
     return " ".join(out).strip() or None
 
 
+def line_gender(collection):
+    """otb.collection_gender, then MAN or WOMAN as a whole word ("FW99 MAN RTW"); a single letter (W, M) is not read."""
+    g = collection_gender(collection)
+    if g or not collection:
+        return g
+    found = {"WOMEN" if m.group(0).upper() == "WOMAN" else "MEN" for m in re.finditer(r"\b(?:WO)?MAN\b", collection, re.I)}
+    return found.pop() if len(found) == 1 else None
+
+
+def account_gender(head):
+    """WOMEN or MEN when the ship-to and bill-to accounts and the Door name one gender as a whole word ("RETAILER -
+    WOMENS"); None when they name none or both."""
+    text = " ".join(head["columns"]["Shipping"] + head["columns"]["Billing"] + [_field(head["columns"]["Order"], "Door") or ""])
+    found = {g for g, pat in ACCOUNT_GENDER if pat.search(text)}
+    return found.pop() if len(found) == 1 else None
+
+
 def _new_doc(head):
     order, brand = head["columns"]["Order"], head["columns"]["Brand"]
     emails = [m.group(1).lower() for s in brand for m in EMAIL.finditer(s)]
@@ -148,7 +171,8 @@ def _new_doc(head):
                 date=created, created=created, start_ship=_field(order, "Start Ship"),
                 complete_ship=_field(order, "Complete Ship"), terms=_field(order, "Terms"),
                 ship_with=_field(order, "Ship With"), order_type=None, currency=None, collection=None,
-                gender=None, total_qty=None, gross=None, net=None, comments=None, cancelled=[], of=head["of"],
+                gender=None, gender_from=None, account_gender=account_gender(head), total_qty=None, gross=None,
+                net=None, comments=None, cancelled=[], of=head["of"],
                 pages=[], lines=[], _stream=[], _seen=[], _done=False)
 
 
@@ -208,8 +232,15 @@ def parse(pdf_path):
         d.pop("_cancelled", None)
         colls = list(dict.fromkeys(l["line_collection"] for l in d["lines"] if l["line_collection"]))
         d["collection"] = "; ".join(colls) or None
-        genders = {collection_gender(c) for c in colls}
-        d["gender"] = genders.pop() if len(genders) == 1 else None
+        genders = {line_gender(c) for c in colls}
+        common = genders.pop() if len(genders) == 1 else None
+        acct = d["account_gender"]
+        d["gender"], d["gender_from"] = (acct, "ship-to/bill-to account") if acct else \
+            (common, "collection") if common else (None, None)
+        for l in d["lines"]:
+            g = line_gender(l["line_collection"])
+            l["gender"], l["gender_from"] = (g, "collection") if g else (acct, "ship-to/bill-to account") if acct \
+                else (None, None)
         if d["net"] is not None and d["gross"] is not None and abs(d["net"] - d["gross"]) > 0.005:
             problems.append(f"{d['doc']}: Grand Total {d['currency']} {d['net']:,.2f} is not the Subtotal "
                             f"{d['gross']:,.2f} (a discount or charge); it is not applied to any line")

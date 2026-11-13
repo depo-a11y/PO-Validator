@@ -125,6 +125,50 @@ def test_by_size_rows(pdf):
                                            "Qty": 1, "Price EUR": 100.13, "Value EUR": 100.13}
 
 
+# ---- gender ----------------------------------------------------------------------
+def _with_collection(n, coll):
+    return [dict(st, coll=coll) if k == n else st for k, st in enumerate(oc_synth.JOOR_STYLES)]
+
+
+def test_no_gender_printed_leaves_it_to_the_brand_default(pdf):
+    d = joor.parse_checked(pdf)[0]
+    assert (d["gender"], d["gender_from"], d["account_gender"]) == (None, None, None)   # "1 Clements Street" is no MEN
+    assert {(l["gender"], l["gender_from"]) for l in d["lines"]} == {(None, None)}
+
+
+def test_the_account_name_gives_the_order_its_gender(build):
+    d1, d2 = joor.parse_checked(build(account="TEST RETAILER - WOMENS"))
+    assert (d1["gender"], d1["gender_from"]) == ("WOMEN", "ship-to/bill-to account")
+    assert {(l["gender"], l["gender_from"]) for l in d1["lines"]} == {("WOMEN", "ship-to/bill-to account")}
+    assert d2["gender"] is None
+
+
+def test_an_account_naming_both_genders_gives_none(build):
+    assert joor.parse_checked(build(account="TEST MENS AND WOMENS"))[0]["account_gender"] is None
+
+
+def test_a_collection_gender_on_every_line_gives_the_order_its_gender(tmp_path):
+    styles = [dict(st, coll="TEST MEN'S MAIN" if len(st["coll"]) < 40 else st["coll"] + " MEN") for st in oc_synth.JOOR_STYLES]
+    d = joor.parse_checked(oc_synth.joor_pdf(str(tmp_path / "men.pdf"), styles=styles))[0]
+    assert (d["gender"], d["gender_from"]) == ("MEN", "collection")
+
+
+@pytest.mark.parametrize("coll,want", [("TEST FW99 MAN RTW", "MEN"), ("TEST WOMAN PRE", "WOMEN"), ("TEST WOMEN", "WOMEN"),
+                                       ("TEST W RTW", None), ("TEST MANTLE", None), ("TEST MAN AND WOMAN", None)])
+def test_a_collection_names_its_gender_in_whole_words(coll, want):
+    assert joor.line_gender(coll) == want
+
+
+def test_the_account_is_the_orders_gender_and_a_line_keeps_its_collections(tmp_path):
+    path = oc_synth.joor_pdf(str(tmp_path / "mix.pdf"), styles=_with_collection(1, "TEST MENS (2099_TEST)"),
+                             account="TEST RETAILER - WOMENS")
+    d = joor.parse_checked(path)[0]
+    assert (d["gender"], d["gender_from"]) == ("WOMEN", "ship-to/bill-to account")
+    assert [(l["style"], l["gender"], l["gender_from"]) for l in d["lines"][1:4]] == [
+        ("ZZ-A1", "WOMEN", "ship-to/bill-to account"), ("ZZ-A2", "MEN", "collection"),
+        ("ZZ-A3", "WOMEN", "ship-to/bill-to account")]
+
+
 # ---- gates ------------------------------------------------------------------------
 def test_sizes_not_summing_to_the_printed_qty_are_refused(build):
     with pytest.raises(otb.GateError) as e:

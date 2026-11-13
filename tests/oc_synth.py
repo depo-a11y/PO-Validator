@@ -428,7 +428,7 @@ JOOR_SECOND = dict(name="TEST SHIRT", code="ZZ-A10", coll="TEST MAIN", price=10.
                    sizes=["S", "M", "L"], colours=[(["NAVY Z76N"], [1, 2, 1])])
 
 
-def _joor_head(p, k, n, status, po, email):
+def _joor_head(p, k, n, status, po, email, account="TEST RETAILER"):
     p.text(498.3, 28.6, f"Page {k} of {n}")
     p.text(55.0, 36.9, "Z0000")
     p.right(539.9, 36.9, status)
@@ -439,8 +439,8 @@ def _joor_head(p, k, n, status, po, email):
                  (419.0, "Billing Information")):
         p.text(x, 65.5, s, 7)
     for k2, (order, brand, ship) in enumerate((("Created: 01/02/2099", "Contact: Test Person", "TEST BUYER"),
-                                               ("Start Ship: 02/03/2099", None, "TEST RETAILER"),
-                                               ("Complete Ship: 03/04/2099", None, "1 Test Street"),
+                                               ("Start Ship: 02/03/2099", None, account),
+                                               ("Complete Ship: 03/04/2099", None, "1 Clements Street"),
                                                ("Terms: TEST TERMS", None, "Testville"))):
         top = 73.4 + 7 * k2
         p.text(55.0, top, order)
@@ -562,12 +562,14 @@ def joor_pdf(path, styles=JOOR_STYLES, status="Pending", email="contact.person@b
     shift=(style, colour, size, dx), qty_off/value_off=(style, colour, d), subtotal_off=(style, d), units_off,
     value_off_doc, grand_off, price_cur=(style, cur), amount_cur=(style, colour, cur), no_qty_row (style 4),
     extra_qty=(style, colour, size): a second quantity under that size one row down, status_p2,
-    placeholder=style: that style's wholesale printed as 0.01 (its amounts unchanged)."""
+    placeholder=style: that style's wholesale printed as 0.01 (its amounts unchanged), account: order 1's ship-to and
+    bill-to account name."""
     def page():
         return Page(595, 842, size=6)
     p1, p2, p3, p4 = page(), page(), page(), page()
     for k, p in enumerate((p1, p2, p3), 1):
-        _joor_head(p, k, 3, fault.get("status_p2", status) if k == 2 else status, "99000001", email)
+        _joor_head(p, k, 3, fault.get("status_p2", status) if k == 2 else status, "99000001", email,
+                   fault.get("account", "TEST RETAILER"))
     _joor_head(p4, 1, 1, "Approved", "ZZ9 - 99000002", email)
     top = 149.7
     for n, st in enumerate(styles[:3]):

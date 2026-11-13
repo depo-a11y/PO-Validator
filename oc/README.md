@@ -75,16 +75,24 @@ SS27 test and is now off by Colwyn's rule of 2026-11-12.
   proforma invoices, USD; `oc_label` THUG CLUB or a collaboration such as TC x AI; a commercial invoice, packing
   list or deposit proforma is refused as "not an order confirmation"), `joor` (the JOOR order print of any brand;
   `oc_supplier` is the brand contact's email domain, since JOOR prints the brand as a logo; a Pending order is a
-  WARN; a wholesale under 1.00 or a Grand Total other than the Subtotal is refused) and `p3m` (the "#3xxxxxx"
+  WARN; a wholesale under 1.00 or a Grand Total other than the Subtotal is refused), `p3m` (the "#3xxxxxx"
   ordering platform: Willy Chavarria, Gosha Rubchinskiy, Maison MIHARA YASUHIRO, Amiri, grid and SOSU inline
-  layouts; `oc_supplier` is the selling company printed on page 1).
+  layouts; `oc_supplier` is the selling company printed on page 1) and `sportlux` (the Palm Angels distributor's
+  "Order Confirmation" PDFs, EUR, an ERP and an Excel template told apart by the table header; `oc_supplier` is
+  the issuer printed at the top, since they print no label).
 - OC spreadsheet: `adapter: sheet` reads a brand's OC sent as .xlsx, .xls (BIFF, or the HTML-table ".xls" some
   order desks export) or .csv, by the config's `sheet:` column mapping (see "Spreadsheet OCs" below).
 - Matching and identity keys, any reader, off unless set: `match_ignore` (separator characters such as "-_ " left
   out of both codes, upper-cased, when an OC code is matched to a live product; a MERGE row carries the live code,
   a NEW row the OC's; two live codes that become equal stop the draft naming both), `oc_style_prefix` (every OC
-  line's style must start with one, for a brand that shares an agency's issuer; it counts as an identity check)
-  and `size_map` (see Sizes).
+  line's style must start with one, for a brand that shares an agency's issuer; it counts as an identity check),
+  `join_key_alt` (a second template, tried only for a line whose `join_key` code finds no live product; it may
+  also use `{style_alt}`, a sheet's `columns: style_alt`; each line joined so is an INFO check, printed -> live,
+  and complete and reconcile key it the same way, `match_ignore` applied) and `size_map` (see Sizes).
+- Config state, off unless set: `hold` (a sentence; every path that uses the config, read, draft, complete,
+  finalize and the cart, refuses with it before reading or writing anything) and `source_kind` (a short text such
+  as "SAP demand export" for a file that is not the brand's own OC: a WARN names it and says to confirm lines,
+  quantities and prices with the supplier).
 - Money: Wholesale Price, Total Order and the `Variant.cost_price` metafield are in the brand's `cost_currency`.
   The metafield is written and checked as `<cost_currency> <amount>` (`EUR 34`, `USD 150`), messages are worded in
   that currency, and the PO and Delivery file format those columns in it (EUR keeps the euro-sign format).
@@ -260,7 +268,8 @@ missing one would drop the rest).
 headless, so nobody else on the network can open it or spend on the API key; hosting must revisit that file, with
 a viewer allowlist and a per-user cap on AI reads. A brand config's numbers are checked at load: `sku_digits` is a
 whole number from 1 to 12 (it is a format width), `cost_multiplier` and `margin_floor` are above 0 and below 20,
-and the retired `price_round` key is dropped.
+the retired `price_round` key is dropped, and any other top-level key no code reads (`brand.KEYS`) fails the load
+naming it, so a misspelt `on_hold:` cannot load a brand unheld.
 
 `.streamlit/secrets.toml` is gitignored. Never commit it.
 
@@ -274,6 +283,13 @@ optionally, the RRP, EAN, HS code, country of origin, description, gender and or
 size (`columns: size` and `qty`), a matrix with one column per size (`size_columns`), or (size, qty, size price)
 column groups as NuORDER exports them (`size_pairs`). The module docstring shows every key. A sheet brand needs
 `join_key`; `oc_supplier` and `oc_label` need the column that prints them.
+
+For exports that are not a plain order form: `select` (`{column, values}`: only rows whose column holds one of the
+values are this brand's, the rest are counted in the Checks; `known` lists every value the brand's configs read
+between them, and a row whose value is in none FAILs naming its rows, units and value), `header_rows` with
+`stack_headers: true` (a header printed over two rows, each column's text joined), `price_from: line_value` (no
+unit price printed: each size row's price is its line value / qty, and the Checks say the qty x price gate checked
+nothing) and `columns: qty_gross` / `qty_cancelled` (gross - cancelled must equal the net qty on every row).
 
 The header row is found by its text, not its position; a later repeat of it (a page break in an export) is skipped.
 An unknown mapping key fails when the config loads, and a mapped header missing from the file fails the read naming

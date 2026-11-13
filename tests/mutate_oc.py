@@ -1217,6 +1217,15 @@ MUTANTS += [
      "joor: a style Total row that disagrees points at AI"),
     ("oc/brand.py", '    for key, what in (("oc_supplier", "a company name"), ("oc_label", "a label name"),\n                      ("oc_style_prefix", "a style-number prefix")):',
      '    for key, what in (("oc_supplier", "a company name"), ("oc_label", "a label name")):', "oc_style_prefix: an empty prefix loads"),
+    # ---- gender signals on the JOOR print ----
+    (J, '        d["gender"], d["gender_from"] = (acct, "ship-to/bill-to account") if acct else \\',
+     '        d["gender"], d["gender_from"] = (acct, "ship-to/bill-to account") if False else \\',
+     "joor: the ship-to/bill-to account's gender not given to the order"),
+    (J, """ACCOUNT_GENDER = (("WOMEN", re.compile(r"\\b(?:WOMEN'?S?|LADIES|FEMALE)\\b", re.I)), ("MEN", re.compile(r"\\b(?:MEN'?S?|MALE)\\b", re.I)))""",
+     """ACCOUNT_GENDER = (("WOMEN", re.compile(r"\\b(?:WOMEN'?S?|LADIES|FEMALE)\\b", re.I)), ("MEN", re.compile(r"MEN", re.I)))""",
+     "joor: MEN read inside an address word"),
+    (J, 'for m in re.finditer(r"\\b(?:WO)?MAN\\b", collection, re.I)}', 'for m in re.finditer(r"(?:WO)?MAN", collection, re.I)}',
+     "joor: MAN read inside a collection word"),
 ]
 
 MUTANTS += [   # review 2026-11-13-buyer-17 F1: an unknown select value under price_from: line_value
@@ -1254,6 +1263,8 @@ MUTANTS += [   # review 2026-11-13-buyer-17 F5: an unknown top-level key fails a
      "brand: an old config carrying the retired price_round no longer loads (buyer-17 F5)"),
     ("oc/brand.py", '            "source_kind", "hold", "price_round"]', '            "source_kind", "price_round"]',
      "brand: a config on hold no longer loads (buyer-17 F5)"),
+    ("pages/1_Order_confirmation_to_PO.py", "Amiri, the Palm Angels distributor's \\\norder confirmations `sportlux`)",
+     "Amiri)", "page: the reader list leaves sportlux out (buyer-17 F3)"),
 ]
 
 

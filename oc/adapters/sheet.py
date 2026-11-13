@@ -19,7 +19,7 @@ which printed header holds what (`check_mapping` validates it when the config lo
         currency: Currency Cost     # or sheet.currency when no column carries it
         doc: Order Number           # optional: one confirmation per value, else one named after the file
         # optional: line_no, fabric, product_class, gender, collection, description, delivery, issuer, label,
-        #           rrp, rrp_currency, ean, hs_code, origin
+        #           rrp, rrp_currency, ean, hs_code, origin, style_alt (join_key_alt's {style_alt})
       size_columns: [XS, S, M]      # layout 2, a size matrix: one column per size, headed by the size
       size_pairs:                   # layout 3: (size, qty[, size price]) column groups, as NuORDER exports
         - [Size 1, Qty 1, Size price 1]

@@ -10,7 +10,8 @@ Marais keeps the real ones in ~/Code/marais/_work/oc-brands/ (set OC_BRAND_DIR).
 
 A config can also come without a file (the web page): `from_text` takes the
 YAML itself, from an uploaded .yaml or a Streamlit secret, and `from_mapping`
-takes a TOML table. All three paths apply the same DEFAULTS and REQUIRED keys.
+takes a TOML table. All three paths apply the same DEFAULTS and REQUIRED keys,
+and refuse a top-level key outside KEYS, naming it (a typo would be ignored).
 
 Only a config read from a file (`load`) may name past POs by path. In a config
 from text the history paths are never opened: anyone who can upload a config
@@ -36,7 +37,8 @@ through an agency, whose issuer it shares with the agency's other brands, accept
 `adapter` picks the OC reader: a built-in reader for one known layout (`otb` Maison
 Margiela/MM6, `admilano` AD Milano, `adidas` adidas AG, `fog` Fear of God, `thugclub` THUG CLUB
 Corp. proforma invoices, `joor` the JOOR order print of any brand, `p3m` the "#3xxxxxx"
-ordering platform: Willy Chavarria, Gosha Rubchinskiy, Maison MIHARA YASUHIRO, Amiri), `sheet` (an OC sent
+ordering platform: Willy Chavarria, Gosha Rubchinskiy, Maison MIHARA YASUHIRO, Amiri, `sportlux` the Palm
+Angels distributor's order confirmations), `sheet` (an OC sent
 as a spreadsheet, read by the config's `sheet:` column mapping; oc/adapters/sheet.py) or `ai` (any
 layout, read by Claude; oc/adapters/ai.py). An `ai` brand must name `oc_supplier`
 (the company printed as the issuer on its OCs) and `join_key`; a `sheet` brand `join_key` and `sheet:`.
@@ -59,6 +61,9 @@ title_tag and body_html are filled the same way, each from its own tokens (TEXT_
 ("ZZ-0001 A1" printed, "ZZ0001 A1" live): characters such as "-_ " left out of both sides when an OC code
 is matched to a live product (catalog.match), upper-cased. A MERGE row carries the live code; a NEW row the
 OC's. Two live codes that become equal stop the draft, naming both. Letters and digits are refused.
+
+`join_key_alt` (off unless set) is a second template, tried only for a line whose join_key code finds no live
+product; it may also use {style_alt} (a sheet's style_alt column).
 """
 import copy
 import os
