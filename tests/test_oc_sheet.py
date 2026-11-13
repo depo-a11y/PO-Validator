@@ -556,9 +556,9 @@ def issuer_rows(issuer, label="LB"):
 
 
 def test_oc_supplier_on_a_sheet_brand_needs_its_issuer_column():
-    with pytest.raises(brandm.BrandError, match="oc_supplier is set but sheet: columns: issuer is not mapped"):
+    with pytest.raises(brandm.BrandError, match="oc_supplier is set but neither sheet: columns: issuer nor sheet: fields: issuer is mapped"):
         cfg(extra=dict(oc_supplier="Test Brand SpA"))
-    with pytest.raises(brandm.BrandError, match="oc_label is set but sheet: columns: label is not mapped"):
+    with pytest.raises(brandm.BrandError, match="oc_label is set but neither sheet: columns: label nor sheet: fields: label is mapped"):
         cfg(extra=dict(oc_label="LB"))
 
 
@@ -803,6 +803,199 @@ def test_an_rrp_that_differs_by_size_leaves_retail_blank_and_the_checks_say_so(t
     assert {r["Variant Price"] for r in rows_} == {None}
 
 
+# ---- platforms, header-block fields, footers, selectors, split columns (oc-readers-sheet2) --------------------------
+def joor_file(path, brand="TEST HOUSE", status="Approved", sizes=("S", "M", "L"), lines=None, units=None, subtotal=None,
+              discount=0, currency="EUR", rrp_currency="AUD"):
+    """A JOOR-layout export: brand at B2, label: value pairs above the header, a footer of labelled totals."""
+    lines = lines or [("TEE", "ZZ9001.AA01", "BLACK", "001", (1, 2, 0), 40.0, 120.0),
+                      ("COAT", "ZZ9002.BB02", "NAVY", "002", (0, 1, 1), 150.5, 420.0)]
+    head = (["Style Image", "Style Name", "Style Number", "Color", "Color Code", "Color Comment", "Style Comment",
+             "Materials", "Fabrication", "Country of Origin"] + list(sizes)
+            + [f"Sugg. Retail ({rrp_currency})", f"WholeSale ({currency})", "Item Discount", "Units", f"Total ({currency})"])
+    rows = [[], [None, brand, None, None, "Order Status:", status], [None, "Rep", None, None, "Created Date:", "01/02/2099"],
+            [None, "rep@example.com", None, None, "PO Number:", "77001"]] + [[] for _ in range(15)] + [head, ["CUSTOMER"]]
+    total_q = total_v = 0
+    for name, style, colour, code, qs, price, rrp in lines:
+        q = sum(qs)
+        total_q += q
+        total_v += q * price
+        rows.append([None, name, style, colour, code, None, None, None, "COTTON", None] + [x or None for x in qs]
+                    + [rrp, price, None, q, q * price])
+    pad = [None] * 9
+    rows += [pad + ["Total:"] + [None] * len(sizes) + [None, None, None, "Units:", units if units is not None else total_q],
+             pad + [None] * (len(sizes) + 4) + ["Subtotal:", subtotal if subtotal is not None else total_v],
+             pad + [None] * (len(sizes) + 4) + ["Order Discount:", discount],
+             pad + [None] * (len(sizes) + 4) + ["Shipping:", 0], pad + [None] * (len(sizes) + 4) + ["Tax:", 0],
+             pad + [None] * (len(sizes) + 4) + ["Total:", total_v - discount], [None, "Order last modified:", "02/10/2099"]]
+    return write_xlsx(path, rows)
+
+
+def platform_cfg(sheet_keys=None, **extra):
+    data = {k: v for k, v in base.BRAND.items() if k != "oc_label"}
+    s = dict(platform="joor", currency="EUR", rrp_currency="AUD")
+    s.update(sheet_keys or {})
+    data.update(vendor="TEST BRAND", adapter="sheet", join_key="{style} {colour}", oc_supplier="TEST HOUSE", sheet=s, **extra)
+    return brandm.from_mapping(data, "test config", "test")
+
+
+def test_a_joor_export_reads_by_the_platform_mapping_with_its_sizes_from_the_header(tmp_path):
+    docs, checks, _ = service.read_oc(joor_file(tmp_path / "j.xlsx"), platform_cfg())
+    assert [c["Result"] for c in checks] == ["INFO"], checks
+    assert "on the joor platform layout" in checks[0]["Detail"]
+    (d,) = docs
+    assert (d["doc"], d["issuer"], d["total_qty"], d["net"], d["recomputed"]) == ("77001", "TEST HOUSE", 5, 421.0, [])
+    assert [(l["style"], l["colour"], l["sizes"], l["qty"], l["price"], l["line_value"], l["rrp"], l["rrp_currency"])
+            for l in d["lines"]] == [("ZZ9001.AA01", "001", {"S": 1, "M": 2}, 3, 40.0, 120.0, 120.0, "AUD"),
+                                     ("ZZ9002.BB02", "002", {"M": 1, "L": 1}, 2, 150.5, 301.0, 420.0, "AUD")]
+    other = joor_file(tmp_path / "k.xlsx", sizes=("36", "38", "U"))
+    assert {s for l in sheet.parse_checked(other, platform_cfg())[0]["lines"] for s in l["sizes"]} == {"36", "38", "U"}
+
+
+@pytest.mark.parametrize("fault, want", [
+    (dict(status="Pending"), "Order Status: 'Pending', not Approved: this file is not a confirmed order"),
+    (dict(discount=25), "Order Discount: 25.00 is not applied to any line"),
+    (dict(units=6), "77001: its lines add up to 5 units, but it prints a total of 6"),
+    (dict(subtotal=431.0), "77001: its lines add up to EUR 421.00, but it prints a net total of EUR 431.00"),
+    (dict(currency="USD"), "missing 'WholeSale (EUR)', 'Total (EUR)'"),
+])
+def test_a_joor_export_that_is_not_the_confirmed_order_as_printed_fails(tmp_path, fault, want):
+    got = problems(joor_file(tmp_path / "j.xlsx", **fault), platform_cfg())
+    assert any(want in p for p in got), got
+
+
+def test_a_joor_export_from_another_brand_is_refused(tmp_path):
+    docs, checks, _ = service.read_oc(joor_file(tmp_path / "j.xlsx", brand="OTHER HOUSE"), platform_cfg())
+    (row,) = [c for c in checks if c["Check"] == service.IDENTITY_CHECK]
+    assert docs is None and "77001 is from 'OTHER HOUSE', not TEST HOUSE" in row["Detail"]
+
+
+def test_a_brand_overrides_the_platform_column_by_column(tmp_path):
+    config = platform_cfg(dict(columns=dict(colour_code="Color", colour_name="Color Code", rrp=None), rrp_currency=None))
+    cols = sheet.resolve(config["sheet"])["columns"]
+    assert (cols["colour_code"], cols["colour_name"], "rrp" in cols, cols["price"]) == ("Color", "Color Code", False,
+                                                                                       "WholeSale (EUR)")
+    (l, _) = sheet.parse_checked(joor_file(tmp_path / "j.xlsx"), config)[0]["lines"]
+    assert (l["colour"], l["colour_name"], l["rrp"]) == ("BLACK", "001", None)
+
+
+def test_an_unknown_platform_or_a_missing_placeholder_fails_at_load():
+    with pytest.raises(brandm.BrandError, match="platform 'nuorderx' is not one the reader knows"):
+        platform_cfg(dict(platform="nuorderx"))
+    data = {k: v for k, v in base.BRAND.items() if k != "oc_label"}
+    with pytest.raises(brandm.BrandError, match="the platform's headers need rrp_currency"):
+        brandm.from_mapping(dict(data, adapter="sheet", join_key="{style}", sheet=dict(platform="joor", currency="EUR")), "t")
+
+
+def order_sheet_file(path, discount_label="Discount 0% (EUR)", discount=0, total_q=None):
+    head = [None, "Image", "Season / Line", "Category", "Product name", "Product model", "Fabric name", "Made in", "Bulk",
+            "XS\nXS", "S\nS", "M\nM", "TALL XL", "Total QTY", "Wholesale price", "Suggested retail price",
+            "Wholesale total", "Suggested retail total"]
+    rows = [[], [None, "TEST HOUSE", None, None, None, None, None, None, "ORDER SHEET"], [],
+            [None, "Order number", "#880001", None, "Line", "-"], [None, "Order date", "29/01/2099"],
+            [None, "Customer", "MARAIS", None, None, None, None, discount_label, discount], [], head,
+            [None] * 14 + ["EUR", "EUR", "EUR", "EUR"],
+            [None, None, "FW", "Jersey", "TEE", "ZZ-AW-001-01", "JERSEY", "Portugal", None, 0, 2, 1, 1, 4, 50.0, 140.0, 200,
+             560],
+            [None, None, "FW", "Knit", "POLO", "ZZ-AW-002-03", "WOOL", "Italy", None, 1, 1, 0, 0, 2, 75.5, 210.0, 151,
+             420],
+            [None, "TOTAL", None, None, None, None, None, None, 0, None, None, None, None, total_q or 6, None, None, 351,
+             980]]
+    return write_xlsx(path, rows)
+
+
+def order_sheet_cfg():
+    data = {k: v for k, v in base.BRAND.items() if k != "oc_label"}
+    data.update(vendor="TEST BRAND", adapter="sheet", join_key="{style}", oc_supplier="TEST HOUSE",
+                sheet=dict(platform="order_sheet", currency="EUR", sheet_name="Order"))
+    return brandm.from_mapping(data, "test config", "test")
+
+
+def test_an_order_sheet_export_with_a_currency_row_and_doubled_size_headers(tmp_path):
+    docs, checks, _ = service.read_oc(order_sheet_file(tmp_path / "o.xlsx"), order_sheet_cfg())
+    (d,) = docs
+    assert (d["doc"], d["issuer"], d["total_qty"], d["net"]) == ("#880001", "TEST HOUSE", 6, 351.0)
+    assert [(l["style"], l["colour"], l["sizes"], l["line_value"]) for l in d["lines"]] == \
+        [("ZZ-AW-001-01", None, {"S": 2, "M": 1, "TALL XL": 1}, 200.0), ("ZZ-AW-002-03", None, {"XS": 1, "S": 1}, 151.0)]
+
+
+@pytest.mark.parametrize("fault, want", [
+    (dict(discount_label="Discount 10% (EUR)", discount=35), "no amount right of 'Discount 0% (EUR)'"),
+    (dict(total_q=7), "#880001: its lines add up to 6 units, but it prints a total of 7"),
+])
+def test_an_order_sheet_with_a_discount_or_another_total_fails(tmp_path, fault, want):
+    got = problems(order_sheet_file(tmp_path / "o.xlsx", **fault), order_sheet_cfg())
+    assert any(want in p for p in got), got
+
+
+SEL_HEAD = ["line", "style", "fabric", "colour", "size", "qty", "price"]
+SEL_ROWS = [["AA", "AA100", "F1", "09", "S", 1, 10], ["AA", "AA100", "F1", "09", "M", 2, 10],
+            ["BB", "BB200", "F2", "11", "L", 3, 20], ["CC", "CC300", "F3", "12", "OS", 1, 30]]
+
+
+def select_cfg(values, **sheet_keys):
+    data = {k: v for k, v in base.BRAND.items() if k != "oc_label"}
+    s = dict(columns=dict(style="style", fabric="fabric", colour_code="colour", size="size", qty="qty", price="price"),
+             currency="EUR", select=dict(column="line", values=values), **sheet_keys)
+    return brandm.from_mapping(dict(data, adapter="sheet", join_key="{style} {fabric} {colour}", sheet=s), "t")
+
+
+def test_select_reads_only_this_brands_lines_and_says_what_it_left(tmp_path):
+    path = write_xlsx(tmp_path / "s.xlsx", [SEL_HEAD] + SEL_ROWS)
+    docs, checks, _ = service.read_oc(path, select_cfg(["AA", "CC"]))
+    assert [(l["style"], l["qty"]) for l in lines(docs)] == [("AA100", 3), ("CC300", 1)]
+    (note,) = [c for c in checks if c["Check"] == service.NOTES_CHECK]
+    assert note["Detail"] == "1 order rows of other lines (BB) left out: this brand config reads only AA, CC ('line')"
+
+
+def test_a_row_with_no_selector_value_fails_and_select_never_meets_printed_totals(tmp_path):
+    rows = copy.deepcopy(SEL_ROWS)
+    rows[2][0] = None
+    got = problems(write_xlsx(tmp_path / "s.xlsx", [SEL_HEAD] + rows), select_cfg(["AA"]))
+    assert any("row 4 has no 'line', so it is no one's line" in p for p in got), got
+    with pytest.raises(brandm.BrandError, match="select cannot be used with printed totals"):
+        select_cfg(["AA"], totals=dict(qty_cell="B9", value_cell="C9"))
+
+
+def test_columns_can_take_part_of_a_cell(tmp_path):
+    head = ["Style", "Color", "Size", "Qty", "Price", "Model"]
+    rows = [head, ["AB0001 CD0002", "GR001 : FERNWOOD", "S", 1, 10, "XXXXXZ1234"]]
+    data = {k: v for k, v in base.BRAND.items() if k != "oc_label"}
+    s = dict(columns=dict(style={"header": "Style", "split": " ", "part": 1}, fabric={"header": "Style", "split": " ", "part": 2},
+                          colour_code={"header": "Color", "split": " : ", "part": 1},
+                          colour_name={"header": "Color", "split": " : ", "part": 2},
+                          description={"header": "Model", "from": 6, "to": 8},
+                          product_class={"header": "Style", "remove": "0"}, size="Size", qty="Qty", price="Price"),
+             currency="EUR")
+    config = brandm.from_mapping(dict(data, adapter="sheet", join_key="{style}{fabric} {colour}", sheet=s), "t")
+    (l,) = lines(sheet.parse_checked(write_xlsx(tmp_path / "p.xlsx", rows), config))
+    assert (l["style"], l["fabric"], l["colour"], l["colour_name"], l["description"], l["product_class"]) == \
+        ("AB0001", "CD0002", "GR001", "FERNWOOD", "Z12", "AB1 CD2")
+    with pytest.raises(brandm.BrandError, match="columns: qty is a header text"):
+        brandm.from_mapping(dict(data, adapter="sheet", join_key="{style}", sheet=dict(s, columns=dict(
+            s["columns"], qty={"header": "Qty", "from": 2}))), "t")
+
+
+def test_a_join_key_without_a_colour_needs_no_colour_column():
+    data = {k: v for k, v in base.BRAND.items() if k != "oc_label"}
+    s = dict(columns=dict(style="Style", size="Size", qty="Qty", price="Price"), currency="EUR")
+    assert brandm.from_mapping(dict(data, adapter="sheet", join_key="{style}", sheet=s), "t")["adapter"] == "sheet"
+    with pytest.raises(brandm.BrandError, match="needs colour_code or colour_name"):
+        brandm.from_mapping(dict(data, adapter="sheet", join_key="{style} {colour}", sheet=s), "t")
+
+
+@pytest.mark.parametrize("bad, want", [
+    (dict(fields=dict(doc={"label": "PO:"}), columns=dict(doc="Order")), "the order number is given twice"),
+    (dict(fields=dict(store={"cell": "B2"})), "sheet: fields: unknown key 'store'"),
+    (dict(fields=dict(doc={"label": "PO:", "require": ["A"]})), "sheet: fields: doc is {label: text}"),
+    (dict(header_rows=9), "header_rows is a whole number from 1 to 5"),
+    (dict(size_columns={"from": "X"}), "size_columns is a list of size headers or {after: header}"),
+    (dict(footer_labels="Total:"), "footer_labels is a list of label texts"),
+])
+def test_bad_new_mapping_keys_fail_at_load(bad, want):
+    with pytest.raises(brandm.BrandError, match=re.escape(want)):
+        cfg(**{k: v for k, v in bad.items() if k != "columns"}, columns=dict(COLUMNS, **bad.get("columns", {})))
+
+
 # ---- real order confirmations, local only ------------------------------------------------------------
 REAL = os.environ.get("OC_SHEET_DIR")
 
@@ -838,3 +1031,212 @@ def test_real_sheets_pass_their_gates_and_match_their_pdf_twins():
                 printed = _pdf_totals(str(twin))
                 if printed:
                     assert {d_["doc"]: (d_["total_qty"], round(d_["net"], 2)) for d_ in docs} == printed, f
+
+
+# ---- an order form in sections ---------------------------------------------------------
+FORM = [["SAMPLE ORDER FORM"],
+        ["Style", "Colour", "Price", "S", "M", None, "Units", "Total"],
+        ["QQ100", "SLATE", 20, 1, 2, None, 3, 60],
+        ["QQ200", "SLATE", 30, None, None, None, 0, 0],
+        [None, None, None, None, None, "FOOTWEAR"],
+        ["Style", "Colour", "Price", 40, 41.5, 42, "Units", "Total"],
+        ["QQ300", "OCHRE", 50, None, 1, 1, 2, 100],
+        [None, None, None, None, None, None, 5, 160]]
+
+
+def form_cfg(**kw):
+    s = dict(columns=dict(style="Style", colour_name="Colour", price="Price", qty="Units", line_value="Total"),
+             size_columns=dict(after="Price"), currency="EUR", sections=True,
+             totals=dict(unlabelled=True, qty="Units", value="Total"))
+    s.update(kw)
+    data = {k: v for k, v in base.BRAND.items() if k != "oc_label"}
+    return brandm.from_mapping(dict(data, adapter="sheet", join_key="{style} {colour}", sheet=s), "t")
+
+
+def test_an_order_form_in_sections_reads_each_under_its_own_header_and_holds_all_to_the_grand_total(tmp_path):
+    (d,) = sheet.parse_checked(write_xlsx(tmp_path / "f.xlsx", FORM), form_cfg())
+    assert [(l["line_no"], l["style"], l["sizes"], l["qty"], l["line_value"]) for l in d["lines"]] == \
+        [(1, "QQ100", {"S": 1, "M": 2}, 3, 60.0), (2, "QQ300", {"41.5": 1, "42": 1}, 2, 100.0)]
+    assert (d["total_qty"], d["net"]) == (5, 160)
+    assert not [x for x in d["recomputed"] if "total" in x.lower()], d["recomputed"]
+
+
+@pytest.mark.parametrize("cell, value, want", [
+    (6, 6, "its lines add up to 5 units, but it prints a total of 6"),
+    (7, 170, "its lines add up to EUR 160.00, but it prints a net total of EUR 170.00")])
+def test_an_order_form_whose_grand_total_is_not_reproduced_fails(tmp_path, cell, value, want):
+    rows = copy.deepcopy(FORM)
+    rows[-1][cell] = value
+    got = problems(write_xlsx(tmp_path / "f.xlsx", rows), form_cfg())
+    assert any(want in p for p in got), got
+
+
+def test_an_order_form_with_a_totals_row_in_two_sections_or_two_in_one_fails(tmp_path):
+    rows = copy.deepcopy(FORM)
+    rows.insert(4, [None, None, None, None, None, None, 3, 60])
+    got = problems(write_xlsx(tmp_path / "f.xlsx", rows), form_cfg())
+    assert any("a totals row in 2 sections (rows 5, 9); one order prints one" in p for p in got), got
+    rows = copy.deepcopy(FORM) + [[None, None, None, None, None, None, 5, 160]]
+    got = problems(write_xlsx(tmp_path / "f.xlsx", rows), form_cfg())
+    assert any("row 9: a second totals row (rows 8 and 9 both have numbers and no style)" in p for p in got), got
+
+
+def test_a_section_with_nothing_ordered_is_quiet_but_a_form_with_nothing_ordered_fails(tmp_path):
+    rows = copy.deepcopy(FORM)
+    rows[2][3:5], rows[2][6:8], rows[-1][6:8] = [None, None], [0, 0], [2, 100]
+    (d,) = sheet.parse_checked(write_xlsx(tmp_path / "f.xlsx", rows), form_cfg())
+    assert [l["style"] for l in d["lines"]] == ["QQ300"]
+    rows[6][4:8] = [None, None, 0, 0]
+    got = problems(write_xlsx(tmp_path / "f.xlsx", rows[:-1]), form_cfg(totals="none"))
+    assert got == ["Order: no order lines under any of the 2 header rows"]
+
+
+@pytest.mark.parametrize("bad, want", [
+    (dict(sections="yes"), "sections is true or false"),
+    (dict(totals=dict(qty_cell="B9", value_cell="C9")), "sections take a totals row (label or unlabelled)"),
+    (dict(totals=dict(unlabelled="yes", qty="Units", value="Total")), "totals: unlabelled is true"),
+    (dict(totals=dict(unlabelled=True, qty="Units", value="")), "totals: value is a text"),
+])
+def test_bad_section_keys_fail_at_load(bad, want):
+    with pytest.raises(brandm.BrandError, match=re.escape(want)):
+        form_cfg(**bad)
+
+
+def test_a_blank_order_form_every_line_at_zero_is_no_confirmation(tmp_path):
+    rows = [MATRIX[0], ["ZZ100AA001", "INK", None, None, None, 0, 100, 0]]
+    assert problems(write_xlsx(tmp_path / "m.xlsx", rows), matrix_cfg()) == ["Order: no order lines under the header row 1"]
+
+
+def test_a_bad_line_in_a_later_section_is_gated_once_under_its_order_line_number(tmp_path):
+    rows = copy.deepcopy(FORM)
+    rows[6][7], rows[-1][7] = 90, 150
+    assert problems(write_xlsx(tmp_path / "f.xlsx", rows), form_cfg()) == \
+        ["f line 2 QQ300: 2 x 50.0 = 100.00 != line value 90.0", f"f: its lines add up to EUR 160.00, but it prints a net total of EUR 150.00. {otb.NOT_ADDING_UP}"]
+
+
+def test_the_grand_total_columns_need_not_be_mapped(tmp_path):
+    config = form_cfg(columns=dict(style="Style", colour_name="Colour", price="Price", qty="Units"))
+    (d,) = sheet.parse_checked(write_xlsx(tmp_path / "f.xlsx", FORM), config)
+    assert (d["total_qty"], d["net"], [l["line_value"] for l in d["lines"]]) == (5, 160, [60.0, 100.0])
+
+
+# ---- a printed gender: a line's own column, else the order's name -------------------------------------------------
+@pytest.mark.parametrize("printed, want", [
+    ("Man", "MEN"), ("Woman", "WOMEN"), ("Women", "WOMEN"), ("MENS-EDIT-K", "MEN"), ("WOMENS-EDIT-Q", "WOMEN"),
+    ("Men's Bags", "MEN"), ("FEMALE", "WOMEN"), ("Unisex", None), ("MEN / WOMEN", None), ("GERMANY", None),
+    ("ROMAN BLIND", None), ("", None), (None, None)])
+def test_a_printed_gender_is_read_as_a_word(printed, want):
+    assert sheet.gender_of(printed) == want
+
+
+def test_an_order_name_above_a_joor_header_genders_its_lines_and_the_platform_fields_stay(tmp_path):
+    from oc import draft
+    path = joor_file(tmp_path / "j.xlsx")
+    wb = openpyxl.load_workbook(path)
+    wb.active["E6"], wb.active["F6"] = "Order Name:", "WOMENS-EDIT-Q"
+    wb.save(path)
+    config = platform_cfg(dict(fields=dict(gender=dict(label="Order Name:"))))
+    (d,) = sheet.parse_checked(str(path), config)
+    assert (d["doc"], d["issuer"], d["gender"]) == ("77001", "TEST HOUSE", "WOMEN")
+    assert {l["gender"] for l in draft.oc_lines([d], config)} == {"WOMEN"}
+
+
+def test_a_line_s_own_gender_column_wins_over_the_order_name(tmp_path):
+    from oc import draft
+    rows = copy.deepcopy(ROWS)
+    rows[3][16] = "Unisex"
+    path = write_xlsx(tmp_path / "g.xlsx", [HEAD] + rows, extra_sheets=[("Info", {"B2": "MENS-EDIT-K"})])
+    config = cfg(fields=dict(gender=dict(cell="Info!B2")))
+    got = {(d["doc"], l["style"]): l["gender"] for d in sheet.parse_checked(str(path), config)
+           for l in draft.oc_lines([d], config)}
+    assert got == {("SO1", "ZZ100AA001"): "WOMEN", ("SO1", "ZZ200BB002"): "MEN", ("SO2", "ZZ300CC003"): "MEN"}
+
+
+@pytest.mark.parametrize("status", [dict(label="Order Status:"), None])
+def test_a_brand_cannot_drop_the_platform_s_confirmed_order_gate(status):
+    with pytest.raises(brandm.BrandError, match="fields: status must keep a require list"):
+        platform_cfg(dict(fields=dict(status=status)))
+    assert platform_cfg(dict(fields=dict(status=dict(label="Order Status:", require=["Shipped"]))))
+
+
+# ---- join_key_alt: a second code form, tried only when join_key finds no live product -----------------------------
+ALT_HEAD = ["Model", "Colour", "Size", "Qty", "Price"]
+
+
+def alt_cfg(**extra):
+    data = {k: v for k, v in base.BRAND.items() if k != "oc_label"}
+    data.update(dict(adapter="sheet", join_key="{style} {colour}", join_key_alt="{style_alt} {colour}"), **extra)
+    data["sheet"] = dict(columns=dict(style=dict(header="Model", **{"from": 4}), style_alt="Model", colour_code="Colour",
+                                      size="Size", qty="Qty", price="Price"), currency="EUR", totals="none")
+    return brandm.from_mapping(data, "test config", "test")
+
+
+def alt_catalog(tmp_path, products):
+    rows = [base._variant(pid, title, "MEN CLOTHING T-SHIRTS SHORT SLEEVE", "Active", code, "BLACK", s,
+                          f"ZXFW26{pid}{i}", "300.00", "300.00", "60.00", i == 0)
+            for pid, title, code in products for i, s in enumerate(["S", "M"])]
+    return base._write_catalog(tmp_path / "catalog.csv", rows, base.CAT_COLS)
+
+
+def test_join_key_alt_joins_a_line_whose_join_key_finds_no_live_product_and_never_one_that_does(tmp_path):
+    rows = [ALT_HEAD, ["QQ-AB100", "C01", "S", 1, 40.0], ["QQ-AB200", "C02", "M", 2, 50.0]]
+    path = write_xlsx(tmp_path / "a.xlsx", rows)
+    cat = alt_catalog(tmp_path, [("901", "Short Tee in Black", "AB100 C01"), ("902", "Long Tee in Black", "QQ-AB100 C01"),
+                                 ("903", "Other Tee in Black", "QQ-AB200 C02")])
+    po, review, checks = service.draft(str(path), cat, alt_cfg())
+    by = {c["Check"]: c for c in checks}
+    assert by["Joined by join_key_alt (join_key finds no live product)"]["Detail"] == "AB200 C02 -> QQ-AB200 C02"
+    ids = review[review["Column"] == "ID"]
+    assert sorted(set(zip(ids["Code"], ids["Value"].astype(str)))) == [("AB100 C01", "901"), ("QQ-AB200 C02", "903")]
+
+
+def test_join_key_alt_onto_two_live_products_fails_and_a_bad_alt_template_fails_at_load(tmp_path):
+    path = write_xlsx(tmp_path / "a.xlsx", [ALT_HEAD, ["QQ-AB300", "C03", "S", 1, 40.0]])
+    cat = alt_catalog(tmp_path, [("904", "Tee One in Black", "QQ-AB300 C03"), ("905", "Tee Two in Black", "QQ-AB300 C03")])
+    _, _, checks = service.draft(str(path), cat, alt_cfg())
+    fails = [c for c in checks if c["Check"] == "Join key resolves to one live product"]
+    assert len(fails) == 1 and fails[0]["Result"] == "FAIL" and fails[0]["Detail"].startswith("QQ-AB300 C03: AMBIGUOUS")
+    for bad in ("{style_alt} {colour", "{style} {colour}", "{model} {colour}"):
+        with pytest.raises(brandm.BrandError, match="join_key_alt is a second join template"):
+            alt_cfg(join_key_alt=bad)
+    data = {k: v for k, v in base.BRAND.items() if k != "oc_label"}
+    with pytest.raises(brandm.BrandError, match=re.escape("needs style_alt (join_key_alt uses {style_alt})")):
+        brandm.from_mapping(dict(data, adapter="sheet", join_key="{style} {colour}", join_key_alt="{style_alt} {colour}",
+                                 sheet=dict(columns=dict(style="Model", colour_code="Colour", size="Size", qty="Qty",
+                                                         price="Price"), currency="EUR")), "t")
+
+
+def test_complete_and_reconcile_key_a_line_by_the_code_join_key_alt_found(tmp_path):
+    from oc import complete, reconcile
+    from oc.poxlsx import CODE, COST_PRICE, MADE_IN
+    path = write_xlsx(tmp_path / "a.xlsx", [ALT_HEAD, ["QQ-AB200", "C02", "M", 2, 50.0]])
+    config = alt_cfg()
+    cat = catm.load(alt_catalog(tmp_path, [("903", "Other Tee in Black", "QQ-AB200 C02")]))
+    docs = sheet.parse_checked(str(path), config)
+    rows = [{"Command": "MERGE", "Title": "Other Tee in Black", "Vendor": config["vendor"], "Option2 Value": s,
+             "Type": "MEN CLOTHING T-SHIRTS SHORT SLEEVE", "Variant SKU": f"ZXFW26903{i}", "Variant Price": 300.0,
+             CODE: "QQ-AB200 C02", "Order Qty": q, "Wholesale Price": 50.0, "Total Order": q * 50.0, "Variant Cost": 75.0,
+             MADE_IN: "Italy", COST_PRICE: "EUR 50"} for i, (s, q) in enumerate([("S", 0), ("M", 2)])]
+    hand = tmp_path / "hand.xlsx"
+    base._hand_po(hand, rows)
+    checks = complete.run(str(hand), docs, config, cat, base._hist(), base._tags(), str(tmp_path / "po.xlsx"))
+    assert {c["Check"]: c["Result"] for c in checks}["Qty per code+size equals the OC"] == "PASS"
+    res = reconcile.compare(rows, rows, docs, brand=config)
+    assert (res["draft_qty_mismatch"], res["hand_qty_mismatch"]) == ([], [])
+
+
+def known_cfg(values, known):
+    data = {k: v for k, v in base.BRAND.items() if k != "oc_label"}
+    s = dict(columns=dict(style="style", fabric="fabric", colour_code="colour", size="size", qty="qty", price="price"),
+             currency="EUR", select=dict(column="line", values=values, known=known))
+    return brandm.from_mapping(dict(data, adapter="sheet", join_key="{style} {fabric} {colour}", sheet=s), "t")
+
+
+def test_a_select_value_no_brand_config_knows_fails_naming_its_units_and_value(tmp_path):
+    path = write_xlsx(tmp_path / "s.xlsx", [SEL_HEAD] + SEL_ROWS)
+    assert problems(path, known_cfg(["AA"], ["AA", "CC"])) == [
+        "Order: 'line' 'BB' is in no brand config's select (known: AA, CC): 1 rows, 3 units, EUR 60.00 would be dropped. "
+        "Add it to the config of the brand that sells it, and to known in each"]
+    assert [l["style"] for l in lines(sheet.parse_checked(path, known_cfg(["AA"], ["AA", "BB", "CC"])))] == ["AA100"]
+    with pytest.raises(brandm.BrandError, match=re.escape("select: known must hold every value this config reads")):
+        known_cfg(["AA", "BB"], ["AA", "CC"])

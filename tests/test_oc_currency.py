@@ -229,3 +229,147 @@ def test_the_default_templates_fill_as_before():
     assert R.title_tag("Replica Sneaker in White") == "MAISON MARGIELA - Replica Sneaker in White |MARAIS"
     assert R.body_html("S99 1", "100% Calf", "Italy") == \
         "<p>Composition: 100% Calf</p> <p>Made in Italy</p> <p>SKU: S99 1</p>"
+
+
+# ---- the PO's money against an OC priced in fractions of a cent ----------------------------------------------
+def _fraction_docs():
+    docs = _usd_docs()
+    a, b = docs[0]["lines"]
+    docs[0].update(total_qty=6, net=396.0306, lines=[
+        dict(a, sizes={"40": 1, "41": 1, "42": 1}, qty=3, price=66.0051, line_value=198.0153),
+        dict(b, sizes={"41": 1, "42": 1, "43": 1}, qty=3, price=66.0051, line_value=198.0153)])
+    return docs
+
+
+def test_a_wholesale_in_fractions_of_a_cent_drafts_although_each_row_rounds_to_the_cent(tmp_path, monkeypatch):
+    _stub(monkeypatch, _fraction_docs())   # six rows of 66.01 = 396.06 against the OC's 396.03
+    po, _, checks = service.draft("oc.pdf", _catalog(tmp_path), USD)
+    by = {c["Check"]: c for c in checks}
+    assert by["PO Order Qty and Total Order equal the OC"] == dict(
+        Check="PO Order Qty and Total Order equal the OC", Result="PASS",
+        Detail="6 units, USD 396.03 (the Total Order column, each row rounded to the cent, sums to USD 396.06)")
+    assert po is not None
+
+
+@pytest.mark.parametrize("value, ok", [(200.0, True), (200.009, True), (199.991, True), (200.011, False),
+                                       (198.5, False)])
+def test_po_money_matches_the_oc_within_a_cent_in_its_own_unit(value, ok):
+    from oc import draft
+    assert draft.money_matches(value, 200.0) is ok
+
+
+def test_a_live_variant_whose_sku_carries_the_season_prefix_is_not_a_new_sku(tmp_path, monkeypatch):
+    _stub(monkeypatch, _usd_docs())
+    _, _, checks = service.draft("oc.pdf", _catalog(tmp_path), dict(USD, sku_prefix="ZXFW26"))
+    (c,) = [c for c in checks if c["Check"].startswith("SKUs unique in the sheet")]
+    assert (c["Result"], c["Detail"]) == ("PASS", "4 new SKUs (ZXFW26103..ZXFW26106); 0 duplicated"), c
+
+
+def test_complete_accepts_a_hand_po_whose_rows_round_an_oc_priced_in_fractions_of_a_cent(tmp_path):
+    sizes = ["40", "41", "42", "43", "44", "45"]
+    cat = base.catm.load(base._write_catalog(tmp_path / "catalog.csv", [
+        base._variant("1", "Replica Sneaker in White", "MEN SHOES SNEAKERS", "Active", "S99WS0001P0001 101", "WHITE", s,
+                      f"ZXFW26{100 + i}", "800.00", "800.00", "310.00", i == 0) for i, s in enumerate(sizes)], base.CAT_COLS))
+    docs = _usd_docs()
+    docs[0].update(total_qty=6, net=396.0306, lines=[dict(docs[0]["lines"][0], sizes=dict.fromkeys(sizes, 1), qty=6,
+                                                          price=66.0051, line_value=396.0306)])
+    rows = [{"Command": "MERGE", "Title": "Replica Sneaker in White", "Vendor": "EXAMPLE USD BRAND",
+             "Type": "MEN SHOES SNEAKERS", "Option2 Value": s, "Variant SKU": f"ZXFW26{100 + i}", "Variant Price": 800.0,
+             poxlsx.CODE: "S99WS0001P0001 101", "Order Qty": 1, "Wholesale Price": 66.0051, "Total Order": 66.01,
+             "Variant Cost": 300.0, poxlsx.MADE_IN: "Italy", poxlsx.COST_PRICE: "USD 66.0051"} for i, s in enumerate(sizes)]
+    hand = tmp_path / "hand.xlsx"
+    base._hand_po(hand, rows)
+    checks = complete.run(str(hand), docs, USD, cat, base._hist(), base._tags(), str(tmp_path / "po.xlsx"))
+    (c,) = [c for c in checks if c["Check"] == "Order Qty and Total Order equal the OC"]
+    assert (c["Result"], c["Detail"]) == (
+        "PASS", "6 units, USD 396.03 at the OC's prices (OC 6, USD 396.03); the Total Order column sums to USD 396.06")
+
+
+@pytest.mark.parametrize("qtys, result", [((3, 3), "PASS"), ((3, 4), "FAIL")])
+def test_complete_checks_a_hand_po_of_several_units_a_row_at_cent_rounded_prices(tmp_path, qtys, result):
+    cat = base.catm.load(_catalog(tmp_path))
+    docs = _usd_docs()
+    docs[0].update(total_qty=6, net=396.0306, lines=[dict(docs[0]["lines"][0], sizes={"40": 3, "41": 3}, qty=6,
+                                                          price=66.0051, line_value=396.0306)])
+    rows = [{"Command": "MERGE", "Title": "Replica Sneaker in White", "Vendor": "EXAMPLE USD BRAND",
+             "Type": "MEN SHOES SNEAKERS", "Option2 Value": s, "Variant SKU": f"ZXFW26{100 + i}", "Variant Price": 800.0,
+             poxlsx.CODE: "S99WS0001P0001 101", "Order Qty": q, "Wholesale Price": 66.01, "Total Order": round(q * 66.01, 2),
+             "Variant Cost": 99.02, poxlsx.MADE_IN: "Italy", poxlsx.COST_PRICE: "USD 66.01"}
+            for i, (s, q) in enumerate(zip(["40", "41"], qtys))]
+    hand = tmp_path / "hand.xlsx"
+    base._hand_po(hand, rows)
+    checks = complete.run(str(hand), docs, USD, cat, base._hist(), base._tags(), str(tmp_path / "po.xlsx"))
+    (c,) = [c for c in checks if c["Check"] == "Order Qty and Total Order equal the OC"]
+    assert c["Result"] == result, c
+
+
+# ---- a new size on a live product in another size system ------------------------------------------------------
+@pytest.mark.parametrize("size, system", [("XS", "alpha"), ("XS - S", "alpha"), ("2XS", "alpha"), ("3XL", "alpha"),
+                                          ("38", "number"), ("6.5", "number"), (40.0, "number"), ("90CM", "length"),
+                                          ("OS", "one"), ("UNI", "one"), ("TALL XXL", None), ("38/40", None)])
+def test_a_size_belongs_to_one_size_system(size, system):
+    from oc.util import size_system
+    assert size_system(size) == system
+
+
+@pytest.mark.parametrize("new, warned", [("S", True), ("43", False), ("TALL XXL", False)])
+def test_a_new_size_outside_a_live_product_s_size_system_is_amber_and_warned(tmp_path, monkeypatch, new, warned):
+    from oc.resolve import OFF_RUN
+    docs = _usd_docs()
+    docs[0].update(total_qty=2, net=400.0, lines=[dict(docs[0]["lines"][0], sizes={"41": 1, new: 1}, qty=2,
+                                                      line_value=400.0)])
+    _stub(monkeypatch, docs)
+    po, review, checks = service.draft("oc.pdf", _catalog(tmp_path), USD)
+    warn = [c for c in checks if c["Check"] == "New sizes on live products stay in their size run"]
+    cell = review[(review["Column"] == "Option2 Value") & (review["Value"] == new)]
+    if warned:
+        assert warn == [dict(Check="New sizes on live products stay in their size run", Result="WARN",
+                             Detail="S99WS0001P0001 101 S on Replica Sneaker in White (live 40, 41, 42)")]
+        assert list(cell["Source"]) == [OFF_RUN]
+        ws = openpyxl.load_workbook(io.BytesIO(po))["Sheet1"]
+        r = next(i for i in range(2, ws.max_row + 1) if ws.cell(i, poxlsx.PO_HEADER.index("Option2 Value") + 1).value == new)
+        assert ws.cell(r, poxlsx.PO_HEADER.index("Option2 Value") + 1).fill.fgColor.rgb.endswith("FFEB9C")
+    else:
+        assert warn == [] and list(cell["Source"]) == ["OC"]
+
+
+# ---- two orders of one product ----------------------------------------------------------------------------------
+def _two_orders(price_b):
+    a, b = _usd_docs()[0], _usd_docs()[0]
+    line = a["lines"][0]
+    a.update(doc="ORD-A", total_qty=1, net=200.0, lines=[dict(line, sizes={"41": 1}, qty=1, line_value=200.0)])
+    b.update(doc="ORD-B", total_qty=3, net=3 * price_b,
+             lines=[dict(line, line_no=7, sizes={"41": 2, "42": 1}, qty=3, price=price_b, line_value=3 * price_b)])
+    return [a, b]
+
+
+def test_two_orders_of_one_code_at_one_price_draft_as_one_product(tmp_path, monkeypatch):
+    _stub(monkeypatch, _two_orders(200.0))
+    po, review, checks = service.draft("oc.pdf", _catalog(tmp_path), USD)
+    by = {c["Check"]: c for c in checks}
+    assert by["One product per code: lines of one code at one price merged"]["Detail"] == \
+        "S99WS0001P0001 101: ORD-A line 1 + ORD-B line 7"
+    assert by["SKUs unique in the sheet (new ones skip the catalog's; finalize checks them against the store again)"][
+        "Result"] == "PASS" and "Each join key on one OC line" not in by
+    qty = review[review["Column"] == "Order Qty"]
+    assert dict(zip(qty["Size"], qty["Value"])) == {"40": 0, "41": 3, "42": 1}
+    assert po is not None
+
+
+def test_two_orders_of_one_code_at_two_prices_stay_apart_and_refuse(tmp_path, monkeypatch):
+    _stub(monkeypatch, _two_orders(210.0))
+    po, _, checks = service.draft("oc.pdf", _catalog(tmp_path), USD)
+    by = {c["Check"]: c for c in checks}
+    assert by["Each join key on one OC line"]["Result"] == "WARN"
+    assert by["SKUs unique in the sheet (new ones skip the catalog's; finalize checks them against the store again)"][
+        "Result"] == "FAIL" and po is None
+
+
+def test_a_men_s_and_a_women_s_order_of_one_code_stay_apart(tmp_path, monkeypatch):
+    docs = _two_orders(200.0)
+    docs[1]["gender"] = "WOMEN"
+    _stub(monkeypatch, docs)
+    po, _, checks = service.draft("oc.pdf", _catalog(tmp_path), USD)
+    by = {c["Check"]: c for c in checks}
+    assert "One product per code: lines of one code at one price merged" not in by
+    assert by["Each join key on one OC line"]["Result"] == "WARN" and po is None

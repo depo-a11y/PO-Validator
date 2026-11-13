@@ -12,7 +12,7 @@ import openpyxl
 from openpyxl.utils import get_column_letter
 
 from . import cartorder
-from .draft import oc_lines, cart_checks
+from .draft import oc_lines, cart_checks, join_alt, money_matches, oc_value
 from .poxlsx import (FILLS, CODE, MADE_IN, COST_PRICE, TITLE_TAG, SEASON, NEW_SALE, PO_FORMULA,
                      resolve_formula, write_table, review_row, clean_text, as_text)
 from .draft import PRICE_CHECK
@@ -24,6 +24,7 @@ def run(po_path, docs, brand, catalog, history, tag_lookup, out, price_overrides
     price_overrides = {norm_code(k): v for k, v in (price_overrides or {}).items()}
     cur = cost_currency(brand)
     lines = oc_lines(docs, brand)
+    join_alt(lines, catalog, brand.get("match_ignore") or "")
     if brand.get("match_ignore"):   # a code matched through match_ignore is the store's code on the PO's rows
         for l in lines:
             p = catalog.match(l["code"], brand["match_ignore"])[0]
@@ -168,10 +169,14 @@ def _checks(ws, col, data_rows, get, lines, R, brand, catalog, tag_lookup, revie
     out.append(dict(Check="Qty per code+size equals the OC", Result="FAIL" if bad else "PASS",
                     Detail=f"{len(bad)} mismatches" + (f": {bad[:5]}" if bad else "")))
     units = sum(po_q.values())
-    value = round(sum(money(x["Total Order"]) or 0 for x in rows), 2)
-    oc_units, oc_value = sum(oc_q.values()), round(sum(l["line_value"] for l in lines), 2)
-    out.append(dict(Check="Order Qty and Total Order equal the OC", Result="PASS" if (units, value) == (oc_units, oc_value) else "FAIL",
-                    Detail=f"{units} units, {cur} {value:,.2f} (OC {oc_units}, {cur} {oc_value:,.2f})"))
+    value = sum((money(x["Order Qty"]) or 0) * oc_eur.get(norm_code(x[CODE]), money(x["Wholesale Price"]) or 0)
+                for x in rows)   # the PO's quantities at the OC's unrounded prices; each row's price is checked below
+    column = round(sum(money(x["Total Order"]) or 0 for x in rows), 2)   # rows rounded to the cent: shown only
+    oc_units, oc_val = sum(oc_q.values()), oc_value(lines)
+    out.append(dict(Check="Order Qty and Total Order equal the OC",
+                    Result="PASS" if units == oc_units and money_matches(value, oc_val) else "FAIL",
+                    Detail=f"{units} units, {cur} {value:,.2f} at the OC's prices (OC {oc_units}, {cur} {oc_val:,.2f}); "
+                           f"the Total Order column sums to {cur} {column:,.2f}"))
     wrong = sorted({(norm_code(x[CODE]), money(x["Wholesale Price"])) for x in rows
                     if abs((money(x["Wholesale Price"]) or 0) - oc_eur.get(norm_code(x[CODE]), -1)) > 0.005})
     out.append(dict(Check="Wholesale equals the OC on every row", Result="FAIL" if wrong else "PASS",

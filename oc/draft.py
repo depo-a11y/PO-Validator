@@ -14,11 +14,11 @@ import collections
 from .brand import ColourCodeError, code_for, unmapped_colours
 from . import cartorder, housestyle
 from .poxlsx import PO_HEADER, CODE, MADE_IN, SEASON, NEW_SALE, COST_PRICE, TITLE_TAG, review_row, col_letter
-from .resolve import Resolver, COLOUR, AI_OC, AI_NEW_SIZE, NO_RRP, split_code, worse
+from .resolve import Resolver, COLOUR, AI_OC, AI_NEW_SIZE, OFF_RUN, NO_RRP, split_code, worse
 
 PRICE_CHECK = "Every NEW row has a retail price"
-from .util import norm_size, sort_sizes, size_key, fmt_money, cost_currency, slug, store_sizes, size_clashes, \
-    one_name_per_size
+from .util import norm_size, sort_sizes, size_key, size_system, fmt_money, cost_currency, slug, store_sizes, \
+    size_clashes, one_name_per_size
 
 PRICE_COL = col_letter(PO_HEADER, "Variant Price")
 SIZE_NAMES_CHECK = "Each size has one name per product"
@@ -73,16 +73,69 @@ def oc_lines(docs, brand=None):
     for d in docs:
         for l in d["lines"]:
             code = code_for(brand, l["style"], l["fabric"], l["colour"])
+            alt = (brand or {}).get("join_key_alt")
+            code_alt = code_for(brand, l["style"], l["fabric"], l["colour"], alt, l.get("style_alt")) if alt else None
             sizes = {}
             for s, q in l["sizes"].items():
                 sizes[norm_size(s)] = sizes.get(norm_size(s), 0) + q
-            out.append(dict(l, code=code, doc=d["doc"], collection=d["collection"],
+            out.append(dict(l, code=code, code_alt=code_alt, doc=d["doc"], collection=d["collection"],
                             gender=l.get("gender") or d.get("gender"), sizes_norm=sizes))
     return out
 
 
+def join_alt(lines, catalog, ignore=""):
+    """join_key_alt, tried only for a line whose join_key finds no live product (never when it finds one, or two):
+    the line takes the alternative code when that finds a live product, or two (so the ambiguity FAILs). The swaps,
+    as 'code -> alternative' texts. `ignore` is the brand's match_ignore, as for the join_key."""
+    out = []
+    for l in lines:
+        alt = l.get("code_alt")
+        if not alt or alt == l["code"]:
+            continue
+        product, note, _ = catalog.match(l["code"], ignore)
+        if product is not None or note.startswith("AMBIGUOUS"):
+            continue
+        product, note, _ = catalog.match(alt, ignore)
+        if product is not None or note.startswith("AMBIGUOUS"):
+            out.append(f"{l['code']} -> {alt}")
+            l["code"] = alt
+    return out
+
+
+def merge_repeats(lines):
+    """Lines of one code at one unit price, RRP and gender (two orders of one product) as one line, sizes summed and
+    every source line kept in `sources`; a code at two prices, or ordered for two genders (whose units go to two
+    listings), stays as separate lines (its SKUs then repeat: FAIL). The merged codes, as 'code: doc line n + doc
+    line m' texts."""
+    groups = collections.defaultdict(list)
+    for l in lines:
+        groups[l["code"]].append(l)
+    out, merged = [], []
+    for l in lines:
+        g = groups[l["code"]]
+        if len(g) == 1 or len({(round(x["price"], 4), x.get("rrp"), x.get("gender")) for x in g}) > 1:
+            out.append(l)
+            continue
+        if l is not g[0]:
+            continue
+        sizes = collections.Counter()
+        for x in g:
+            sizes.update(x["sizes_norm"])
+        src = [f"{x['doc']} line {x['line_no']}" for x in g]
+        out.append(dict(l, sizes_norm=dict(sizes), qty=sum(x["qty"] for x in g),
+                        line_value=round(sum(x["line_value"] for x in g), 2), sources=src))
+        merged.append(f"{l['code']}: {' + '.join(src)}")
+    return out, merged
+
+
+def _src(l):
+    return " + ".join(l.get("sources") or [f"{l['doc']} line {l['line_no']}"])
+
+
 def build(docs, brand, catalog, history, tag_lookup, cart=None, prior_prices=None):
     lines = oc_lines(docs, brand)
+    swapped = join_alt(lines, catalog, brand.get("match_ignore") or "")
+    lines, merged = merge_repeats(lines)
     dup = [c for c, n in collections.Counter(l["code"] for l in lines).items() if n > 1]
     R = Resolver(brand, catalog, history, tag_lookup, lines, cart)
     rows, cells, checks = [], [], []
@@ -97,7 +150,13 @@ def build(docs, brand, catalog, history, tag_lookup, cart=None, prior_prices=Non
         row[key] = value
         cells.append((len(rows), key, value, source, detail))
 
-    pending = []
+    pending, off_run = [], []
+    if merged:
+        checks.append(dict(Check="One product per code: lines of one code at one price merged", Result="INFO",
+                           Detail="; ".join(merged)))
+    if swapped:
+        checks.append(dict(Check="Joined by join_key_alt (join_key finds no live product)", Result="INFO",
+                           Detail="; ".join(swapped)))
     for l in lines:
         cur["line"] = l
         code, eur = l["code"], l["price"]
@@ -142,6 +201,11 @@ def build(docs, brand, catalog, history, tag_lookup, cart=None, prior_prices=Non
                     cell(row, "Option2 Value", size, AI_NEW_SIZE,
                          f"read by AI from {l['doc']} line {l['line_no']}; ordered size the live product does not "
                          "have: check it against the PDF")
+                elif _off_run(size, live):
+                    runs = ", ".join(sort_sizes(live))
+                    cell(row, "Option2 Value", size, OFF_RUN, f"ordered size outside the live product's run ({runs}): "
+                         "a second size system on one product? Check the size map before importing")
+                    off_run.append(f"{code} {size} on {title} (live {runs})")
                 else:
                     cell(row, "Option2 Value", size, "OC", "ordered size the live product does not have")
                 if v:
@@ -158,7 +222,7 @@ def build(docs, brand, catalog, history, tag_lookup, cart=None, prior_prices=Non
                 cell(row, "Variant Compare At Price", price, "rule", "compare-at = price on a buy sheet")
                 _money_cells(cell, row, R, brand, eur, l["sizes_norm"].get(size, 0))
                 cell(row, CODE, product["code"], "OC" if product["code"] == code else "catalog",
-                     f"{l['doc']} line {l['line_no']}" + ("" if product["code"] == code else
+                     _src(l) + ("" if product["code"] == code else
                                                          f"; the OC prints {code}, this live code once "
                                                          f"{brand['match_ignore']!r} is left out"))
                 cell(row, SEASON, brand["season"], "rule", "carryover is re-seasoned to the buy season")
@@ -222,7 +286,7 @@ def build(docs, brand, catalog, history, tag_lookup, cart=None, prior_prices=Non
             else:
                 cell(row, "Variant Compare At Price", compare, "rule", "compare-at = price at creation (a formula)")
             _money_cells(cell, row, R, brand, eur, l["sizes_norm"].get(size, 0))
-            cell(row, CODE, code, "OC", f"{l['doc']} line {l['line_no']} ({l['product_class']})")
+            cell(row, CODE, code, "OC", f"{_src(l)} ({l['product_class']})")
             cell(row, SEASON, brand["season"], "rule", "brand config")
             cell(row, MADE_IN, made, made_src, made_why)
             cell(row, NEW_SALE, brand["new_sale"], "rule", "new stock is created NEW")
@@ -249,6 +313,9 @@ def build(docs, brand, catalog, history, tag_lookup, cart=None, prior_prices=Non
             + "; ".join(clash) + ". Keep the store's name and move the quantity onto it.")))
     if cart is not None and not cartorder.from_cart(lines):
         checks += cart_checks(lines, cart, brand)
+    if off_run:
+        checks.append(dict(Check="New sizes on live products stay in their size run", Result="WARN",
+                           Detail="; ".join(off_run)))
     checks = _draft_checks(docs, lines, rows, R, brand, catalog, tag_lookup, dup) + checks
     if cartorder.from_cart(lines):
         checks = cartorder.cart_wording(checks)
@@ -321,6 +388,23 @@ def _dedupe_titles(pending, R, brand, checks):
                 n["title"][1] = "guess"
 
 
+def _off_run(size, live):
+    """True when a new size is in another size system than every live size of the product (XS on a 38-44 run)."""
+    kinds = {size_system(s) for s in live}
+    return bool(live) and None not in kinds and size_system(size) not in kinds | {None}
+
+
+def money_matches(value, oc_value):
+    """The PO's money against the OC's, both as quantity x the OC's unrounded unit price, within a cent. Never a sum
+    of the cent-rounded Total Order rows: they drift half a cent a row from an OC priced in fractions of a cent."""
+    return abs(value - oc_value) < 0.01
+
+
+def oc_value(lines):
+    """The OC's own value in its source unit: every ordered size x its line's unrounded unit price."""
+    return sum(sum(l["sizes_norm"].values()) * l["price"] for l in lines)
+
+
 def _money_cells(cell, row, R, brand, eur, qty):
     cur = cost_currency(brand)
     cell(row, "Variant Cost", R.cost(eur), "rule", f"{cur} {eur:g} x {brand['cost_multiplier']} (season cost convention)")
@@ -342,10 +426,13 @@ def _draft_checks(docs, lines, rows, R, brand, catalog, tag_lookup, dup):
                            + (f"(printed {t['printed_units']} / {cur} {t['printed_value']:,.2f})" if not rec else
                               f"(recomputed from the lines: {', '.join(rec)} print(s) no totals, so nothing to compare)")))
     units = sum(r["Order Qty"] for r in rows)
-    value = round(sum(r["Total Order"] for r in rows), 2)
-    ok = units == t["units"] and abs(value - t["value"]) < 0.01
+    value = sum(r["Order Qty"] * r["Wholesale Price"] for r in rows)
+    column = round(sum(r["Total Order"] for r in rows), 2)   # each row rounded to the cent: shown, never compared
+    ok = units == t["units"] and money_matches(value, oc_value(lines))
     out.append(dict(Check="PO Order Qty and Total Order equal the OC", Result="PASS" if ok else "FAIL",
-                    Detail=f"{units} units, {cur} {value:,.2f}"))
+                    Detail=f"{units} units, {cur} {value:,.2f}" + (
+                        f" (the Total Order column, each row rounded to the cent, sums to {cur} {column:,.2f})"
+                        if abs(column - value) >= 0.005 else "")))
     oc_q = collections.Counter()
     for l in lines:
         for s, q in l["sizes_norm"].items():
@@ -387,13 +474,12 @@ def _draft_checks(docs, lines, rows, R, brand, catalog, tag_lookup, dup):
         out.append(dict(Check=f"MERGE live price clears {brand['margin_floor']}x at this season's cost", Result="WARN",
                         Detail="; ".join(f"{t} A${p:g} / A${c:g} = {p / c:.2f}x" for _, t, p, c in lowm)))
     skus = [r["Variant SKU"] for r in rows]
-    new_skus = [r["Variant SKU"] for r in rows if r["Variant SKU"].startswith(brand["sku_prefix"])]
-    clash = [s for s in new_skus if s in catalog.skus]
+    new_skus = [s for s in skus if s in R.used_skus]   # a live variant's SKU may carry this season's prefix too
     dupe = [s for s, n in collections.Counter(skus).items() if n > 1]
-    out.append(dict(Check="SKUs unique in the sheet and new SKUs absent from the catalog",
-                    Result="FAIL" if clash or dupe else "PASS",
+    out.append(dict(Check="SKUs unique in the sheet (new ones skip the catalog's; finalize checks them against the "
+                          "store again)", Result="FAIL" if dupe else "PASS",
                     Detail=f"{len(new_skus)} new SKUs ({min(new_skus, default='')}..{max(new_skus, default='')}); "
-                           f"{len(clash)} in catalog, {len(dupe)} duplicated"))
+                           f"{len(dupe)} duplicated"))
     long_tags = sorted({r.get(TITLE_TAG) for r in new if len(r.get(TITLE_TAG) or "") > 60})
     out.append(dict(Check="title_tag <= 60 chars (the validator's own check never fires)", Result="WARN" if long_tags else "PASS",
                     Detail=f"{len(long_tags)} over 60" + (": " + " | ".join(long_tags[:8]) if long_tags else "")))

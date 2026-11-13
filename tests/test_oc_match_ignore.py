@@ -72,23 +72,49 @@ def test_a_draft_with_the_key_takes_the_live_products_size_names_through_the_siz
         ("MERGE", "ZZ0001 A1", "S", 1), ("MERGE", "ZZ0001 A1", "M", 0)}
 
 
-def test_a_match_ignore_draft_passes_its_checks_writes_a_workbook_and_completes(cat, tmp_path, monkeypatch):
-    """Review 2026-11-13-buyer-15 F1: the MERGE row carries the live code, so every OC-vs-PO check compares the OC
-    line under that code: the draft, service.draft (a workbook, nothing blocking), complete and reconcile."""
-    brand = dict(BRAND, match_ignore="-")
-    _, _, checks, _ = build(_docs("ZZ-0001", "A1"), brand, cat, _hist(), _tags())
+PRINTED = pytest.mark.parametrize("printed", [("ZZ-0001", "A1"), ("ZZ0003", "C1")],
+                                  ids=["the OC prints the separator", "the store's code carries it"])
+
+
+def _passes_end_to_end(brand, cat, tmp_path, monkeypatch, printed):
+    """The draft, service.draft (a workbook, nothing blocking), complete and reconcile of the PO against itself."""
+    _, _, checks, _ = build(_docs(*printed), brand, cat, _hist(), _tags())
     assert {c["Check"]: c["Result"] for c in checks}["Qty per code+size equals the OC"] == "PASS"
-    monkeypatch.setattr(service, "read_oc", lambda *a, **k: (_docs("ZZ-0001", "A1"), [], None))
+    monkeypatch.setattr(service, "read_oc", lambda *a, **k: (_docs(*printed), [], None))
     po, _, checks = service.draft(str(tmp_path / "oc.pdf"), str(tmp_path / "catalog.csv"), brand)
     assert po is not None and service.blocking(checks) == []
     out = tmp_path / "po.xlsx"
     out.write_bytes(po)
-    done = {c["Check"]: c["Result"] for c in complete.run(str(out), _docs("ZZ-0001", "A1"), brand, cat, _hist(),
+    done = {c["Check"]: c["Result"] for c in complete.run(str(out), _docs(*printed), brand, cat, _hist(),
                                                             _tags(), str(tmp_path / "done.xlsx"))}
     assert done["Qty per code+size equals the OC"] == "PASS" and done["Wholesale equals the OC on every row"] == "PASS"
     _, rows = poxlsx.read_po(str(out))
-    res = reconcile.compare(rows, rows, _docs("ZZ-0001", "A1"), brand=brand)
+    res = reconcile.compare(rows, rows, _docs(*printed), brand=brand)
     assert res["hand_qty_mismatch"] == [] and res["hand_price_diff"] == []
+    assert res["draft_qty_mismatch"] == [] and res["draft_price_diff"] == []
+
+
+@PRINTED
+def test_a_match_ignore_draft_passes_its_checks_writes_a_workbook_and_completes(cat, tmp_path, monkeypatch, printed):
+    """Review 2026-11-13-buyer-15 F1: the MERGE row carries the live code, so every OC-vs-PO check compares the OC
+    line under that code: the draft, service.draft (a workbook, nothing blocking), complete and reconcile."""
+    _passes_end_to_end(dict(BRAND, match_ignore="-"), cat, tmp_path, monkeypatch, printed)
+
+
+def test_join_key_alt_leaves_the_same_separators_out(cat):
+    """A brand with match_ignore and join_key_alt: the alternative code is matched the way the join_key is."""
+    brand = dict(BRAND, match_ignore="-", join_key="{style}{colour}", join_key_alt="{style} {colour}")
+    rows, _, checks, _ = build(_docs("ZZ-0001", "A1"), brand, cat, _hist(), _tags())
+    assert {(r["Command"], r[CODE]) for r in rows} == {("MERGE", "ZZ0001 A1")}
+    assert [c["Detail"] for c in checks if c["Check"].startswith("Joined by join_key_alt")] == ["ZZ-0001A1 -> ZZ-0001 A1"]
+
+
+@PRINTED
+def test_join_key_alt_with_match_ignore_passes_end_to_end(cat, tmp_path, monkeypatch, printed):
+    """Review 2026-11-13-buyer-17 F2: reconcile keys the alternative code the way it keys the join_key, with the
+    separators left out, so a PO reconciled against itself reports nothing."""
+    brand = dict(BRAND, match_ignore="-", join_key="{style}{colour}", join_key_alt="{style} {colour}")
+    _passes_end_to_end(brand, cat, tmp_path, monkeypatch, printed)
 
 
 def test_a_draft_without_the_key_is_unchanged(cat):

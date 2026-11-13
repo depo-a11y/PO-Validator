@@ -32,10 +32,34 @@ which printed header holds what (`check_mapping` validates it when the config lo
                                     # a line repeats the line's subtotal, which is then taken once, never summed)
       sheet_name: Order             # optional: the worksheet (default the first that has the header row)
       totals: {label: Total, qty: Units, value: Total Cost}       # a printed totals row, found by its label
+      totals: {unlabelled: true, qty: Units, value: Total Cost}  # or the one row with numbers and no style
       totals: {qty_cell: "Summary!B7", value_cell: "Summary!B8"}  # or printed totals cells
       totals: none                  # or: the brand prints no totals (declared, so the Checks can say so)
       ean_prefixes: ["0000000"]     # optional: the brand's GS1 company prefix(es); every EAN must start with one
                                     # (an identity check for a file that names no brand)
+      size_columns: {after: Country of Origin}   # or: the size columns are the header cells after this one, up to
+                                    # the next mapped or RRP column (an order platform prints only the sizes ordered)
+      fields:                       # optional: one value per file, from a cell above the header row
+        doc: {label: "PO Number:"}  # the first filled cell right of this label
+        issuer: {cell: B2}          # or a fixed cell
+        status: {label: "Order Status:", require: [Approved]}   # anything else is not a confirmed order: FAIL
+        gender: {label: "Order Name:"}   # an order or drop name (MENS-EDIT-K): a gender word in it is the order's
+                                         # gender, for every line whose own gender column is blank or absent
+      totals: {qty_label: "Units:", value_label: "Subtotal:"}   # or totals right of their labels, anywhere
+      footer_labels: ["Total:"]     # rows holding one of these are footers, never order lines
+      zero_labels: ["Order Discount:"]   # the amount right of each must be 0 (a discount the lines do not carry)
+      header_rows: 2                # the header spans two rows (e.g. a currency row under it)
+      sections: true                # every row that prints the mapped headers again starts a section with its own
+                                    # columns and sizes (an order form grouped by category); sections are merged
+      select: {column: productline, values: [AA, AB]}   # only these rows are this brand's; the rest are counted
+                                    # and named in the Checks, never read (one file, two store vendors)
+      select: {column: productline, values: [AA], known: [AA, AB]}   # known: every value the brand's configs read
+                                    # between them; a row whose value is in none FAILs, naming its units and value
+      columns: {colour_code: {header: Color, split: " : ", part: 1}}   # a cell printing "code : name"
+      columns: {style: {header: Model, from: 6}}   # characters 6 to the end (to: N ends at N), after any split
+      columns: {style: {header: Model, remove: "-"}}   # the cell with every "-" taken out (applied last)
+      platform: joor                # start from a built-in platform mapping (PLATFORMS); every key given here
+                                    # overrides it, columns one by one (null drops one)
 
 The header row is the first row that holds every mapped header; a later row that repeats it (a page break in an
 export) is skipped. A mapped header missing from the sheet, or a mapping key the reader does not know, is a FAIL
@@ -53,6 +77,8 @@ An RRP is taken only from a column whose header util.rrp_header accepts, in the 
 mapping or the document gives; the draft uses it as a retail price only when that currency is AUD.
 EAN, HS code and origin are kept per size (`ean`, `hs_code`, `origin`: {size: value}).
 """
+import collections
+import copy
 import csv
 import html.parser
 import io
@@ -66,10 +92,44 @@ from ..util import iso_currency, rrp_header
 
 COLUMN_KEYS = ("style", "colour_code", "colour_name", "fabric", "size", "qty", "price", "line_value", "currency",
                "doc", "line_no", "product_class", "gender", "collection", "description", "delivery", "issuer",
-               "label", "rrp", "rrp_currency", "ean", "hs_code", "origin")
+               "label", "rrp", "rrp_currency", "ean", "hs_code", "origin", "style_alt")
 SHEET_KEYS = ("columns", "size_columns", "size_pairs", "size_map", "currency", "rrp_currency", "decimal",
-              "line_value_per", "sheet_name", "totals", "ean_prefixes")
+              "line_value_per", "sheet_name", "totals", "ean_prefixes", "platform", "select", "fields",
+              "footer_labels", "zero_labels", "header_rows", "sections")
+NUMBER_KEYS = ("qty", "price", "line_value", "rrp")
+FIELD_KEYS = ("doc", "issuer", "label", "status", "gender")
+TOTALS_LABEL_KEYS = ("qty_label", "value_label")
+# Order platforms whose exports share one layout whatever the brand. Header texts may carry {currency} and
+# {rrp_currency}, filled from the brand's sheet: currency and rrp_currency, so an export in another currency fails
+# on its header. A brand config names one with `platform:` and overrides any key.
+PLATFORMS = {
+    "joor": {   # JOOR order export: brand name at B2, label: value pairs above the header, a footer of labelled totals
+        "columns": {"style": "Style Number", "colour_code": "Color Code", "colour_name": "Color",
+                    "description": "Style Name", "product_class": "Style Name", "origin": "Country of Origin",
+                    "qty": "Units", "price": "WholeSale ({currency})", "line_value": "Total ({currency})",
+                    "rrp": "Sugg. Retail ({rrp_currency})"},
+        "size_columns": {"after": "Country of Origin"},
+        "fields": {"doc": {"label": "PO Number:"}, "issuer": {"cell": "B2"},
+                   "status": {"label": "Order Status:", "require": ["Approved"]}},
+        "totals": {"qty_label": "Units:", "value_label": "Subtotal:"},
+        "footer_labels": ["Total:", "Shipping:", "Tax:", "Order last modified:"],
+        "zero_labels": ["Order Discount:"],
+    },
+    "order_sheet": {   # an ORDER SHEET tab (with an Order report tab): brand at B2, a currency row under the header
+        "sheet_name": "Order sheet",
+        "columns": {"style": "Product model", "description": "Product name", "product_class": "Product name",
+                    "origin": "Made in", "qty": "Total QTY", "price": "Wholesale price", "line_value": "Wholesale total",
+                    "rrp": "Suggested retail price"},
+        "size_columns": {"after": "Bulk"},
+        "header_rows": 2,
+        "fields": {"doc": {"label": "Order number"}, "issuer": {"cell": "B2"}},
+        "totals": {"label": "TOTAL", "qty": "Total QTY", "value": "Wholesale total"},
+        "zero_labels": ["Discount 0% ({currency})"],
+    },
+}
+
 TOTALS_ROW_KEYS = ("label", "qty", "value")
+TOTALS_BARE_KEYS = ("unlabelled", "qty", "value")
 TOTALS_CELL_KEYS = ("qty_cell", "value_cell")
 MONEY_TOL = 0.02
 TOTALS_NONE = "totals (the brand config says the brand prints none)"
@@ -104,23 +164,86 @@ def blank(v):
 
 
 # ---- the mapping -----------------------------------------------------------------
+def _fill(v, sheet):
+    if isinstance(v, str):
+        for k in ("currency", "rrp_currency"):
+            if "{" + k + "}" in v and sheet.get(k):
+                v = v.replace("{" + k + "}", str(sheet[k]))
+        return v
+    if isinstance(v, list):
+        return [_fill(x, sheet) for x in v]
+    if isinstance(v, dict):
+        return {k: _fill(x, sheet) for k, x in v.items()}
+    return v
+
+
+WOMEN_WORDS = {"WOMEN", "WOMAN", "WOMENS", "WOMANS", "FEMALE", "LADIES", "LADY", "DONNA", "FEMME"}
+MEN_WORDS = {"MEN", "MAN", "MENS", "MANS", "MALE", "HOMME", "UOMO"}
+
+
+def gender_of(value):
+    """MEN or WOMEN when a printed text names one gender as a word (Man, Women's, MENS-EDIT-K), else None: Unisex, a
+    text naming both, or a word that only contains one (GERMANY), leaves the brand's default_gender to decide."""
+    words = set(re.split(r"[^A-Z]+", str(value or "").upper().replace("'", "")))
+    w, m = bool(words & WOMEN_WORDS), bool(words & MEN_WORDS)
+    return "WOMEN" if w and not m else "MEN" if m and not w else None
+
+
+def resolve(sheet):
+    """The brand's sheet: mapping on top of its platform's (columns and fields merged one by one, null drops one),
+    with {currency} and {rrp_currency} filled. A mapping with no platform comes back as given."""
+    if not isinstance(sheet, dict) or "platform" not in sheet or sheet["platform"] not in PLATFORMS:
+        return sheet
+    out = copy.deepcopy(PLATFORMS[sheet["platform"]])
+    for k, v in sheet.items():
+        if k in ("columns", "fields") and isinstance(v, dict):
+            out.setdefault(k, {})
+            for c, h in v.items():
+                if h is None:
+                    out[k].pop(c, None)
+                else:
+                    out[k][c] = h
+        elif k != "platform":
+            out[k] = v
+    out["platform"] = sheet["platform"]
+    return _fill(out, out)
+
+
+def head(spec):
+    """The header text a column spec names: the text itself, or a split spec's header."""
+    return spec.get("header") if isinstance(spec, dict) else spec
+
+
 def check_mapping(sheet, cfg):
     """[] when the brand config's `sheet:` mapping is usable, else what is wrong with it."""
     if not isinstance(sheet, dict):
         return ["adapter: sheet needs a sheet: block mapping the OC's column headers (see oc/adapters/sheet.py)"]
+    if "platform" in sheet and sheet["platform"] not in PLATFORMS:
+        return [f"sheet: platform {sheet['platform']!r} is not one the reader knows ({', '.join(PLATFORMS)})"]
+    gate = (PLATFORMS.get(sheet.get("platform")) or {}).get("fields", {}).get("status", {}).get("require")
+    sheet = resolve(sheet)
     out = [f"sheet: unknown key {k!r} (known: {', '.join(SHEET_KEYS)})" for k in sheet if k not in SHEET_KEYS]
+    status = (sheet.get("fields") or {}).get("status")
+    if gate and not (isinstance(status, dict) and status.get("require")):
+        out.append(f"sheet: fields: status must keep a require list: the {sheet['platform']} platform drafts only an "
+                   f"order whose status is {' or '.join(gate)}, and a brand may name another status, never drop the gate")
     cols = sheet.get("columns")
     if not isinstance(cols, dict):
         return out + ["sheet: columns: maps each field to its printed header, e.g. style: Model"]
     out += [f"sheet: columns: unknown key {k!r} (known: {', '.join(COLUMN_KEYS)})" for k in cols if k not in COLUMN_KEYS]
-    out += [f"sheet: columns: {k} is a header text, got {v!r}" for k, v in cols.items()
-            if not isinstance(v, str) or not v.strip()]
+    out += [f"sheet: columns: {k} is a header text, or {{header, split, part, from, to, remove}} for part of a cell, "
+            f"got {v!r}" for k, v in cols.items() if not _spec_ok(v, k)]
+    left = sorted({x for v in cols.values() for x in re.findall(r"\{(\w+)\}", str(head(v) or ""))})
+    if left:
+        out.append(f"sheet: the platform's headers need {', '.join(left)}: give them in the brand's sheet: block")
     if "style" not in cols:
         out.append("sheet: columns: needs style")
+    if "{style_alt}" in (cfg.get("join_key_alt") or "") and "style_alt" not in cols:
+        out.append("sheet: columns: needs style_alt (join_key_alt uses {style_alt})")
     if "price" not in cols:
         out.append("sheet: columns: needs price (the unit price)")
-    if not ({"colour_code", "colour_name"} & set(cols)):
-        out.append("sheet: columns: needs colour_code or colour_name")
+    if not ({"colour_code", "colour_name"} & set(cols)) and re.search(r"\{colour(_code)?\}", cfg.get("join_key") or ""):
+        out.append("sheet: columns: needs colour_code or colour_name (the join_key uses a colour)")
     layouts = [n for n, on in (("columns: size", "size" in cols), ("size_columns", "size_columns" in sheet),
                                ("size_pairs", "size_pairs" in sheet)) if on]
     if len(layouts) != 1:
@@ -129,9 +252,10 @@ def check_mapping(sheet, cfg):
     if "size" in cols and "qty" not in cols:
         out.append("sheet: columns: size needs columns: qty")
     sc = sheet.get("size_columns")
-    if "size_columns" in sheet and (not isinstance(sc, list) or not sc or not all(isinstance(x, str) and x.strip()
-                                                                                    for x in sc)):
-        out.append(f"sheet: size_columns is a list of size headers, got {sc!r}")
+    if "size_columns" in sheet and not (isinstance(sc, list) and sc and all(isinstance(x, str) and x.strip() for x in sc)
+                                        or isinstance(sc, dict) and set(sc) == {"after"}
+                                        and isinstance(sc["after"], str) and sc["after"].strip()):
+        out.append(f"sheet: size_columns is a list of size headers or {{after: header}}, got {sc!r}")
     sp = sheet.get("size_pairs")
     if "size_pairs" in sheet and (not isinstance(sp, list) or not sp or not all(
             isinstance(p, list) and len(p) in (2, 3) and all(isinstance(x, str) and x.strip() for x in p) for p in sp)):
@@ -148,6 +272,7 @@ def check_mapping(sheet, cfg):
     for key in ("currency", "rrp_currency"):
         if sheet.get(key) and not iso_currency(sheet[key]):
             out.append(f"sheet: {key} {sheet[key]!r} is not a currency code (e.g. EUR, USD, AUD)")
+    out += _check_new_keys(sheet, cols, cfg)
     if "rrp" in cols and isinstance(cols["rrp"], str) and not rrp_header(cols["rrp"].split()):
         out.append(f"sheet: columns: rrp {cols['rrp']!r} is not an RRP column header (RRP, MSRP, SRP, retail, ...): "
                    "an RRP is read only from a column printed as one")
@@ -169,10 +294,75 @@ def check_mapping(sheet, cfg):
     tpl = cfg.get("join_key") or ""
     if "{fabric}" in tpl and "fabric" not in cols:
         out.append("join_key uses {fabric} but sheet: columns: fabric is not mapped")
+    fields = sheet.get("fields") if isinstance(sheet.get("fields"), dict) else {}
     for key, col in (("oc_supplier", "issuer"), ("oc_label", "label")):
-        if cfg.get(key) and col not in cols:
-            out.append(f"{key} is set but sheet: columns: {col} is not mapped: a spreadsheet prints no issuer or "
-                       f"label the reader can find otherwise, so map the column that names it or remove {key}")
+        if cfg.get(key) and col not in cols and col not in fields:
+            out.append(f"{key} is set but neither sheet: columns: {col} nor sheet: fields: {col} is mapped: a "
+                       f"spreadsheet prints no issuer or label the reader can find otherwise, so map the column or "
+                       f"cell that names it or remove {key}")
+    return out
+
+
+def _spec_ok(v, key):
+    if isinstance(v, str):
+        return bool(v.strip())
+    ints = [v.get(k, 1) for k in ("part", "from", "to")] if isinstance(v, dict) else []
+    return (isinstance(v, dict) and key not in NUMBER_KEYS
+            and set(v) <= {"header", "split", "part", "from", "to", "remove"}
+            and isinstance(v.get("header"), str) and v["header"].strip() and ({"split", "from", "to", "remove"} & set(v))
+            and (isinstance(v.get("remove"), str) and v["remove"] != "" if "remove" in v else True)
+            and (isinstance(v.get("split"), str) and v["split"] != "" if "split" in v else "part" not in v)
+            and all(isinstance(x, int) and not isinstance(x, bool) and x >= 1 for x in ints)
+            and v.get("from", 1) <= v.get("to", v.get("from", 1)))
+
+
+def _check_new_keys(sheet, cols, cfg):
+    out = []
+    sel = sheet.get("select")
+    if sel is not None and not (isinstance(sel, dict) and set(sel) in ({"column", "values"}, {"column", "values", "known"})
+                                and isinstance(sel["column"], str)
+                                and all(isinstance(sel.get(k, ["x"]), list) and sel.get(k, ["x"])
+                                        and all(isinstance(x, str) and x.strip() for x in sel.get(k, ["x"]))
+                                        for k in ("values", "known"))):
+        out.append(f"sheet: select is {{column: header, values: [..], known: [..] (optional)}}, got {sel!r}")
+    elif sel is not None and "known" in sel and {norm(x) for x in sel["values"]} - {norm(x) for x in sel["known"]}:
+        out.append(f"sheet: select: known must hold every value this config reads, got {sel['known']!r} without "
+                   f"{sorted({norm(x) for x in sel['values']} - {norm(x) for x in sel['known']})}")
+    if sel is not None and isinstance(sheet.get("totals"), dict):
+        out.append("sheet: select cannot be used with printed totals: they cover every line, not only the selected ones")
+    fields = sheet.get("fields")
+    if fields is not None:
+        if not isinstance(fields, dict):
+            out.append(f"sheet: fields is a mapping of {', '.join(FIELD_KEYS)}, got {fields!r}")
+        else:
+            out += [f"sheet: fields: unknown key {k!r} (known: {', '.join(FIELD_KEYS)})" for k in fields if k not in FIELD_KEYS]
+            for k, f in fields.items():
+                ok = isinstance(f, dict) and (set(f) == {"cell"} and isinstance(f["cell"], str) and CELL.match(f["cell"])
+                                              or "label" in f and set(f) <= {"label", "require"}
+                                              and isinstance(f["label"], str) and f["label"].strip()
+                                              and (k == "status" or "require" not in f))
+                if ok and "require" in f and not (isinstance(f["require"], list) and f["require"]):
+                    ok = False
+                if not ok:
+                    out.append(f"sheet: fields: {k} is {{label: text}} (the cell right of it), {{cell: B2}}"
+                               + (", with require: [..] for status" if k == "status" else "") + f", got {f!r}")
+            if "doc" in fields and "doc" in cols:
+                out.append("sheet: the order number is given twice: columns: doc and fields: doc")
+            for k in ("issuer", "label"):
+                if k in fields and k in cols:
+                    out.append(f"sheet: {k} is given twice: columns: {k} and fields: {k}")
+    for key in ("footer_labels", "zero_labels"):
+        v = sheet.get(key)
+        if v is not None and not (isinstance(v, list) and v and all(isinstance(x, str) and x.strip() for x in v)):
+            out.append(f"sheet: {key} is a list of label texts, got {v!r}")
+    if sheet.get("sections") not in (None, True, False):
+        out.append(f"sheet: sections is true or false, got {sheet['sections']!r}")
+    if sheet.get("sections") and isinstance(sheet.get("totals"), dict) and "qty" not in sheet["totals"]:
+        out.append("sheet: sections take a totals row (label or unlabelled), not totals cells or labels: every "
+                   "section would find them")
+    hr = sheet.get("header_rows")
+    if hr is not None and (isinstance(hr, bool) or not isinstance(hr, int) or not 1 <= hr <= 5):
+        out.append(f"sheet: header_rows is a whole number from 1 to 5, got {hr!r}")
     return out
 
 
@@ -185,11 +375,20 @@ def _check_totals(t):
     if keys == set(TOTALS_ROW_KEYS):
         return [f"sheet: totals: {k} is a text, got {t[k]!r}" for k in TOTALS_ROW_KEYS
                 if not isinstance(t[k], str) or not t[k].strip()]
+    if keys == set(TOTALS_BARE_KEYS):
+        return ([] if t["unlabelled"] is True else [f"sheet: totals: unlabelled is true, got {t['unlabelled']!r}"]) + \
+            [f"sheet: totals: {k} is a text, got {t[k]!r}" for k in ("qty", "value")
+             if not isinstance(t[k], str) or not t[k].strip()]
+    if keys == set(TOTALS_LABEL_KEYS):
+        return [f"sheet: totals: {k} is a label text, got {t[k]!r}" for k in TOTALS_LABEL_KEYS
+                if not isinstance(t[k], str) or not t[k].strip()]
     if keys == set(TOTALS_CELL_KEYS):
         return [f"sheet: totals: {k} is a cell like B7 or Summary!B7, got {t[k]!r}" for k in TOTALS_CELL_KEYS
                 if not isinstance(t[k], str) or not CELL.match(t[k].strip())]
     return [f"sheet: totals is {{label, qty, value}} (a totals row found by its label; qty and value are "
-            f"column headers), {{qty_cell, value_cell}}, or none (the brand prints no totals), got keys {sorted(keys)}"]
+            f"column headers), {{unlabelled: true, qty, value}} (the one row with numbers and no style), "
+            f"{{qty_cell, value_cell}}, {{qty_label, value_label}} (each total right of its label), "
+            f"or none (the brand prints no totals), got keys {sorted(keys)}"]
 
 
 # ---- reading the file ----------------------------------------------------------
@@ -369,10 +568,12 @@ def text(v):
 def _headers(sheet):
     """Every header the mapping names, as printed in the config."""
     cols = sheet["columns"]
-    names = list(cols.values()) + list(sheet.get("size_columns") or [])
+    sc = sheet.get("size_columns")
+    names = [head(v) for v in cols.values()] + (list(sc) if isinstance(sc, list) else [sc["after"]] if sc else [])
+    names += [sheet["select"]["column"]] if sheet.get("select") else []
     names += [h for p in sheet.get("size_pairs") or [] for h in p]
     t = sheet.get("totals") if isinstance(sheet.get("totals"), dict) else {}
-    names += [t[k] for k in ("qty", "value") if "label" in t]
+    names += [t[k] for k in ("qty", "value") if "qty" in t]
     return list(dict.fromkeys(names))
 
 
@@ -410,6 +611,7 @@ def parse(path, brand_cfg):
     bad = check_mapping(sheet, brand_cfg or {})
     if bad:
         return [], bad
+    sheet = resolve(sheet)
     try:
         sheets = read_sheets(path)
     except Exception as e:
@@ -419,7 +621,54 @@ def parse(path, brand_cfg):
     if isinstance(found, str):
         return [], [found]
     name, rows, h, pos = found
+    if sheet.get("sections"):
+        return _sections(path, sheet, sheets, name, rows, h)
     return Reader(path, sheet, sheets, name, rows, h, pos).run()
+
+
+def _sections(path, sheet, sheets, name, rows, h):
+    """A sheet in sections, each under its own copy of the header (columns and sizes may move between them): each
+    section read on its own, the documents merged by order number."""
+    want = {norm(x) for x in _headers(sheet)}
+    starts = [i for i in range(h, len(rows)) if want <= {norm(v) for v in rows[i] if not isinstance(v, Uncached)}]
+    docs, problems, readers = {}, [], []
+    for k, s in enumerate(starts):
+        pos = {}
+        for j, v in enumerate(rows[s]):
+            if not isinstance(v, Uncached) and norm(v) in want:
+                pos.setdefault(norm(v), j)
+        rd = Reader(path, sheet, sheets, name, rows[:starts[k + 1] if k + 1 < len(starts) else len(rows)], s, pos)
+        rd.section = True
+        readers.append(rd)
+        ds, ps = rd.run()
+        problems += ps
+        for d in ds:
+            t = docs.get(d["doc"])
+            if t is None:
+                docs[d["doc"]] = d
+                continue
+            if iso_currency(t["currency"]) != iso_currency(d["currency"]):
+                problems.append(f"{d['doc']}: sections in {t['currency']} and {d['currency']}")
+            t["lines"], t["rows"] = t["lines"] + d["lines"], t["rows"] + d["rows"]
+            for key in ("notes", "recomputed"):
+                t[key] += [x for x in d[key] if x not in t[key]]
+    out = list(docs.values())
+    for d in out:
+        if "line_no" not in sheet["columns"]:
+            for n, l in enumerate(d["lines"], 1):
+                l["line_no"] = n
+        d["identity"], d["identity_problems"] = None, []
+        rd._anchor(d)   # over the whole order's EANs, not one section's
+    printed = [x.printed for x in readers if x.printed is not None]
+    if len(printed) > 1:
+        problems.append(f"{name}: a totals row in {len(printed)} sections (rows "
+                        f"{', '.join(str(x[2] + 1) for x in printed)}); one order prints one")
+    rd.problems = []
+    rd._totals(out, printed[0] if printed else None)
+    problems += rd.problems
+    if not any(d["lines"] for d in out) and not problems:
+        problems.append(f"{name}: no order lines under any of the {len(starts)} header rows")
+    return out, problems + gate_problems(out)
 
 
 class Reader:
@@ -429,18 +678,92 @@ class Reader:
         self.cols = sheet["columns"]
         self.dec = sheet.get("decimal", ".")
         self.size_map = {norm(k): str(v) for k, v in (sheet.get("size_map") or {}).items()}
-        self.problems, self.format_errors = [], []
+        self.problems, self.format_errors, self.section, self.printed = [], [], False, None
         self.header = [norm(v) for v in rows[h]]
+        self.size_heads, self.size_label = self._size_heads()
+
+    def _size_heads(self):
+        """The size columns' headers and their sizes: the mapped list, or every header after `after` up to the next
+        mapped column. A header printing its size twice ("XS XS") names that size once."""
+        sc = self.sheet.get("size_columns")
+        if not isinstance(sc, dict):
+            return list(sc or []), {}
+        start, mapped = self.pos[norm(sc["after"])], set(self.pos.values())
+        heads, labels = [], {}
+        for j in range(start + 1, len(self.rows[self.h])):
+            v = self.rows[self.h][j]
+            if j in mapped or blank(v) or isinstance(v, Uncached) or rrp_header(str(v).split()):
+                break   # a mapped column, a blank header or an RRP column (never a size, even unmapped) ends the sizes
+            t = text(v) if not isinstance(v, (int, float)) else ident(v)
+            if norm(t) in self.pos:
+                self.problems.append(f"{self.name} row {self.h + 1}: header {t!r} printed in more than one column")
+                continue
+            self.pos[norm(t)] = j
+            words = t.split()
+            labels[t] = words[0] if len(words) > 1 and len(set(words)) == 1 else t
+            heads.append(t)
+        if not heads:
+            self.problems.append(f"{self.name} row {self.h + 1}: no size columns after {sc['after']!r}")
+        return heads, labels
+
+    def head(self, key):
+        return head(self.cols[key])
 
     def col(self, key):
-        return self.pos[norm(self.cols[key])] if key in self.cols else None
+        return self.pos[norm(self.head(key))] if key in self.cols else None
 
     def cell(self, row, key=None, header=None):
         j = self.pos[norm(header)] if header is not None else self.col(key)
-        return row[j] if j is not None and j < len(row) else None
+        v = row[j] if j is not None and j < len(row) else None
+        spec = self.cols.get(key) if header is None else None
+        if isinstance(spec, dict):
+            t = ident(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else text(v)
+            if t is not None and "split" in spec:
+                parts = [x.strip() for x in t.split(spec["split"])]
+                t = parts[spec.get("part", 1) - 1] if len(parts) >= spec.get("part", 1) else None
+            if t is not None and ("from" in spec or "to" in spec):
+                t = t[spec.get("from", 1) - 1:spec.get("to")]
+            if t is not None and "remove" in spec:
+                t = t.replace(spec["remove"], "")
+            return t or None
+        return v
+
+    def _label_value(self, label, rows):
+        """(value, row index) of the first filled cell right of the first cell reading `label`, in these rows."""
+        want = norm(label)
+        for r in rows:
+            row = self.rows[r]
+            for j, v in enumerate(row):
+                if not isinstance(v, Uncached) and norm(v) == want:
+                    return next((x for x in row[j + 1:] if not blank(x)), None), r
+        return None, None
+
+    def _cell_at(self, ref):
+        m = CELL.match(ref.strip())
+        name, letters, n = m.group(1), m.group(2).upper(), int(m.group(3))
+        rows = self.rows if name is None else next((rs for s, rs in self.sheets if norm(s) == norm(name)), [])
+        j = 0
+        for ch in letters:
+            j = j * 26 + ord(ch) - 64
+        return rows[n - 1][j - 1] if n - 1 < len(rows) and j - 1 < len(rows[n - 1]) else None
+
+    def _fields(self):
+        """The file's own values above the header row: order number, issuer, label, status (checked here), gender."""
+        out = {}
+        for key, f in (self.sheet.get("fields") or {}).items():
+            v = self._cell_at(f["cell"]) if "cell" in f else self._label_value(f["label"], range(self.h))[0]
+            v = ident(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else text(v)
+            where = f.get("cell") or f"right of {f['label']!r}"
+            if v is None:
+                self.problems.append(f"{self.name}: no {key} {where} above the header row")
+            elif "require" in f and norm(v) not in {norm(x) for x in f["require"]}:
+                self.problems.append(f"{self.name}: {f['label']} {v!r}, not {' or '.join(f['require'])}: this file is "
+                                     "not a confirmed order, so nothing is drafted from it")
+            out[key] = v
+        return out
 
     def num(self, r, row, key=None, header=None):
-        head = header if header is not None else self.cols[key]
+        head = header if header is not None else self.head(key)
         v = self.cell(row, key, header)
         try:
             return number(v, self.dec)
@@ -457,13 +780,14 @@ class Reader:
         if q is None:
             return 0
         if q < 0 or abs(q - round(q)) > 1e-9:
-            head = header if header is not None else self.cols[key]
+            head = header if header is not None else self.head(key)
             self.problems.append(f"{self.name} row {r + 1} column {head!r}: quantity {q:g} is not a whole number")
             return 0
         return int(round(q))
 
     def size(self, v):
         t = text(v) if not isinstance(v, (int, float)) or isinstance(v, bool) else ident(v)
+        t = self.size_label.get(t, t)
         return self.size_map.get(norm(t), t) if t is not None else None
 
     def repeated_header(self, row):
@@ -473,30 +797,70 @@ class Reader:
     def run(self):
         t = self.sheet.get("totals") if isinstance(self.sheet.get("totals"), dict) else {}
         label = norm(t.get("label")) if "label" in t else None
-        data, printed, repeats = [], None, 0
-        for r in range(self.h + 1, len(self.rows)):
+        footer = {norm(x) for x in (self.sheet.get("footer_labels") or []) + (self.sheet.get("zero_labels") or [])
+                  + [t[k] for k in TOTALS_LABEL_KEYS if k in t]}
+        sel = self.sheet.get("select")
+        keep = {norm(x) for x in sel["values"]} if sel else None
+        known = {norm(x) for x in sel["known"]} if sel and "known" in sel else None
+        unknown = {}   # a selector value no brand config reads: [rows, units, value]
+        self.fields = self._fields()
+        data, printed, repeats, left = [], None, 0, collections.Counter()
+        for r in range(self.h + self.sheet.get("header_rows", 1), len(self.rows)):
             row = self.rows[r]
             if self.repeated_header(row):
                 repeats += 1
                 continue
+            if footer and any(not isinstance(v, Uncached) and norm(v) in footer for v in row):
+                continue
+            if keep is not None and ident(self.cell(row, "style")) is not None:
+                v = text(self.cell(row, header=sel["column"]))
+                if v is None:
+                    self.problems.append(f"{self.name} row {r + 1} has no {sel['column']!r}, so it is no one's line")
+                    continue
+                if norm(v) not in keep:
+                    left[v] += 1
+                    if known is not None and norm(v) not in known:
+                        u = unknown.setdefault(v, [0, 0.0, 0.0])
+                        q = (self.num(r, row, "qty") if "qty" in self.cols else
+                             sum(self.num(r, row, header=h) or 0 for h in self.size_heads)) or 0
+                        u[0], u[1], u[2] = u[0] + 1, u[1] + q, u[2] + q * (self.num(r, row, "price") or 0)
+                    continue
             if ident(self.cell(row, "style")) is None:
-                if label is not None and any(norm(v) == label for v in row if not isinstance(v, Uncached)):
+                numbers = any(not blank(row[j]) for j in self._number_cols() if j < len(row))
+                if (label is not None and any(norm(v) == label for v in row if not isinstance(v, Uncached))) \
+                        or (t.get("unlabelled") and numbers):
                     if printed is not None:
-                        self.problems.append(f"{self.name} row {r + 1}: a second totals row labelled {t['label']!r}")
+                        self.problems.append(f"{self.name} row {r + 1}: a second totals row "
+                                             + (f"labelled {t['label']!r}" if label is not None else
+                                                f"(rows {printed[2] + 1} and {r + 1} both have numbers and no style)"))
                     printed = (self.num(r, row, header=t["qty"]), self.num(r, row, header=t["value"]), r)
                     continue
-                if any(not blank(row[j]) for j in self._number_cols() if j < len(row)):
+                if numbers:
                     self.problems.append(f"{self.name} row {r + 1} has quantities or prices but no style "
-                                         f"({self.cols['style']!r}): a subtotal row? Map it as totals or remove it")
+                                         f"({self.head('style')!r}): a subtotal row? Map it as totals or remove it")
                 continue
             data.append(r)
         self._format_scan(data)
         if "qty_cell" in t:
             printed = self._printed_cells(t)
+        if "qty_label" in t:
+            printed = self._printed_labels(t)
+        self._zero_labels()
         docs = self._docs(data)
-        if not docs and not self.problems:
+        for v, (n, q, val) in sorted(unknown.items()):
+            self.problems.append(f"{self.name}: {sel['column']!r} {v!r} is in no brand config's select (known: "
+                                 f"{', '.join(sel['known'])}): {n} rows, {q:g} units, {self.sheet.get('currency') or ''} "
+                                 f"{val:,.2f} would be dropped. Add it to the config of the brand that sells it, and to "
+                                 "known in each")
+        if left and docs:
+            docs[0]["notes"].append(f"{sum(left.values())} order rows of other lines ({', '.join(sorted(left))}) left out: "
+                                    f"this brand config reads only {', '.join(sel['values'])} ({sel['column']!r})")
+        if not any(d["lines"] for d in docs) and not self.problems and not self.section:   # a section may be empty
             self.problems.append(f"{self.name}: no order lines under the header row {self.h + 1}")
-        self._totals(docs, printed)
+        if self.section:
+            self.printed = printed   # checked once, against the merged order
+        else:
+            self._totals(docs, printed)
         for d in docs:
             d["header_repeats"] = repeats
             if "issuer" in self.cols and d["issuer"] is None:
@@ -509,7 +873,7 @@ class Reader:
                           + (f"; and {n - 4} more" if n > 4 else "") + ". A separator that contradicts the format, or "
                           "a cell that reads two ways (1.234), is never guessed: has the OC's number format changed? "
                           "Check the file, then ask Colwyn to update sheet: decimal"]
-        return docs, self.problems + gate_problems(docs)
+        return docs, self.problems + ([] if self.section else gate_problems(docs))   # a section is gated merged
 
     def _anchor(self, d):
         """The brand's GS1 prefixes against every EAN of the document: d["identity"] says what was checked, and an
@@ -526,8 +890,8 @@ class Reader:
 
     def _format_scan(self, data):
         """Every mapped money and quantity cell of every order line against the number format, before any is used."""
-        heads = [self.cols[k] for k in ("qty", "price", "line_value", "rrp") if k in self.cols]
-        heads += list(self.sheet.get("size_columns") or [])
+        heads = [self.head(k) for k in ("qty", "price", "line_value", "rrp") if k in self.cols]
+        heads += list(self.size_heads)
         heads += [h for p in self.sheet.get("size_pairs") or [] for h in p[1:]]
         for r in data:
             for h in heads:
@@ -539,9 +903,42 @@ class Reader:
                 except ValueError:
                     pass   # not a number at all: reported where the cell is read
 
+    def _printed_labels(self, t):
+        """(units, value, None) from the cells right of the totals labels, below the header first."""
+        below = range(self.h + self.sheet.get("header_rows", 1), len(self.rows))
+        vals = []
+        for key in TOTALS_LABEL_KEYS:
+            v, r = self._label_value(t[key], below)
+            if r is None:
+                v, r = self._label_value(t[key], range(self.h))
+            try:
+                got = number(v, self.dec)
+            except ValueError as e:
+                self.problems.append(f"totals: {t[key]!r}: {e}")
+                return None
+            if got is None:
+                self.problems.append(f"totals: no amount right of {t[key]!r}")
+                return None
+            vals.append(got)
+        return vals[0], vals[1], None
+
+    def _zero_labels(self):
+        for lab in self.sheet.get("zero_labels") or []:
+            v, r = self._label_value(lab, range(len(self.rows)))
+            try:
+                got = number(v, self.dec)
+            except ValueError:
+                got = None
+            if r is None or got is None:
+                self.problems.append(f"{self.name}: no amount right of {lab!r}: is there a discount the lines do not "
+                                     "carry? The PO takes the line prices as they are printed")
+            elif abs(got) > MONEY_TOL:
+                self.problems.append(f"{self.name}: {lab} {got:,.2f} is not applied to any line; the lines sum to the "
+                                     "amount before it, so the PO would overstate the cost")
+
     def _number_cols(self):
         keys = [k for k in ("qty", "price", "line_value") if k in self.cols]
-        out = [self.col(k) for k in keys] + [self.pos[norm(h)] for h in self.sheet.get("size_columns") or []]
+        out = [self.col(k) for k in keys] + [self.pos[norm(h)] for h in self.size_heads]
         return out + [self.pos[norm(p[1])] for p in self.sheet.get("size_pairs") or []]
 
     def _printed_cells(self, t):
@@ -575,9 +972,9 @@ class Reader:
         groups = {}
         for r in data:
             row = self.rows[r]
-            doc = ident(self.cell(row, "doc")) if "doc" in self.cols else stem
+            doc = ident(self.cell(row, "doc")) if "doc" in self.cols else self.fields.get("doc") or stem
             if doc is None:
-                self.problems.append(f"{self.name} row {r + 1}: no {self.cols['doc']!r}")
+                self.problems.append(f"{self.name} row {r + 1}: no {self.head('doc')!r}")
                 continue
             d = docs.setdefault(doc, self._new_doc(doc))
             self._doc_fields(d, r, row)
@@ -603,6 +1000,11 @@ class Reader:
 
     def _doc_fields(self, d, r, row):
         d["rows"].append(r + 1)
+        for key in ("issuer", "label"):
+            if key in self.fields and d[key] is None:
+                d[key] = self.fields[key] or ""
+        if "gender" in self.fields and d["gender"] is None:
+            d["gender"] = gender_of(self.fields["gender"])
         for key, field in (("currency", "currency"), ("issuer", "issuer"), ("label", "label"),
                            ("collection", "collection")):
             if key not in self.cols:
@@ -611,7 +1013,7 @@ class Reader:
             if d[field] is None:
                 d[field] = v
             elif v is not None and norm(v) != norm(d[field]) and field != "collection":
-                self.problems.append(f"{d['doc']} row {r + 1}: {self.cols[key]!r} is {v!r}, but earlier rows of "
+                self.problems.append(f"{d['doc']} row {r + 1}: {self.head(key)!r} is {v!r}, but earlier rows of "
                                      f"this confirmation say {d[field]!r}")
 
     def _line(self, d, key, rs, n, layout):
@@ -623,7 +1025,7 @@ class Reader:
         unpriced = [r + 1 for r, p in prices if p is None]
         if unpriced and price_set:
             self.problems.append(f"{tag}: row(s) {', '.join(map(str, unpriced))} have no unit price in "
-                                 f"{self.cols['price']!r}")
+                                 f"{self.head('price')!r}")
             return None
         if len(price_set) != 1:
             self.problems.append(f"{tag} (rows {', '.join(str(r + 1) for r in rs)}): " +
@@ -674,7 +1076,7 @@ class Reader:
                         per_size[k] = {s: v for s, q in sizes.items() if q}
             line_value = self.num(r, first, "line_value") if "line_value" in self.cols else None
             if "line_value" in self.cols and line_value is None:
-                self.problems.append(f"{tag} row {r + 1}: no line value in {self.cols['line_value']!r}")
+                self.problems.append(f"{tag} row {r + 1}: no line value in {self.head('line_value')!r}")
         sizes = {s: q for s, q in sizes.items() if q}
         if not sizes and not qty:
             return None
@@ -684,13 +1086,14 @@ class Reader:
         rrp, rrp_cur, rrp_note = self._rrp(tag, rs, d)
         gender_text = text(self.cell(first, "gender"))
         delivery = text(self.cell(first, "delivery"))
-        return dict(line_no=line_no, style=style, fabric=fabric, colour=code if code is not None else name,
+        return dict(line_no=line_no, style=style, style_alt=ident(self.cell(first, "style_alt")) if "style_alt" in self.cols
+                    else None, fabric=fabric, colour=code if code is not None else name,
                     colour_code=code, colour_name=name, sizes=sizes, qty=qty, price=price,
                     line_value=line_value if line_value is not None else round(qty * price, 2),
                     product_class=text(self.cell(first, "product_class")),
-                    gender=collection_gender(gender_text) if gender_text else None,
+                    gender=gender_of(gender_text),
                     description=text(self.cell(first, "description")), deliver_from=delivery, deliver_to=None,
-                    rrp=rrp, rrp_currency=rrp_cur, rrp_found=f"column {self.cols['rrp']!r}" if rrp else None,
+                    rrp=rrp, rrp_currency=rrp_cur, rrp_found=f"column {self.head('rrp')!r}" if rrp else None,
                     rrp_note=rrp_note, rows=[r + 1 for r in rs],
                     **{k: v for k, v in per_size.items() if k in self.cols})
 
@@ -716,7 +1119,7 @@ class Reader:
         for r in rs:
             v, q = self.num(r, self.rows[r], "line_value"), qs[r]
             if v is None:
-                self.problems.append(f"{tag} row {r + 1}: no line value in {self.cols['line_value']!r}")
+                self.problems.append(f"{tag} row {r + 1}: no line value in {self.head('line_value')!r}")
                 return None
             if per == "row" and abs(q * price - v) > MONEY_TOL:
                 self.problems.append(f"{tag} row {r + 1}: {q} x {price:g} = {q * price:.2f} != line value {v:g}")
@@ -732,7 +1135,7 @@ class Reader:
     def _matrix(self, r, row):
         """(size, qty, size price | None) for each size cell of a matrix or pair row."""
         out = []
-        for h in self.sheet.get("size_columns") or []:
+        for h in self.size_heads:
             out.append((self.size(h), self.qty(r, row, header=h), None))
         for p in self.sheet.get("size_pairs") or []:
             s, q = self.size(self.cell(row, header=p[0])), self.qty(r, row, header=p[1])
@@ -808,6 +1211,8 @@ def doc_label(d):
 
 
 def reader_row(brand_cfg):
-    cols = (brand_cfg.get("sheet") or {}).get("columns") or {}
-    return (f"read by the built-in spreadsheet reader with this brand's column mapping (style: {cols.get('style')!r}, "
-            f"price: {cols.get('price')!r}); no AI was used")
+    sheet = resolve(brand_cfg.get("sheet") or {})
+    cols = sheet.get("columns") or {}
+    plat = f" on the {sheet['platform']} platform layout" if sheet.get("platform") else ""
+    return (f"read by the built-in spreadsheet reader with this brand's column mapping{plat} (style: "
+            f"{head(cols.get('style'))!r}, price: {head(cols.get('price'))!r}); no AI was used")

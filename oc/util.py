@@ -116,6 +116,22 @@ def size_key(s):
         return (2, 0, s)
 
 
+def size_system(s):
+    """Which size system a store size belongs to: alpha (XS, M, 3XL, "XS - S"), number (38, 6.5), length (90CM),
+    one (OS), or None when it is none of these (never compared)."""
+    t = norm_size(s)
+    parts = [x for x in re.split(r"[\s/-]+", t) if x]
+    if parts and all(x in ALPHA or re.fullmatch(r"\d?X{0,3}[SL]", x) for x in parts):
+        return "alpha"
+    if re.fullmatch(r"\d+(\.\d+)?", t):
+        return "number"
+    if re.fullmatch(r"\d+ ?CM", t):
+        return "length"
+    if t in ("OS", "OSFM", "O/S"):
+        return "one"
+    return None
+
+
 def sort_sizes(sizes):
     return sorted({norm_size(s) for s in sizes if norm_size(s)}, key=size_key)
 

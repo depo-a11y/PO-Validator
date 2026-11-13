@@ -83,6 +83,7 @@ FIXED += ("sheet",)   # built-in too: a spreadsheet OC of any layout, read by th
 ADAPTERS = FIXED + ("ai",)
 JOIN_FIELDS = ("style", "fabric", "colour", "colour_code")
 JOIN_TOKEN = re.compile(r"\{(style|fabric|colour|colour_code)\}")
+ALT_TOKEN = re.compile(r"\{(style|style_alt|fabric|colour|colour_code)\}")   # join_key_alt may also use {style_alt}
 DEFAULT_JOIN_KEY = "{style}{fabric} {colour}"
 AI_NEEDS = {
     "oc_supplier": "oc_supplier: the company name printed as the issuer on this brand's order confirmations "
@@ -147,16 +148,19 @@ def fill_text(brand, key, **values):
     return _tokens(TEXT_TEMPLATES[key]).sub(lambda m: str(values[m.group(1)]), brand[key])
 
 
-def code_for(brand, style, fabric, colour):
-    """The store's manufacture_code for an OC line, by the brand's join_key."""
-    tpl = (brand or {}).get("join_key") or DEFAULT_JOIN_KEY
-    vals = dict(style=style, fabric=fabric or "", colour=colour or "")
-    if "colour_code" in join_fields(tpl):
+def code_for(brand, style, fabric, colour, tpl=None, style_alt=None):
+    """The store's manufacture_code for an OC line, by the brand's join_key (or the template given, e.g.
+    join_key_alt). None when the template needs a {style_alt} the line does not carry."""
+    tpl = tpl or (brand or {}).get("join_key") or DEFAULT_JOIN_KEY
+    if "{style_alt}" in tpl and not style_alt:
+        return None
+    vals = dict(style=style, fabric=fabric or "", colour=colour or "", style_alt=style_alt or "")
+    if "colour_code" in ALT_TOKEN.findall(tpl):
         cc = (brand.get("colour_codes") or {}).get(norm_colour(colour))
         if cc is None:
             raise ColourCodeError([str(colour)])
         vals["colour_code"] = cc
-    return norm_code(JOIN_TOKEN.sub(lambda m: str(vals[m.group(1)]), tpl))
+    return norm_code(ALT_TOKEN.sub(lambda m: str(vals[m.group(1)]), tpl))
 
 
 def unmapped_colours(brand, docs):
@@ -264,6 +268,14 @@ def _reader_keys(cfg, data, source):
                          + ", each written exactly so (no format specs, conversions or other braces)"
                          + (f"; not allowed: {', '.join(bad)}" if bad else ""))
     cfg["join_key"] = tpl
+    alt = cfg.get("join_key_alt")
+    if alt is not None:
+        rest = ALT_TOKEN.sub("", alt) if isinstance(alt, str) else "{"
+        if "{" in rest or "}" in rest or not ALT_TOKEN.findall(alt) or alt == tpl:
+            raise BrandError(f"{source}: join_key_alt is a second join template, tried only when join_key finds no "
+                             "live product, from {style}, {style_alt}, {fabric}, {colour}, {colour_code}, and not "
+                             f"join_key itself; got {alt!r}")
+        fields = fields + ALT_TOKEN.findall(alt)
     codes = cfg.get("colour_codes") or {}
     if not isinstance(codes, Mapping):
         raise BrandError(f"{source}: colour_codes is a list of 'OC colour: store code' lines, got {codes!r}")

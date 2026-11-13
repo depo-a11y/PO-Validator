@@ -13,10 +13,12 @@ def _norm(v):
 def compare(draft_rows, hand_rows, docs, allow_price=(), brand=None):
     lines = oc_lines(docs, brand)
     ign = (brand or {}).get("match_ignore") or ""
-    if ign:   # the draft wrote the store's code where match_ignore matched one; key the OC lines the same way
-        drafted = {code_match(r[CODE], ign): norm_code(r[CODE]) for r in draft_rows}
-        for l in lines:
-            l["code"] = drafted.get(code_match(l["code"], ign), l["code"])
+    drafted = {code_match(r[CODE], ign): norm_code(r[CODE]) for r in draft_rows}
+    for l in lines:   # key each OC line the way the draft matched it: join_key, else join_key_alt, separators left out
+        key = code_match(l["code"], ign)
+        if key not in drafted and l.get("code_alt") and code_match(l["code_alt"], ign) in drafted:
+            key = code_match(l["code_alt"], ign)
+        l["code"] = drafted.get(key, l["code"])
     oc_q, oc_eur = collections.Counter(), {}
     for l in lines:
         oc_eur[l["code"]] = l["price"]

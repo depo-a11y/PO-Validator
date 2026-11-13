@@ -26,11 +26,12 @@ AI_OC = "OC (AI read)"   # a value the AI reader took from the OC: never green, 
 AI_NEW_SIZE = "OC (AI read), size not live"   # an AI-read size the live product does not have: red
 CART_OC = "cart, not confirmed"   # a quantity or price read from a cart drafted before its OC (oc/cartorder.py): amber
 PRIOR = "prior PO"   # a NEW retail price typed into the PO drafted from the cart, carried to the OC's draft: amber
+OFF_RUN = "OC, outside the live size run"   # a new size in another size system than the live product's: amber
 GENDERS = ("MEN", "WOMEN", "UNISEX")
 # A colour description is copied into a title; anything outside these is a garbled export ('Peach Pur}e').
 CLEAN_COLOUR = re.compile(r"[^\w\s/&'.,()+-]")
 COLOUR = {"OC": GREEN, AI_OC: AMBER, AI_NEW_SIZE: RED, NEEDED: RED, "catalog": GREEN, "cart": AMBER, "history": AMBER,
-          "rule": AMBER, "guess": RED, CART_OC: AMBER, PRIOR: AMBER}
+          "rule": AMBER, "guess": RED, CART_OC: AMBER, PRIOR: AMBER, OFF_RUN: AMBER}
 RANK = {GREEN: 0, AMBER: 1, RED: 2}
 
 
