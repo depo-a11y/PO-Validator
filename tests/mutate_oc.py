@@ -577,6 +577,17 @@ MUTANTS = [
     ("oc/agent/titles.py", "        if tip:   # an AI value that repeats", "        if True:   # an AI value that repeats",
      "titles: an empty suggestion still noted and counted"),
     # ---- reviewer case 2026-11-12-buyer-14 (F5, F7) ----
+    # ---- reviewer case 2026-11-13-buyer-9 (finding 2): no rejected value echoed through a reason ----
+    ("oc/agent/explain.py", """        raise ValueError("its 'who' is not colleague or colwyn")""",
+     """        raise ValueError(f"'who' is {data.get('who')!r}, not colleague or colwyn")""", "explain: a bad 'who' echoed"),
+    ("oc/agent/titles.py", '''[("not a colour family", "not one of the brand's colour families")]''',
+     '''[("not a colour family", f"'{fam}' is not one of the brand's colour families")]''',
+     "titles: a rejected colour family echoed in its reason"),
+    ("oc/agent/titles.py", '''        out.append(("code-like token", f"{len(codes)} code-like token(s)"))''',
+     '''        out.append(("code-like token", f"code-like {', '.join(codes)}"))''', "titles: rejected code-like tokens echoed"),
+    ("oc/agent/titles.py", '''        out.append(("characters", f"{len(odd)} character(s) outside''',
+     '''        out.append(("characters", f"{' '.join(map(repr, odd))} character(s) outside''',
+     "titles: rejected characters echoed"),
     ("oc/agent/titles.py", '            n.pop("ai", None)', "            pass", "titles: a restore leaves the AI mark for the de-dupe"),
     ("oc/agent/explain.py", "        dropped += sum(1 for good in ok if not good)", "        dropped += 0",
      "explain: dropped refs not counted"),

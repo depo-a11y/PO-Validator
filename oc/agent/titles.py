@@ -264,8 +264,7 @@ def _text_problems(v, brand, code, heel, kind):
         out.append(("formula lead", f"starts with '{v[0]}'"))
     odd = sorted(set(ALLOWED_TEXT.sub("", v)))
     if odd:
-        out.append(("characters", "character(s) " + " ".join(repr(c) for c in odd)
-                    + " outside letters, digits and / & ' - . ,"))
+        out.append(("characters", f"{len(odd)} character(s) outside letters, digits and / & ' - . ,"))
     toks = _tokens(v)
     brand_words = sorted({t.upper() for t in toks} & _brand_words(brand))
     if brand_words:
@@ -278,7 +277,7 @@ def _text_problems(v, brand, code, heel, kind):
         out.append(("link or contact", contact))
     codes = [t for t in toks if code_like(t)]
     if codes:
-        out.append(("code-like token", f"code-like {', '.join(codes)}"))
+        out.append(("code-like token", f"{len(codes)} code-like token(s)"))   # counted: a token may be a planted link
     if kind in ("name", "example") and toks and toks[0].lower() in GENDER_WORDS:
         out.append(("gender prefix", f"starts with '{toks[0]}' (the tool adds a gender prefix itself)"))
     if kind == "name" and re.search(r"\bin\b", v):
@@ -311,7 +310,7 @@ def judge(a, ev, brand, code):
     fam = _clean(a.get("colour_family")).upper()
     ok = fam in (brand.get("colour_families") or {})
     out["family"] = (fam if ok else None, fam,
-                     [] if ok or not fam else [("not a colour family", f"'{fam}' is not one of the brand's colour families")])
+                     [] if ok or not fam else [("not a colour family", "not one of the brand's colour families")])
     return out
 
 

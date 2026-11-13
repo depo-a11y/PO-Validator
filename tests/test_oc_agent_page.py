@@ -70,6 +70,24 @@ def test_an_explanation_is_shown_as_plain_text_and_not_asked_again(tmp_path, mon
     assert not [m for m in at.markdown if "<b>discount</b>" in m.value or "](http" in m.value]
 
 
+def test_a_rejected_answer_shows_nowhere_on_the_page(tmp_path, monkeypatch, key):
+    import test_oc_explain as te
+    from oc.agent import explain
+    probe = "see https://evil.example/" + "x" * 640
+    record = explain.explain(explain.request({}), dict(pages={1}, rows=set(), checks=set()),
+                             factory=te.Fake(te.answer("A cause.", "A step.", who=probe)).factory)
+    assert record["ok"] is False
+    at = AppTest.from_file(PAGE, default_timeout=60)
+    at.session_state["draft"] = dict(po=None, review=pd.DataFrame(), checks=[FAIL], file="x.xlsx",
+                                     made_from="oc.pdf and catalog.csv, brand config t", explain=record)
+    at.run()
+    assert not at.exception
+    shown = [x.value for kind in (at.markdown, at.text, at.caption, at.error, at.warning, at.info, at.success)
+             for x in kind]
+    assert any(str(v).startswith("No AI explanation: ") for v in shown)
+    assert not [v for v in shown if "evil" in str(v) or "https" in str(v)]
+
+
 def test_no_explanation_record_shows_nothing(tmp_path, monkeypatch, key):
     at = AppTest.from_file(PAGE, default_timeout=60)
     at.session_state["draft"] = dict(po=None, review=pd.DataFrame(), checks=[FAIL], file="x.xlsx",

@@ -348,6 +348,17 @@ def test_the_rejection_never_echoes_what_it_rejected(tmp_path, key):
         assert not any(x in json.dumps(e) for x in ("evil", "9123", "a@"))
 
 
+@pytest.mark.parametrize("who", ["see https://evil.example/" + "x" * 640, "<b>evil</b>", "evil@example.com",
+                                 dict(evil="https://evil.example"), ["evil"], 3])
+def test_a_bad_who_is_never_echoed(tmp_path, key, who):
+    pdf, po, review, checks = case_unknown_layout(tmp_path)
+    e = service.explain_draft(pdf, checks, _cfg(),
+                              ai_factory=Fake(dict(DRAFT_CASES["unknown layout"][-1], who=who)).factory)
+    text = explain.as_text(e)
+    assert e["ok"] is False and "not colleague or colwyn" in e["reason"] and len(e["reason"]) < 80, e["reason"]
+    assert "evil" not in json.dumps(e) and "evil" not in text and "https" not in text
+
+
 def test_plain_text_keeps_what_an_explanation_needs():
     for ok in ("Rows 195-219 have no retail price.", "Page 2: gross 10,550.00, discount 100.00, net 10,450.00.",
                "Order SS - 2027/01-62-3009 is for label MM.", "Check pages 7, 18-19 and 24-26.", "e.g. the PDF",

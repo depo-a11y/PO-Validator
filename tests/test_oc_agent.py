@@ -369,8 +369,8 @@ def test_a_heel_code_sits_right_before_in(tmp_path, key):
 
 
 BAD_NAMES = [
-    ("Replica T0123 Sneaker", "code-like T0123"),
-    ("Replica M01234", "code-like M01234"),
+    ("Replica T0123 Sneaker", "'Replica T0123 Sneaker' rejected (1 code-like token(s)"),
+    ("Replica M01234", "'Replica M01234' rejected (1 code-like token(s)"),
     ("Sneaker P0001", "raw code P0001 from the manufacture code"),
     ("S97XX0009 Sneaker", "raw code S97XX0009 from the manufacture code"),
     ("Maison Margiela Sneaker", "brand word(s) MAISON, MARGIELA"),
@@ -385,7 +385,7 @@ BAD_NAMES = [
     ("Paint Sneaker H100", "heel code H100 is not one of"),
     ("Womens Paint Sneaker", "starts with 'Womens'"),
     ("Sneaker in Leather", "holds the word 'in'"),
-    ("Paint Sneaker 123", "code-like 123"),
+    ("Paint Sneaker 123", "'Paint Sneaker 123' rejected (1 code-like token(s)"),
     ("Paint Sneaker see evil-shop.com", "holds a link or a web address"),
     ("Sneaker 0400 123 456", "holds a phone number"),
 ]
@@ -408,6 +408,21 @@ def test_a_rejected_value_holding_a_link_is_never_echoed(tmp_path, key):
     assert "AI product name (not shown) rejected (holds a link or a web address" in t["Why"] and "evil" not in t["Why"]
 
 
+ECHO_PROBES = ["see https://evil.example/x1", "<b>evil1</b>", "evil9.example", "evil1@example.com"]
+
+
+@pytest.mark.parametrize("field", ["product_name", "colour_words", "colour_family"])
+@pytest.mark.parametrize("probe", ECHO_PROBES)
+def test_a_rejected_title_part_or_family_is_never_echoed(tmp_path, key, field, probe):
+    ans = dict(product_name="Paint Sneaker", colour_words="White", colour_family="WHITE", basis="b")
+    ans[field] = probe
+    rows, review, checks, fills = build(tmp_path, Fake(answers={NEW_STYLE_101: ans}))
+    cell = one(review, NEW_STYLE_101, "Option1 Value" if field == "colour_family" else "Title")
+    assert "(not shown) rejected (" in cell["Why"], cell
+    assert "evil" not in json.dumps([rows, review, checks], default=str).lower()
+    assert not {"<", ">", "@"} & set(cell["Why"]), cell   # not even the characters it was rejected for
+
+
 BAD_COLOURS = [("900", "raw code 900"), ("T0013", "raw code T0013") , ("Black H80", "heel code H80 in the colour words"),
                ("Maison Black", "brand word(s) MAISON"), ("Black" + "k" * 40, "longer than 40 characters"),
                ("=Black", "starts with '='"), ("Black (Shiny)", "outside letters, digits")]
@@ -426,7 +441,7 @@ def test_a_colour_family_outside_the_brands_is_rejected(tmp_path, key):
     rows, review, checks, fills = build(tmp_path, Fake(answers={
         SNEAKER_900: dict(product_name="Replica Sneaker", colour_words="Black", colour_family="NOIR", basis="b")}))
     f = one(review, SNEAKER_900, "Option1 Value")
-    assert f["Value"] == "" and f["Source"] == "guess" and "'NOIR' is not one of the brand's colour families" in f["Why"]
+    assert f["Value"] == "" and f["Source"] == "guess" and "AI colour family 'NOIR' rejected (not one of the brand's colour families)" in f["Why"]
 
 
 def test_titles_from_ai_meet_the_same_dedupe_and_handle_checks(tmp_path, key):

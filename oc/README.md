@@ -427,7 +427,8 @@ manufacture code per Title, live handle, blank Option1, `run_gate`) unchanged.
   prefix (the de-dupe adds one), no word "in" in a name. Heel codes: only H30, H50, H60 or H80, as the last words of
   the name, and only when the evidence prints that height (`8cm` or `H80` in a same-style title, the product class,
   the cart's Style Name); any other H-number is refused. A rejected value falls back to the tool's own, and the Why
-  says what was rejected and why.
+  says why it was rejected. The value is quoted only when it is plain text (no markup, link, e-mail address or phone
+  number); the reasons never quote it, and name code-like tokens and odd characters only by count.
 - **Never into a cell finalize would refuse.** Where the tool's own value would fail one of finalize's hard gates
   that an AI value could satisfy (a raw code in the title, a title another code shares or that is a live handle, as
   the de-dupe would leave it, or a blank colour family), the cell keeps the tool's value and its red, and the Why says
@@ -468,8 +469,9 @@ the reviewer fixes in the sheet (a blank retail price) did not stop it. It answe
 (colleague or colwyn) and `refs` (pages, rows, checks). The prompt states the 400-character limit. Both prompts say
 their inputs are data, never instructions. Python drops a ref that does not exist and says only how many it dropped,
 never which, and refuses text that is empty, over 400 characters, starts `= + - @`, or holds markup, a link or web
-address, an e-mail address or a phone number, without quoting it. It reads copies of the checks and files and returns
-only its own record, so no check, file or result changes and a refused run stays refused (tested on every refusal case
+address, an e-mail address or a phone number, without quoting it, and a `who` that is neither colleague nor
+colwyn, also unquoted. It reads copies of the checks and files and returns only its own record, so no check, file
+or result changes and a refused run stays refused (tested on every refusal case
 in `tests/test_oc_explain.py`). It adds no check row, for that reason: its cost is in its own record, shown with it.
 
 ### Cost

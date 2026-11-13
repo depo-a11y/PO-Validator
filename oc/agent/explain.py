@@ -171,7 +171,7 @@ def check_answer(data, valid):
         if prob:
             raise ValueError(f"its {k.replace('_', ' ')} cannot be shown as plain text ({prob})")
     if data.get("who") not in WHO:
-        raise ValueError(f"'who' is {data.get('who')!r}, not colleague or colwyn")
+        raise ValueError("its 'who' is not colleague or colwyn")   # never echoed: it may be planted text
     refs, dropped = {}, 0
     for k, kind in (("pages", int), ("rows", int), ("checks", str)):
         got = data["refs"].get(k) or []
