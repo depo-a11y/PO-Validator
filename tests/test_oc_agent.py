@@ -11,7 +11,7 @@ import openpyxl
 import pytest
 
 import test_oc_tool as base
-from oc import catalog as catm, cli, draft as draftm, history as histm, poxlsx, service
+from oc import catalog as catm, cli, draft as draftm, history as histm, housestyle, poxlsx, service
 from oc.adapters import ai
 from oc.agent import common, titles
 from oc.resolve import AI_DRAFT, COLOUR
@@ -456,6 +456,50 @@ def test_titles_from_ai_meet_the_same_dedupe_and_handle_checks(tmp_path, key):
 def _pair(*lines):
     return [dict(doc=f"SS - {i}", collection=c, gender=g, currency="European Euro", label="MM", lines=[l], total_qty=1,
                  net=200.0) for i, (c, g, l) in enumerate(lines, 1)]
+
+
+def _active_twin(title, handle):
+    """An ACTIVE product of another style already carrying `title`, under a handle the title would not make."""
+    twin = base._variant("9", title, "MEN SHOES SNEAKERS", "Active", "S00XX0001P0009 1", "WHITE", "41", "ZXFW26900",
+                         "800.00", "800.00", "310.00", True)
+    twin["Handle"] = handle
+    return twin
+
+
+def test_an_ai_title_already_on_an_active_product_keeps_its_source_and_both_reasons(tmp_path, key):
+    rows, review, checks, fills = build(tmp_path, Fake(), cat_extra=[_active_twin("Paint Sneaker in White", "zz-twin")])
+    t = one(review, NEW_STYLE_101, "Title")
+    assert (t["Value"], t["Source"], t["Colour"]) == ("Paint Sneaker in White", AI_DRAFT, "amber")
+    assert "AI-drafted from" in t["Why"] and "an ACTIVE live product already has this title: /zz-twin" in t["Why"]
+    (w,) = [c for c in checks if c["Check"] == housestyle.LIVE_TITLE_CHECK]
+    assert w["Result"] == "WARN" and f"'Paint Sneaker in White' ({NEW_STYLE_101}): /zz-twin" in w["Detail"]
+    assert not [c for c in checks if c["Result"] == "FAIL" and "handle" in c["Check"]]   # a WARN, not a gate
+    # an AI title still red for a part of the tool's keeps red; the same check names it
+    rows, review, checks, fills = build(tmp_path, Fake(answers={NEW_STYLE_101: dict(
+        product_name="", colour_words="Optic White", colour_family="WHITE", basis="b")}), policy="everywhere",
+        cat_extra=[_active_twin("Sneakers in Optic White", "zz-twin-2")])
+    t = one(review, NEW_STYLE_101, "Title")
+    assert (t["Value"], t["Colour"]) == ("Sneakers in Optic White", "red")
+    assert "the product name is still the tool's" in t["Why"] and "already has this title: /zz-twin-2" in t["Why"]
+
+
+def test_ai_titles_run_on_a_draft_from_the_cart_alone(tmp_path, key):
+    import test_oc_cartorder as tco
+    from oc import cartorder
+    docs, cart = cartorder.read(tco.write(tmp_path / "cart.xlsx"))
+    extra = [("7", "zz-live-jacket", "Shell Test Jacket in Navy", "S97AA0007M00007 Q7",
+              "WOMEN CLOTHING JACKETS LIGHTWEIGHT", "Active")]
+    fake = Fake(answers={tco.JACKET: dict(product_name="Shell Test Jacket", colour_words="Navy", colour_family="NAVY",
+                                          basis="b")})
+    rows, review, checks, fills = draftm.build(
+        docs, tco.BRAND, catm.load(tco.catalog_csv(tmp_path, extra)), histm.History([]), base._tags(), cart=cart,
+        titler=lambda p, R: titles.run(p, R, factory=fake.factory))
+    ev = {e["code"]: e for req in fake.calls for e in sent_evidence(req)}
+    assert tco.JACKET in ev and ev[tco.JACKET]["cart"] is not None and ev[tco.JACKET]["oc_line"]["product_class"] == ""
+    t = next(x for x in review if x["Code"] == tco.JACKET and x["Column"] == "Title")
+    assert (t["Value"], t["Source"], t["Colour"]) == ("Shell Test Jacket in Navy", AI_DRAFT, "amber")
+    assert "/zz-live-jacket" in t["Why"]
+    assert [c["Result"] for c in checks if c["Check"] == housestyle.LIVE_TITLE_CHECK] == ["WARN"]
 
 
 def test_a_gender_prefix_keeps_the_ai_source(tmp_path, key):

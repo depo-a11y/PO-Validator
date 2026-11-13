@@ -584,6 +584,26 @@ MUTANTS = [
     ("pages/1_Order_confirmation_to_PO.py", '''TITLES_SENDS = ("Ticking it sends to Anthropic, for each new product: its codes and OC line (product class, "''',
      '''TITLES_SENDS = ("Ticking it sends to Anthropic, for each new product: its codes (product class, "''',
      "page: the title box caption leaves out the OC line"),
+    # ---- rebase onto landing 1 (4bac04d): the live-title check, house style and drafts with no PDF ----
+    ("oc/housestyle.py",
+     '''            src = worse("rule", n["title"][1]) if n.get("ai") else worse(n["title"][1], "rule")   # AI's on a tie''',
+     '''            src = worse(n["title"][1], "rule")   # AI's on a tie''',
+     "house style: an AI title on an ACTIVE product's title loses its AI source"),
+    ("oc/draft.py", "    if titler is not None and pending:\n        checks += titler(pending, R)\n"
+                    "    _dedupe_titles(pending, R, brand, checks)\n    housestyle.mark_live_titles(pending, catalog, checks)\n",
+     "    housestyle.mark_live_titles(pending, catalog, checks)\n    if titler is not None and pending:\n"
+     "        checks += titler(pending, R)\n    _dedupe_titles(pending, R, brand, checks)\n",
+     "draft: the live-title check runs before the AI titles"),
+    ("oc/draft.py", "        name = (title[:-len(cut)] if title.endswith(cut) else title, ti_src, ti_why)",
+     "        name = (title, ti_src, ti_why)", "draft: the tool's name part keeps its colour"),
+    ("pages/1_Order_confirmation_to_PO.py",
+     '''    if not agent or record.get("explain") or record.get("explain_note") or record.get(data_key) is None:''',
+     '''    if not agent or record.get("explain") or record.get("explain_note"):''',
+     "page: an explanation offered with no PDF to send"),
+    ("pages/1_Order_confirmation_to_PO.py", "if po is None and oc_up and not is_sheet else None,", "if po is None and oc_up else None,",
+     "page: a spreadsheet OC offered to the AI as a PDF"),
+    ("pages/1_Order_confirmation_to_PO.py", "if po is None and oc_up and not is_sheet else None,", "if po is None and not is_sheet else None,",
+     "page: a draft from the cart alone breaks the page"),
     # ---- reviewer case 2026-11-12-buyer-14 (F5, F7) ----
     # ---- reviewer case 2026-11-13-buyer-9 (finding 2): no rejected value echoed through a reason ----
     ("oc/agent/explain.py", """        raise ValueError("its 'who' is not colleague or colwyn")""",

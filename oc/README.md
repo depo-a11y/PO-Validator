@@ -442,6 +442,13 @@ manufacture code per Title, live handle, blank Option1, `run_gate`) unchanged.
   is not green. Green stays; an AI value that differs is named in the Why ("AI suggests ..."). The source is
   `AI-drafted, check`, amber, never green, and stays so through a gender prefix; `title_tag` follows the title. Type,
   prices, cost, quantities and sizes are never touched. (`policy="everywhere"` exists for the measurement harness only.)
+- **House style and the live-title check.** House style (`oc/housestyle.py`: heel codes with `heel_codes: true`,
+  the `colour_spelling:` map, the Style Name note) shapes the tool's own title and colour words, before the agent.
+  An AI value does not pass through it: the agent's own prompt and checks hold it to the same heel codes (H30, H50,
+  H60, H80, only when the evidence prints the height) and keep brand words out, and the `colour_spelling:` map does
+  not respell AI colour words. The live-title check runs after the agent: an AI title an ACTIVE product already
+  carries keeps its source (`AI-drafted, check`, or red), gains the reason in the Why and the WARN names the handles.
+  Finalize does not refuse such a title (only a live handle is a gate), so the agent does not guard it.
 - **Few-shot.** The NEW products of the brand config's past POs (code, Type, colour family, Title), one per code,
   never a product on this OC, only titles that pass the same checks, round robin over Types, at most 200, in a
   deterministic order. It sits after the instructions in the system prompt with a 5-minute `cache_control`, so it is
@@ -458,7 +465,8 @@ manufacture code per Title, live handle, blank Option1, `run_gate`) unchanged.
     python -m oc finalize ... --ai-explain
 
 Like AI reads (10), the page caps each browser session at 10 AI title runs and 20 explanations, so a stuck rerun
-loop cannot spend without limit; at the cap the box is off and the page says why.
+loop cannot spend without limit; at the cap the box is off and the page says why. A draft from a spreadsheet OC or
+from the cart alone has no PDF to send, so the page offers no explanation for it.
 
 When a draft gives no workbook (a check the sheet cannot fix) or finalize refuses, the page offers a button under the
 errors: "Ask the AI what went wrong (sends the PDF's text to Anthropic)", or for finalize "(sends the PO rows the

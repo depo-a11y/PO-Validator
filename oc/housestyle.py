@@ -80,7 +80,8 @@ def mark_live_titles(pending, catalog, checks):
     for n in pending:
         handles = sorted(live.get(n["title"][0].casefold(), []))
         if handles:
-            n["title"] = [n["title"][0], worse(n["title"][1], "rule"),
+            src = worse("rule", n["title"][1]) if n.get("ai") else worse(n["title"][1], "rule")   # AI's on a tie
+            n["title"] = [n["title"][0], src,
                           f"{n['title'][2]}; an ACTIVE live product already has this title: /{', /'.join(handles)}"]
             hit.append(f"'{n['title'][0]}' ({n['code']}): /{', /'.join(handles)}")
     if hit:

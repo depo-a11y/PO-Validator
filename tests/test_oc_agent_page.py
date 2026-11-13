@@ -173,6 +173,38 @@ def test_the_box_goes_to_the_draft_and_a_refusal_is_explained_only_on_a_click(pa
     assert seen["explain_finalize"] == 1
 
 
+def _sheet_brand():
+    import yaml
+    import test_oc_sheet as tsh
+    return yaml.safe_dump(dict(adapter="sheet", join_key="{style} {colour}",
+                               sheet=dict(columns=tsh.COLUMNS, size_map={"0": "OS"})))
+
+
+XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+
+@pytest.mark.parametrize("brand,uploads,offered", [
+    ("otb", dict(w_oc=("oc.pdf", b"%PDF-1.4", "application/pdf")), True),
+    ("otb", dict(w_cart=("cart.xlsx", b"PK", XLSX)), False),      # the cart alone, before the OC: no PDF
+    ("sheet", dict(w_oc=("oc.csv", b"a,b\n", "text/csv")), False),  # a spreadsheet OC: no PDF
+])
+def test_a_refused_draft_offers_an_explanation_only_with_a_pdf(tmp_path, monkeypatch, key, brand, uploads, offered):
+    asked = []
+    monkeypatch.setattr(service, "draft", lambda *a, **kw: (None, pd.DataFrame(), [FAIL]))
+    monkeypatch.setattr(service, "explain_draft", lambda *a, **kw: asked.append(a) or RECORD)
+    yaml_ = "adapter: otb\noc_label: MM\noc_supplier: X Ltd\n" if brand == "otb" else _sheet_brand()
+    at = tp._page_with_brand(tmp_path, monkeypatch, yaml_)
+    at.file_uploader(key="w_catalog").set_value(("catalog.csv", b"ID\n", "text/csv"))
+    for k, v in uploads.items():
+        at.file_uploader(key=k).set_value(v)
+    at.run()
+    press(at, "Build draft PO")
+    assert bool([b for b in at.button if b.label == DRAFT_ASK]) is offered
+    if offered:
+        press(at, DRAFT_ASK)
+        assert len(asked) == 1
+
+
 def test_title_runs_stop_at_the_session_cap(page):
     at, seen = page
     at.session_state["ai_title_runs"] = TITLES_CAP - 1
