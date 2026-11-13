@@ -15,6 +15,13 @@ RECORD = dict(ok=True, cause="Page 2 carries a <b>discount</b> line.", next_step
 FAIL = dict(Check="Order confirmation passes its gates (parsed = printed)", Result="FAIL", Detail="document discount 100.00")
 
 
+SENDS = ("Ticking it sends to Anthropic, for each new product: its codes and OC line (product class, collection, "
+         "gender, description, composition), the tool's Type, its cart row, and the titles, Types, statuses, colour "
+         "names and colour families the catalog and past POs hold for its style and colour code. It also sends the "
+         "brand's name and colour families, and up to 200 past-PO products of any style (code, Type, colour family, "
+         "title) as examples. No prices, costs or quantities.")
+
+
 @pytest.fixture
 def no_key(monkeypatch):
     monkeypatch.delenv(ai.KEY_NAME, raising=False)
@@ -41,8 +48,9 @@ def test_a_key_offers_the_titles_box_off_by_default_saying_what_it_sends(tmp_pat
     (box,) = [c for c in at.checkbox if c.label == BOX]
     assert box.value is False and "amber" in box.help and "never touches Type, prices" in box.help
     assert "stays red, with the AI's suggestion" in box.help
-    assert any(c.value == ("Ticking it sends each new product's codes, its cart row and the catalog's and past POs' "
-                           "names for its style and colour to Anthropic.") for c in at.caption)
+    from oc.agent import titles
+    (sends,) = [c.value for c in at.caption if c.value.startswith("Ticking it sends")]
+    assert sends == SENDS and f"up to {titles.FEW_SHOT_CAP} past-PO products" in sends
 
 
 def _boom(*a, **k):

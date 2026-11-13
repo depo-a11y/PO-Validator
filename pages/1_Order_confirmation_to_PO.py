@@ -59,8 +59,11 @@ TITLES_HELP = ("AI drafts each new product's name, colour words and colour famil
                "value it drafts is amber in the draft: check each one. A red cell Step 2 would refuse (a code in a "
                "title, a blank colour family) stays red, with the AI's suggestion in the Review sheet. It never "
                "touches Type, prices, quantities or sizes. It costs cents to about a dollar per order confirmation.")
-TITLES_SENDS = ("Ticking it sends each new product's codes, its cart row and the catalog's and past POs' names for its "
-                "style and colour to Anthropic.")
+TITLES_SENDS = ("Ticking it sends to Anthropic, for each new product: its codes and OC line (product class, "
+                "collection, gender, description, composition), the tool's Type, its cart row, and the titles, Types,"
+                " statuses, colour names and colour families the catalog and past POs hold for its style and colour "
+                "code. It also sends the brand's name and colour families, and up to 200 past-PO products of any "
+                "style (code, Type, colour family, title) as examples. No prices, costs or quantities.")
 EXPLAIN_DRAFT_BUTTON = "Ask the AI what went wrong (sends the PDF's text to Anthropic)"
 EXPLAIN_FINAL_BUTTON = "Ask the AI what went wrong (sends the PO rows the failing checks name to Anthropic)"
 EXPLAIN_HEAD = "AI explanation (check it)"

@@ -576,6 +576,14 @@ MUTANTS = [
      "                            for k, v in used.items())", "titles: a part suggestion repeating the tool's part shown"),
     ("oc/agent/titles.py", "        if tip:   # an AI value that repeats", "        if True:   # an AI value that repeats",
      "titles: an empty suggestion still noted and counted"),
+    # ---- reviewer case 2026-11-13-buyer-9 (finding 5): the title box says everything the request carries ----
+    ("oc/agent/titles.py", "FEW_SHOT_CAP = 200", "FEW_SHOT_CAP = 300", "titles: more past-PO examples sent than the page says"),
+    ("oc/agent/titles.py", '''                     composition=comp[0] if COLOUR.get(comp[1]) != "red" else None),''',
+     '''                     composition=comp[0] if COLOUR.get(comp[1]) != "red" else None, quantity=l.get("qty")),''',
+     "titles: a field sent that the page does not name"),
+    ("pages/1_Order_confirmation_to_PO.py", '''TITLES_SENDS = ("Ticking it sends to Anthropic, for each new product: its codes and OC line (product class, "''',
+     '''TITLES_SENDS = ("Ticking it sends to Anthropic, for each new product: its codes (product class, "''',
+     "page: the title box caption leaves out the OC line"),
     # ---- reviewer case 2026-11-12-buyer-14 (F5, F7) ----
     # ---- reviewer case 2026-11-13-buyer-9 (finding 2): no rejected value echoed through a reason ----
     ("oc/agent/explain.py", """        raise ValueError("its 'who' is not colleague or colwyn")""",

@@ -405,8 +405,12 @@ key, client and error wording are reused from `oc/adapters/ai.py`.
     python -m oc draft ... --ai-titles
 
 On the page: "Draft NEW titles and colour words with AI (check every one)", shown only with a key, off by default,
-with the line "Ticking it sends each new product's codes, its cart row and the catalog's and past POs' names for its
-style and colour to Anthropic." under it (review case 2026-11-12-buyer-14 F4).
+with this line under it (review cases 2026-11-12-buyer-14 F4 and 2026-11-13-buyer-9): "Ticking it sends to Anthropic,
+for each new product: its codes and OC line (product class, collection, gender, description, composition), the tool's
+Type, its cart row, and the titles, Types, statuses, colour names and colour families the catalog and past POs hold
+for its style and colour code. It also sends the brand's name and colour families, and up to 200 past-PO products of
+any style (code, Type, colour family, title) as examples. No prices, costs or quantities." A test pins every field
+of the request to that line (`test_a_title_request_carries_only_what_the_page_says_it_sends`).
 
 It runs inside `draft.build`, after the NEW products are resolved and before the title de-dupe, so its titles meet
 the same de-dupe, gender prefix, live-handle and title checks, and finalize's gates (raw code in a title, one

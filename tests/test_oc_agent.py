@@ -581,6 +581,26 @@ def test_the_model_gets_evidence_never_the_tools_answer(tmp_path, key):
     assert "Replica Sneaker in 900" not in body and "Sneakers in White" not in body
 
 
+def test_a_title_request_carries_only_what_the_page_says_it_sends(tmp_path, key):
+    # The page's TITLES_SENDS and the README name every field below. A new field is sent only once they name it too.
+    fake = Fake()
+    build(tmp_path, fake)
+    for req in fake.calls:
+        for e in sent_evidence(req):
+            assert set(e) == {"code", "oc_line", "cart", "same_style_products", "same_style_past_pos",
+                              "same_fabric_and_colour_code", "same_colour_code_other_fabrics"}
+            assert set(e["oc_line"]) == {"style", "fabric", "colour_code", "product_class", "collection", "gender", "type",
+                                         "description", "composition"}
+            assert e["cart"] is None or set(e["cart"]) == {"style_name", "color_description", "materials", "subcategory"}
+            assert all(set(p) == {"code", "title", "colour_option", "type", "status"} for p in e["same_style_products"])
+            assert all(set(p) == {"season", "code", "title", "type", "colour_family"} for p in e["same_style_past_pos"])
+            for u in e["same_fabric_and_colour_code"] + e["same_colour_code_other_fabrics"]["uses"]:
+                assert set(u) == {"colour_words", "colour_family", "catalog", "past_pos"}
+        brand, words, fams, _, intro, cols, *examples = req["system"][1]["text"].splitlines()
+        assert brand.startswith("Brand: ") and fams.startswith("Colour families") and words.startswith("Brand words")
+        assert cols == "manufacture code | Type | colour family | Title" and len(examples) <= titles.FEW_SHOT_CAP == 200
+
+
 def test_the_system_prompt_states_the_house_rules():
     s = " ".join(titles.SYSTEM.split())
     for phrase in ("only H30, H50, H60 or H80", "never H100", "Never guess a height",
