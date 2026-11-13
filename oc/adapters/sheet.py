@@ -51,6 +51,12 @@ which printed header holds what (`check_mapping` validates it when the config lo
       header_rows: 2                # the header spans two rows (e.g. a currency row under it)
       sections: true                # every row that prints the mapped headers again starts a section with its own
                                     # columns and sizes (an order form grouped by category); sections are merged
+      stack_headers: true           # with header_rows: each column's header is its text over those rows, joined with
+                                    # a space (a report that prints some headers one row up from the rest)
+      columns: {qty_gross: Gross, qty_cancelled: Cancelled}   # optional: gross - cancelled must equal qty on every row
+      price_from: line_value        # the file prints no unit price: each size row's price is its line value / qty
+                                    # (layout 1, line_value_per: row); a row with no quantity is a cancelled size and
+                                    # skipped; the Checks say the qty x price gate checked nothing
       select: {column: productline, values: [AA, AB]}   # only these rows are this brand's; the rest are counted
                                     # and named in the Checks, never read (one file, two store vendors)
       select: {column: productline, values: [AA], known: [AA, AB]}   # known: every value the brand's configs read
@@ -92,11 +98,11 @@ from ..util import iso_currency, rrp_header
 
 COLUMN_KEYS = ("style", "colour_code", "colour_name", "fabric", "size", "qty", "price", "line_value", "currency",
                "doc", "line_no", "product_class", "gender", "collection", "description", "delivery", "issuer",
-               "label", "rrp", "rrp_currency", "ean", "hs_code", "origin", "style_alt")
+               "label", "rrp", "rrp_currency", "ean", "hs_code", "origin", "style_alt", "qty_gross", "qty_cancelled")
 SHEET_KEYS = ("columns", "size_columns", "size_pairs", "size_map", "currency", "rrp_currency", "decimal",
               "line_value_per", "sheet_name", "totals", "ean_prefixes", "platform", "select", "fields",
-              "footer_labels", "zero_labels", "header_rows", "sections")
-NUMBER_KEYS = ("qty", "price", "line_value", "rrp")
+              "footer_labels", "zero_labels", "header_rows", "sections", "stack_headers", "price_from")
+NUMBER_KEYS = ("qty", "price", "line_value", "rrp", "qty_gross", "qty_cancelled")
 FIELD_KEYS = ("doc", "issuer", "label", "status", "gender")
 TOTALS_LABEL_KEYS = ("qty_label", "value_label")
 # Order platforms whose exports share one layout whatever the brand. Header texts may carry {currency} and
@@ -135,6 +141,7 @@ MONEY_TOL = 0.02
 TOTALS_NONE = "totals (the brand config says the brand prints none)"
 TOTALS_UNMAPPED = "totals (the brand config maps no printed totals)"
 LINE_VALUES = "line values (the brand config maps no line value column)"
+UNIT_PRICES = "unit prices (none printed: each is the size row's line value / qty, so qty x price = value checked nothing)"
 LINE_QTY = "line quantities (none printed: each is the sum of its size cells, so the sizes-sum gate checked nothing)"
 LAYOUT_HINT = ("If this is the right brand and file, its layout no longer matches the brand config's sheet: "
                "mapping; ask Colwyn to update the mapping.")
@@ -240,7 +247,16 @@ def check_mapping(sheet, cfg):
         out.append("sheet: columns: needs style")
     if "{style_alt}" in (cfg.get("join_key_alt") or "") and "style_alt" not in cols:
         out.append("sheet: columns: needs style_alt (join_key_alt uses {style_alt})")
-    if "price" not in cols:
+    pf = sheet.get("price_from")
+    if pf is not None:
+        if pf != "line_value":
+            out.append(f"sheet: price_from is line_value (the unit price is each size row's line value / qty), got {pf!r}")
+        elif "price" in cols:
+            out.append("sheet: price_from and columns: price both give the unit price: use one")
+        elif not {"line_value", "qty", "size"} <= set(cols) or (sheet.get("line_value_per") or "row") != "row":
+            out.append("sheet: price_from needs columns: size, qty and line_value, one row per size, "
+                       "with line_value_per: row")
+    elif "price" not in cols:
         out.append("sheet: columns: needs price (the unit price)")
     if not ({"colour_code", "colour_name"} & set(cols)) and re.search(r"\{colour(_code)?\}", cfg.get("join_key") or ""):
         out.append("sheet: columns: needs colour_code or colour_name (the join_key uses a colour)")
@@ -363,6 +379,8 @@ def _check_new_keys(sheet, cols, cfg):
     hr = sheet.get("header_rows")
     if hr is not None and (isinstance(hr, bool) or not isinstance(hr, int) or not 1 <= hr <= 5):
         out.append(f"sheet: header_rows is a whole number from 1 to 5, got {hr!r}")
+    if sheet.get("stack_headers") is not None and (not isinstance(sheet["stack_headers"], bool) or (hr or 1) < 2):
+        out.append("sheet: stack_headers is true or false, and needs header_rows of 2 or more")
     return out
 
 
@@ -586,8 +604,13 @@ def _find_header(sheets, sheet):
             return f"no worksheet named {sheet['sheet_name']!r} (the file has {', '.join(n for n, _ in sheets)})"
         sheets = hit
     best = None
+    n = sheet.get("header_rows", 1) if sheet.get("stack_headers") else 1
     for name, rows in sheets:
         for i, row in enumerate(rows):
+            if n > 1:   # each column's header is its text over the header rows, joined with a space
+                row = [" ".join(t for t in (text(rows[k][j]) if j < len(rows[k]) and not isinstance(rows[k][j], Uncached)
+                                            else None for k in range(i, min(i + n, len(rows)))) if t)
+                       for j in range(max(len(r) for r in rows[i:i + n]))]
             got = {}
             for j, v in enumerate(row):
                 if not isinstance(v, Uncached) and norm(v) in want:
@@ -596,6 +619,8 @@ def _find_header(sheets, sheet):
                 twice = [want[k] for k, js in got.items() if len(js) > 1]
                 if twice:
                     return f"{name} row {i + 1}: header(s) {', '.join(map(repr, twice))} printed in more than one column"
+                if n > 1:
+                    rows = rows[:i] + [row] + rows[i + 1:]
                 return name, rows, i, {k: js[0] for k, js in got.items()}
             if got and (best is None or len(got) > best[0]):
                 best = (len(got), name, i, [want[k] for k in want if k not in got])
@@ -805,6 +830,7 @@ class Reader:
         unknown = {}   # a selector value no brand config reads: [rows, units, value]
         self.fields = self._fields()
         data, printed, repeats, left = [], None, 0, collections.Counter()
+        dropped = [0, 0.0]   # units and value of the rows `select` leaves out
         for r in range(self.h + self.sheet.get("header_rows", 1), len(self.rows)):
             row = self.rows[r]
             if self.repeated_header(row):
@@ -819,11 +845,16 @@ class Reader:
                     continue
                 if norm(v) not in keep:
                     left[v] += 1
+                    dropped[0] += self._peek(row, "qty") or 0
+                    dropped[1] += (self._peek(row, "line_value") if "line_value" in self.cols else
+                                   (self._peek(row, "qty") or 0) * (self._peek(row, "price") or 0)) or 0
                     if known is not None and norm(v) not in known:
                         u = unknown.setdefault(v, [0, 0.0, 0.0])
                         q = (self.num(r, row, "qty") if "qty" in self.cols else
                              sum(self.num(r, row, header=h) or 0 for h in self.size_heads)) or 0
-                        u[0], u[1], u[2] = u[0] + 1, u[1] + q, u[2] + q * (self.num(r, row, "price") or 0)
+                        val = (q * (self.num(r, row, "price") or 0) if "price" in self.cols else
+                               self.num(r, row, "line_value") or 0)   # price_from: line_value prints no price
+                        u[0], u[1], u[2] = u[0] + 1, u[1] + q, u[2] + val
                     continue
             if ident(self.cell(row, "style")) is None:
                 numbers = any(not blank(row[j]) for j in self._number_cols() if j < len(row))
@@ -852,8 +883,13 @@ class Reader:
                                  f"{', '.join(sel['known'])}): {n} rows, {q:g} units, {self.sheet.get('currency') or ''} "
                                  f"{val:,.2f} would be dropped. Add it to the config of the brand that sells it, and to "
                                  "known in each")
+        for d in docs:
+            if not d["lines"]:
+                d["notes"].append(f"{d['doc']} has no line with a quantity (every size row is cancelled or empty): "
+                                  "nothing is drafted from it")
         if left and docs:
-            docs[0]["notes"].append(f"{sum(left.values())} order rows of other lines ({', '.join(sorted(left))}) left out: "
+            docs[0]["notes"].append(f"{sum(left.values())} order rows of other lines ({', '.join(sorted(left))}; "
+                                    f"{dropped[0]:g} units, value {dropped[1]:,.2f}) left out: "
                                     f"this brand config reads only {', '.join(sel['values'])} ({sel['column']!r})")
         if not any(d["lines"] for d in docs) and not self.problems and not self.section:   # a section may be empty
             self.problems.append(f"{self.name}: no order lines under the header row {self.h + 1}")
@@ -890,7 +926,7 @@ class Reader:
 
     def _format_scan(self, data):
         """Every mapped money and quantity cell of every order line against the number format, before any is used."""
-        heads = [self.head(k) for k in ("qty", "price", "line_value", "rrp") if k in self.cols]
+        heads = [self.head(k) for k in ("qty", "price", "line_value", "rrp", "qty_gross", "qty_cancelled") if k in self.cols]
         heads += list(self.size_heads)
         heads += [h for p in self.sheet.get("size_pairs") or [] for h in p[1:]]
         for r in data:
@@ -1020,7 +1056,21 @@ class Reader:
         doc, style, fabric, code, name = key[:5]
         first = self.rows[rs[0]]
         tag = f"{doc} {style} {code or name}"
-        prices = [(r, self.num(r, self.rows[r], "price")) for r in rs]
+        self._gross_gate(rs, tag)
+        if self.sheet.get("price_from"):
+            kept = [r for r in rs if self.qty(r, self.rows[r], "qty")]   # a row with no net quantity is a cancelled size
+            for r in set(rs) - set(kept):
+                v = self.num(r, self.rows[r], "line_value")
+                if v:
+                    self.problems.append(f"{tag} row {r + 1}: no net quantity in {self.head('qty')!r} but a value of "
+                                         f"{v:g} in {self.head('line_value')!r}: not skipped silently, check the row")
+            rs = kept
+            if not rs:
+                return None
+            self._recomputed(d, UNIT_PRICES)
+            prices = [(r, self._unit_price(r)) for r in rs]
+        else:
+            prices = [(r, self.num(r, self.rows[r], "price")) for r in rs]
         price_set = sorted({p for _, p in prices if p is not None})
         unpriced = [r + 1 for r, p in prices if p is None]
         if unpriced and price_set:
@@ -1108,6 +1158,28 @@ class Reader:
         got = [text(self.cell(self.rows[r], "line_no")) for r in rs]
         nums = [int(float(g)) for g in got if g is not None and re.fullmatch(r"\d+(\.0+)?", g)]
         return min(nums) if nums else (got[0] or n)
+
+    def _peek(self, row, key):
+        """A mapped number of a row the reader does not use, or None: never a problem, the row is not this brand's."""
+        if key not in self.cols:
+            return None
+        try:
+            return number(self.cell(row, key), self.dec)
+        except ValueError:
+            return None
+
+    def _gross_gate(self, rs, tag):
+        """gross - cancelled = net on every row of a file that prints all three (qty_gross, qty_cancelled, qty)."""
+        if not {"qty_gross", "qty_cancelled", "qty"} <= set(self.cols):
+            return
+        for r in rs:
+            g, c, q = (self.num(r, self.rows[r], k) or 0 for k in ("qty_gross", "qty_cancelled", "qty"))
+            if g - c != q:
+                self.problems.append(f"{tag} row {r + 1}: gross {g:g} - cancelled {c:g} != net {q:g}")
+
+    def _unit_price(self, r):
+        v, q = self.num(r, self.rows[r], "line_value"), self.qty(r, self.rows[r], "qty")
+        return round(v / q, 2) if v is not None and q else None
 
     def _rows_value(self, tag, rs, price, qs):
         """The printed value of a line laid out one row per size, gated per row or per line, never a sum of a

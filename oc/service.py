@@ -72,6 +72,7 @@ CURRENCY_CHECK = "Order confirmation is in the brand's cost currency"
 IDENTITY_CHECK = "Order confirmation is for the brand picked (issuer and label)"
 TOTALS_CHECK = "Order confirmation totals printed by the brand"
 NOTES_CHECK = "Order confirmation values the tool did not use"
+SOURCE_CHECK = "Order source"
 # A fixed reader's problem that is not a layout change: the arithmetic gates, a discount, a number format the reader
 # will not guess, and a document the reader knows is not an order (thugclub: a commercial invoice, packing list or
 # deposit proforma). Every other problem (no confirmation found, a moved header, a quantity off its column) gets the
@@ -166,7 +167,8 @@ def read_oc(oc_path, brand_cfg, reader=None, ai_factory=None):
         return None, [row, _check(IDENTITY_CHECK, "FAIL", wrong)], None
     warn = getattr(reader_mod, "reader_warnings", None)   # not "warnings": a reader may import that module
     extra = [_check(name, "WARN", detail) for name, detail in (warn(docs) if warn else [])]
-    return docs, [row] + identity_unchecked(docs, brand_cfg) + recomputed_rows(docs) + note_rows(docs) + extra, None
+    return docs, [row] + source_rows(brand_cfg) + identity_unchecked(docs, brand_cfg) + recomputed_rows(docs) \
+        + note_rows(docs) + extra, None
 
 
 def _parse(reader_mod, oc_path, brand_cfg):
@@ -195,6 +197,14 @@ def identity_unchecked(docs, brand_cfg):
                    f"(oc_supplier) or label (oc_label), and the file carries nothing else the tool can check. An "
                    f"order confirmation from another brand in the same layout would be drafted as {vendor}: make sure "
                    f"this file is {vendor}'s.")]
+
+
+def source_rows(brand_cfg):
+    """A WARN row when the brand config says the file is not the brand's own order confirmation (source_kind)."""
+    kind = brand_cfg.get("source_kind")
+    return [_check(SOURCE_CHECK, "WARN", f"{kind}: not an order confirmation from the brand. Nothing in it is confirmed "
+                   "by the brand: confirm the lines, quantities and prices with the supplier before ordering.")] \
+        if kind else []
 
 
 def note_rows(docs):

@@ -598,8 +598,8 @@ MUTANTS = [
      "service: the brand config never handed to a reader that takes it"),
     ("oc/service.py", '    hint = getattr(reader_mod, "LAYOUT_HINT", AI_HINT)', "    hint = AI_HINT",
      "service: a sheet brand told to tick the AI box"),
-    ("oc/service.py", "identity_unchecked(docs, brand_cfg) + recomputed_rows(docs) + note_rows(docs) + extra, None",
-     "identity_unchecked(docs, brand_cfg) + note_rows(docs) + extra, None", "service: no Checks row for recomputed totals"),
+    ("oc/service.py", "identity_unchecked(docs, brand_cfg) + recomputed_rows(docs) \\\n",
+     "identity_unchecked(docs, brand_cfg) \\\n", "service: no Checks row for recomputed totals"),
     ("oc/draft.py", '                    cell(row, col, ids[size], "OC",', '                    (row, col, ids[size], "OC",',
      "draft: an OC line's EAN and HS code not carried to the NEW rows"),
     ("oc/draft.py", "f\"{what} printed for size {' and '.join(was)}{named} on {l['doc']}",
@@ -1040,6 +1040,30 @@ MUTANTS = [
      '        if k == "columns" and isinstance(v, dict):', "platform: a brand's fields replace the platform's"),
     ('oc/adapters/sheet.py', '                    gender=gender_of(gender_text),',
      '                    gender=None,', "gender: a line's own gender column ignored"),
+    ("oc/adapters/sheet.py", "        return round(v / q, 2) if v is not None and q else None", "        return round(v * q, 2) if v is not None and q else None",
+     "sheet: the derived unit price is value times qty"),
+    ("oc/adapters/sheet.py", "            kept = [r for r in rs if self.qty(r, self.rows[r], \"qty\")]", "            kept = list(rs)",
+     "sheet: a size row with no net quantity kept as a line"),
+    ("oc/adapters/sheet.py", "            self._recomputed(d, UNIT_PRICES)\n", "            pass\n",
+     "sheet: derived unit prices not said in the Checks"),
+    ("oc/adapters/sheet.py", "    n = sheet.get(\"header_rows\", 1) if sheet.get(\"stack_headers\") else 1", "    n = sheet.get(\"header_rows\", 1)",
+     "sheet: header rows stacked whenever header_rows is set"),
+    ("oc/adapters/sheet.py", "                if n > 1:\n                    rows = rows[:i] + [row] + rows[i + 1:]\n", "                pass\n",
+     "sheet: the stacked header row not used for the column positions"),
+    ("oc/adapters/sheet.py", "        elif \"price\" in cols:\n            out.append(\"sheet: price_from and columns", "        elif False:\n            out.append(\"sheet: price_from and columns",
+     "sheet: price_from allowed beside a price column"),
+    ("oc/adapters/sheet.py", "(hr or 1) < 2):", "(hr or 1) < 1):", "sheet: stack_headers allowed without header_rows"),
+    ("oc/adapters/sheet.py", "                if v:\n                    self.problems.append(f\"{tag} row {r + 1}: no net quantity", "                if False:\n                    self.problems.append(f\"{tag} row {r + 1}: no net quantity",
+     "sheet: a skipped row's value dropped silently"),
+    ("oc/adapters/sheet.py", "            if g - c != q:", "            if False:", "sheet: gross - cancelled = net never gated"),
+    ("oc/adapters/sheet.py", "            if not d[\"lines\"]:\n                d[\"notes\"]", "            if False:\n                d[\"notes\"]",
+     "sheet: a fully cancelled document read as a silent empty one"),
+    ("oc/adapters/sheet.py", "                    dropped[0] += self._peek(row, \"qty\") or 0", "                    dropped[0] += 0",
+     "sheet: the units a select drops not counted"),
+    ("oc/service.py", "        if kind else []", "        if False else []", "service: source_kind shown no Order source row"),
+    ("oc/brand.py", "    if kind is not None and not (isinstance(kind, str) and kind.strip()):", "    if False:", "brand: a blank source_kind accepted"),
+    ("oc/adapters/sheet.py", "                                   (self._peek(row, \"qty\") or 0) * (self._peek(row, \"price\") or 0)) or 0", "                                   0) or 0",
+     "sheet: the value a select drops not counted"),
 ]
 
 
@@ -1130,6 +1154,22 @@ MUTANTS += [
     ("oc/brand.py", '    for key, what in (("oc_supplier", "a company name"), ("oc_label", "a label name"),\n                      ("oc_style_prefix", "a style-number prefix")):',
      '    for key, what in (("oc_supplier", "a company name"), ("oc_label", "a label name")):', "oc_style_prefix: an empty prefix loads"),
 ]
+
+MUTANTS += [   # review 2026-11-13-buyer-17 F1: an unknown select value under price_from: line_value
+    ("oc/adapters/sheet.py", '                        val = (q * (self.num(r, row, "price") or 0) if "price" in self.cols else',
+     '                        val = (0 if "price" in self.cols else',
+     "select.known: an unknown value with a price column is valued at zero (buyer-17 F1)"),
+    ("oc/adapters/sheet.py", "                        u[0], u[1], u[2] = u[0] + 1, u[1] + q, u[2] + val",
+     "                        u[0], u[1], u[2] = u[0] + 1, u[1] + q, u[2]",
+     "select.known: an unknown value's value is never added up (buyer-17 F1)"),
+    ("oc/adapters/sheet.py", '                               self.num(r, row, "line_value") or 0)   # price_from: line_value prints no price',
+     '                               q * (self.num(r, row, "price") or 0))',
+     "select.known: an unknown value under price_from crashes on the missing price column (buyer-17 F1)"),
+    ("oc/adapters/sheet.py", '                               self.num(r, row, "line_value") or 0)   # price_from: line_value prints no price',
+     '                               0)',
+     "select.known: an unknown value under price_from is valued at zero (buyer-17 F1)"),
+]
+
 
 def digest(p):
     return hashlib.md5(p.read_bytes()).hexdigest()

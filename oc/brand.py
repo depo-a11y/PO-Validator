@@ -18,6 +18,9 @@ could otherwise make the hosted app read any file on its server. `history` comes
 back empty and `history_files` keeps each entry's label and bare file name, so
 past POs uploaded on the page can still be matched to their season labels.
 
+`source_kind` (optional text, e.g. "SAP demand export") says the file is not the brand's own order confirmation
+and shows a WARN row naming it.
+
 Which OCs a config accepts: `oc_supplier` names the issuer as printed and `oc_label` the
 label, for an issuer with several (adidas AG: Y-3, Willy Chavarria, RS). Every reader
 returns both per document and an OC that does not match the config is refused. fog needs
@@ -258,6 +261,10 @@ def _reader_keys(cfg, data, source):
             if not all(isinstance(x, str) and x.strip() for x in val):
                 raise BrandError(f"{source}: {key} is {what} or a list of them, got {cfg[key]!r}")
             cfg[key] = val
+    kind = cfg.get("source_kind")
+    if kind is not None and not (isinstance(kind, str) and kind.strip()):
+        raise BrandError(f"{source}: source_kind is a short text naming what the file is "
+                         f"(e.g. 'SAP demand export'), got {kind!r}")
     tpl = cfg.get("join_key") or DEFAULT_JOIN_KEY
     if not isinstance(tpl, str):
         raise BrandError(f"{source}: join_key is a text template, got {tpl!r}")

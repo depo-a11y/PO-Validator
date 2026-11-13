@@ -944,7 +944,7 @@ def test_select_reads_only_this_brands_lines_and_says_what_it_left(tmp_path):
     docs, checks, _ = service.read_oc(path, select_cfg(["AA", "CC"]))
     assert [(l["style"], l["qty"]) for l in lines(docs)] == [("AA100", 3), ("CC300", 1)]
     (note,) = [c for c in checks if c["Check"] == service.NOTES_CHECK]
-    assert note["Detail"] == "1 order rows of other lines (BB) left out: this brand config reads only AA, CC ('line')"
+    assert note["Detail"] == "1 order rows of other lines (BB; 3 units, value 60.00) left out: this brand config reads only AA, CC ('line')"
 
 
 def test_a_row_with_no_selector_value_fails_and_select_never_meets_printed_totals(tmp_path):
@@ -994,6 +994,135 @@ def test_a_join_key_without_a_colour_needs_no_colour_column():
 def test_bad_new_mapping_keys_fail_at_load(bad, want):
     with pytest.raises(brandm.BrandError, match=re.escape(want)):
         cfg(**{k: v for k, v in bad.items() if k != "columns"}, columns=dict(COLUMNS, **bad.get("columns", {})))
+
+
+# ---- a report that prints no unit price and some headers one row up ------------------------------------------------
+DEM_HEAD = [[None, None, None, None, "Net qty", "Net value"],
+            ["Doc", "Style colour", "Size", "Customer PO", None, "EUR"]]
+DEM_ROWS = [["D1", "ZZ100AA0101", "S", "X", 1, 20.5], ["D1", "ZZ100AA0101", "M", "X", 2, 41.0],
+            ["D1", "ZZ100AA0101", "L", "X", 0, 0.0], ["D2", "ZZ200BB0202", "S", "Y", 0, 0.0]]
+
+
+def demand_cfg(**sheet_keys):
+    data = {k: v for k, v in base.BRAND.items() if k != "oc_label"}
+    s = dict(columns=dict(doc="Doc", style="Style colour", size="Size", qty="Net qty", line_value="Net value EUR"),
+             currency="EUR", header_rows=2, stack_headers=True, price_from="line_value", totals="none", **sheet_keys)
+    return brandm.from_mapping(dict(data, adapter="sheet", join_key="{style}", sheet=s), "t")
+
+
+def test_stacked_headers_and_a_unit_price_from_the_line_value(tmp_path):
+    docs, checks, _ = service.read_oc(write_xlsx(tmp_path / "d.xlsx", DEM_HEAD + DEM_ROWS), demand_cfg())
+    d1, d2 = docs
+    (l,) = d1["lines"]
+    assert (l["style"], l["sizes"], l["price"], l["qty"], l["line_value"]) == ("ZZ100AA0101", {"S": 1, "M": 2}, 20.5, 3, 61.5)
+    assert d2["lines"] == []   # a document whose every size was cancelled has no line
+    assert sheet.UNIT_PRICES in d1["recomputed"] and sheet.UNIT_PRICES not in d2["recomputed"]
+
+
+@pytest.mark.parametrize("fault, want", [
+    (dict(row=1, value=25.0), "sizes priced differently"),
+])
+def test_a_derived_unit_price_still_has_to_agree_across_a_line_and_fit_cents(tmp_path, fault, want):
+    rows = copy.deepcopy(DEM_ROWS)
+    rows[fault["row"]][4:6] = [fault.get("qty", rows[fault["row"]][4]), fault["value"]]
+    got = problems(write_xlsx(tmp_path / "d.xlsx", DEM_HEAD + rows), demand_cfg())
+    assert any(want in p for p in got), got
+
+
+def test_a_derived_unit_price_that_does_not_fit_cents_fails_the_row_gate(tmp_path):
+    rows = [["D1", "ZZ100AA0101", "S", "X", 10, 0.07]]
+    got = problems(write_xlsx(tmp_path / "d.xlsx", DEM_HEAD + rows), demand_cfg())
+    assert any("10 x 0.01 = 0.10 != line value 0.07" in p for p in got), got
+
+
+def test_a_select_value_no_config_knows_is_valued_from_the_line_value_when_no_price_is_printed(tmp_path):
+    """Review 2026-11-13-buyer-17 F1: price_from: line_value maps no price column, so the units a `select` value
+    outside `known` would drop are valued from the printed line value, and the colleague reads a FAIL, not a KeyError."""
+    rows = DEM_ROWS + [["D2", "ZZ200BB0202", "M", "Y", 2, 30.0]]
+    got = problems(write_xlsx(tmp_path / "d.xlsx", DEM_HEAD + rows),
+                   demand_cfg(select=dict(column="Customer PO", values=["X"], known=["X"])))
+    assert ("Order: 'Customer PO' 'Y' is in no brand config's select (known: X): 2 rows, 2 units, EUR 30.00 would be "
+            "dropped. Add it to the config of the brand that sells it, and to known in each") in got, got
+
+
+def test_size_columns_are_found_after_a_stacked_header(tmp_path):
+    head = [[None, None, "Cost", None, None], ["Doc", "Style", None, "S", "M"]]
+    rows = [["D1", "ZZ100AA0101", 12.0, 1, 2]]
+    data = {k: v for k, v in base.BRAND.items() if k != "oc_label"}
+    s = dict(columns=dict(doc="Doc", style="Style", price="Cost"), size_columns=dict(after="Cost"), currency="EUR",
+             header_rows=2, stack_headers=True, totals="none")
+    config = brandm.from_mapping(dict(data, adapter="sheet", join_key="{style}", sheet=s), "t")
+    docs, _, _ = service.read_oc(write_xlsx(tmp_path / "d.xlsx", head + rows), config)
+    assert [l["sizes"] for l in lines(docs)] == [{"S": 1, "M": 2}]
+
+
+def test_a_skipped_row_that_carries_a_value_fails(tmp_path):
+    rows = copy.deepcopy(DEM_ROWS)
+    rows[2][5] = 12.5   # the L row has no net quantity but a value
+    got = problems(write_xlsx(tmp_path / "d.xlsx", DEM_HEAD + rows), demand_cfg())
+    assert any("row 5: no net quantity" in p and "a value of 12.5" in p for p in got), got
+
+
+def test_gross_minus_cancelled_must_equal_net_where_the_file_prints_all_three(tmp_path):
+    head = [[None, None, None, "Gross", "Cancelled", "Net qty", "Net value"],
+            ["Doc", "Style colour", "Size", None, None, None, "EUR"]]
+    rows = [["D1", "ZZ100AA0101", "S", 3, 1, 2, 41.0], ["D1", "ZZ100AA0101", "M", 4, 4, 0, 0.0]]
+    cols = dict(doc="Doc", style="Style colour", size="Size", qty="Net qty", line_value="Net value EUR",
+                qty_gross="Gross", qty_cancelled="Cancelled")
+    data = {k: v for k, v in base.BRAND.items() if k != "oc_label"}
+    s = dict(columns=cols, currency="EUR", header_rows=2, stack_headers=True, price_from="line_value", totals="none")
+    config = brandm.from_mapping(dict(data, adapter="sheet", join_key="{style}", sheet=s), "t")
+    docs, _, _ = service.read_oc(write_xlsx(tmp_path / "ok.xlsx", head + rows), config)
+    assert [l["sizes"] for l in lines(docs)] == [{"S": 2}]
+    rows[1][3] = 5   # gross 5 - cancelled 4 != net 0
+    got = problems(write_xlsx(tmp_path / "bad.xlsx", head + rows), config)
+    assert any("gross 5 - cancelled 4 != net 0" in p for p in got), got
+
+
+def test_source_kind_shows_an_order_source_row_and_a_cancelled_document_a_note(tmp_path):
+    path = write_xlsx(tmp_path / "d.xlsx", DEM_HEAD + DEM_ROWS)
+    plain = [c["Check"] for c in service.read_oc(path, demand_cfg())[1]]
+    assert service.SOURCE_CHECK not in plain
+    data = {k: v for k, v in base.BRAND.items() if k != "oc_label"}
+    s = dict(columns=dict(doc="Doc", style="Style colour", size="Size", qty="Net qty", line_value="Net value EUR"),
+             currency="EUR", header_rows=2, stack_headers=True, price_from="line_value", totals="none")
+    config = brandm.from_mapping(dict(data, adapter="sheet", join_key="{style}", sheet=s,
+                                      source_kind="demand export"), "t")
+    _, checks, _ = service.read_oc(path, config)
+    (src,) = [c for c in checks if c["Check"] == service.SOURCE_CHECK]
+    assert src["Result"] == "WARN" and src["Detail"].startswith("demand export: not an order confirmation from the brand")
+    (note,) = [c for c in checks if c["Check"] == service.NOTES_CHECK]
+    assert "D2 has no line with a quantity" in note["Detail"]
+
+
+def test_a_blank_source_kind_fails_at_load():
+    data = {k: v for k, v in base.BRAND.items() if k != "oc_label"}
+    with pytest.raises(brandm.BrandError, match="source_kind is a short text"):
+        brandm.from_mapping(dict(data, adapter="sheet", join_key="{style}", source_kind=" ",
+                                 sheet=dict(columns=dict(style="Style", size="Size", qty="Qty", price="P"))), "t")
+
+
+def test_a_stacked_header_missing_from_its_rows_fails_naming_it(tmp_path):
+    head = [list(DEM_HEAD[0]), list(DEM_HEAD[1])]
+    head[0][4] = "Gross qty"
+    got = problems(write_xlsx(tmp_path / "d.xlsx", head + DEM_ROWS), demand_cfg())
+    assert any("'Net qty'" in p for p in got), got
+
+
+@pytest.mark.parametrize("bad, want", [
+    (dict(price_from="qty"), "price_from is line_value"),
+    (dict(columns=dict(COLUMNS, size="Size"), price_from="line_value"), "price_from and columns: price both"),
+    (dict(drop=("line_value",), price_from="line_value"), "price_from needs columns: size, qty and line_value"),
+    (dict(line_value_per="line", price_from="line_value"), "with line_value_per: row"),
+    (dict(stack_headers=True), "stack_headers is true or false, and needs header_rows of 2 or more"),
+    (dict(header_rows=2, stack_headers="yes"), "stack_headers is true or false"),
+])
+def test_bad_stack_and_price_from_keys_fail_at_load(bad, want):
+    bad = dict(bad)
+    cols = bad.pop("columns", None)
+    drop = bad.pop("drop", ())
+    with pytest.raises(brandm.BrandError, match=re.escape(want)):
+        cfg(columns=cols, drop=("price",) + tuple(drop) if "columns" not in bad and cols is None else drop, **bad)
 
 
 # ---- real order confirmations, local only ------------------------------------------------------------
