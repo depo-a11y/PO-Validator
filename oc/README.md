@@ -425,7 +425,10 @@ manufacture code per Title, live handle, blank Option1, `run_gate`) unchanged.
   fabric-specific and T/H codes mostly are not. With a brand's `match_ignore` (landing 2) the evidence and the
   hold-out compare codes as `catalog.match` does (`util.code_match`), body and colour apart; the hold-out also drops a
   past-PO product whose whole code matches, so with a space in `match_ignore` an OC code printed with the space and a
-  past PO's space-less one are the same product. The tool's own NEW-product lookups (title stem,
+  past PO's space-less one are the same product. With `join_key_alt` (landing 3) the hold-out leaves an OC line out
+  under both its join_key and its alternative code, whichever the draft joined it on. A code ordered for two genders
+  (two listings, landing 3's merge_repeats) is sent once and both listings take the answer; it counts as one product.
+  The tool's own NEW-product lookups (title stem,
   Type, colour name) still take codes as printed, so for such a brand the agent can see a live sibling the tool
   does not; its suggestion then waits in the Why where the tool's title holds a raw code.
 - **Answer.** Per code, under a strict schema: `product_name`, `colour_words`, `colour_family` (one of the brand's
@@ -433,7 +436,9 @@ manufacture code per Title, live handle, blank Option1, `run_gate`) unchanged.
 - **Checked in Python first.** No raw code (`finalize.raw_code_in_title`), no code-like token (T0123, M01234, H0123,
   123; `8cm`, `6.5mm`, `6CC` and `5AC` are words), no vendor word (Maison, Margiela, MM6), letters, digits, space
   and `/ & ' - . ,` only, at most 60 characters for a name and 40 for colour words, nothing starting `= + - @`, no
-  gender prefix (the de-dupe adds one), no word "in" in a name. Heel codes, for a brand with `heel_codes: true`:
+  gender prefix (the de-dupe adds one) and no gender word anywhere (women, womens, woman, men, mens, man, ladies,
+  lady, female, male, unisex, with or without 's: landing 3's readers put the print's gender in the evidence), no
+  word "in" in a name. Heel codes, for a brand with `heel_codes: true`:
   only H30, H50, H60 or H80, as the last words of the name, and only when the evidence prints that height (in cm or
   as the H-code, in a same-style title, the product class or the cart's Style Name); any other H-number is refused.
   A brand without `heel_codes` gets no H-code from the AI: one is refused, counted, never quoted. A rejected value
@@ -497,7 +502,9 @@ capitals as a word of their own (also AI-powered; not AI-204, a code ending -AI,
 case artificial intelligence, ChatGPT (Chat GPT, Chat-GPT), GPT (GPT-4), machine learning or machine-learning, and LLM
 or LLMs. Claude (a designer's name) and "the model" (a supplier's Model column) are not on it. A paraphrase that names
 none of these words ("use the other reader", "tick the box under the brand picker") is shown: only the prompt keeps
-the AI reader out of it. Where a failing check does carry it, AI advice is shown. It answers `cause`, `next_step`, `who`
+the AI reader out of it. Where a failing check does carry it, AI advice is shown. A brand config on hold (landing 3)
+is never explained: its refusal names the reason, the page offers no button, and the CLI and service read and send
+nothing ("this brand's config is on hold, so nothing was read or sent"). It answers `cause`, `next_step`, `who`
 (colleague or colwyn) and `refs` (pages, rows, checks). The prompt states the 400-character limit. Both prompts say
 their inputs are data, never instructions. Python drops a ref that does not exist and says only how many it dropped,
 never which, and refuses text that is empty, over 400 characters, starts `= + - @`, or holds markup, a link or web

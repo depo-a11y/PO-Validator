@@ -205,6 +205,25 @@ def test_a_refused_draft_offers_an_explanation_only_with_a_pdf(tmp_path, monkeyp
         assert len(asked) == 1
 
 
+def test_a_config_on_hold_is_offered_no_explanation(tmp_path, monkeypatch, key):
+    """Landing 3's hold: the refusal names the reason; no button would send the held brand's PDF or PO."""
+    from oc import brand as brandm
+    held = dict(Check=brandm.HOLD_CHECK, Result="FAIL", Detail="This brand's config is on hold: codes do not join")
+    monkeypatch.setattr(service, "draft", lambda *a, **kw: (None, pd.DataFrame(), [held]))
+    monkeypatch.setattr(service, "finalize", lambda *a, **kw: (None, [held], pd.DataFrame()))
+    monkeypatch.setattr(service, "explain_draft", _boom)
+    monkeypatch.setattr(service, "explain_finalize", _boom)
+    at = tp._page_with_brand(tmp_path, monkeypatch, "adapter: otb\noc_label: MM\noc_supplier: X Ltd\n"
+                                                    "hold: codes do not join\n")
+    at.file_uploader(key="w_catalog").set_value(("catalog.csv", b"ID\n", "text/csv"))
+    at.file_uploader(key="w_oc").set_value(("oc.pdf", b"%PDF-1.4", "application/pdf"))
+    at.file_uploader(key="w_po").set_value(("po.xlsx", b"PK", "application/octet-stream"))
+    at.run()
+    press(at, "Build draft PO")
+    press(at, "Make upload files")
+    assert not [b for b in at.button if b.label in (DRAFT_ASK, FINAL_ASK)]
+
+
 def test_title_runs_stop_at_the_session_cap(page):
     at, seen = page
     at.session_state["ai_title_runs"] = TITLES_CAP - 1

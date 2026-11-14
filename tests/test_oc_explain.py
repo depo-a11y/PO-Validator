@@ -230,6 +230,28 @@ def test_a_refusal_the_ai_reader_cannot_fix_shows_words_that_only_look_like_ai(t
         assert e["ok"] and e["next_step"] == text, text
 
 
+def test_a_config_on_hold_is_never_explained_from_its_files(tmp_path, monkeypatch, key):
+    """Landing 3's hold: a held config's refusal names its reason, and its OC or PO is never read or sent."""
+    import test_oc_hold as th
+    from oc.agent import common
+
+    def boom(*a, **k):
+        raise AssertionError("read or sent for a config on hold")
+    monkeypatch.setattr(ai, "pdf_pages", boom)
+    monkeypatch.setattr(poxlsx, "read_po", boom)
+    monkeypatch.setattr(common, "connect", boom)
+    checks = [brandm.hold_row(th._held())]
+    for fn, path in ((service.explain_draft, "oc.pdf"), (service.explain_finalize, "po.xlsx")):
+        e = fn(str(tmp_path / path), checks, th._held(), ai_factory=boom)
+        assert explain.as_text(e) == "No AI explanation: this brand's config is on hold, so nothing was read or sent."
+    cat, cfg = th._catalog(tmp_path), th._held_yaml(tmp_path)
+    with pytest.raises(SystemExit):
+        cli.main(["draft", "--oc", str(tmp_path / "oc.pdf"), "--catalog", cat, "--brand", "x", "--brand-config", cfg,
+                  "--out", str(tmp_path / "d.xlsx"), "--ai-explain"])
+    assert cli.main(["finalize", "--po", str(tmp_path / "po.xlsx"), "--catalog", cat, "--brand", "x", "--brand-config",
+                     cfg, "--out-prefix", str(tmp_path / "run-"), "--ai-explain"]) == 1
+
+
 def test_a_refusal_the_ai_reader_may_fix_keeps_its_ai_advice(tmp_path, key):
     pdf, po, review, checks = case_unknown_layout(tmp_path)
     for advice in ("Check the brand; if it is right, tick Read the OC with AI.", "Do not tick Read the OC with AI."):

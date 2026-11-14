@@ -468,8 +468,12 @@ def titles_ran(checks):
 
 def explain_draft(oc_path, checks, brand_cfg, ai_factory=None):
     """A refused draft explained in plain English: None with no key (nothing sent), else the record from
-    agent.explain.explain. Reads the PDF and a copy of the checks; changes neither."""
+    agent.explain.explain. Reads the PDF and a copy of the checks; changes neither. A config on hold: nothing read
+    or sent."""
     from .agent import explain
+    held = explain.held(brand_cfg)
+    if held:
+        return held
     req, valid = explain.draft_request(oc_path, checks, brand_cfg)
     return explain.explain(req, valid, ai_factory)
 
@@ -477,6 +481,9 @@ def explain_draft(oc_path, checks, brand_cfg, ai_factory=None):
 def explain_finalize(po_path, checks, brand_cfg, ai_factory=None):
     """A refused finalize explained: as explain_draft, from the PO rows the failing checks name."""
     from .agent import explain
+    held = explain.held(brand_cfg)
+    if held:
+        return held
     req, valid = explain.finalize_request(po_path, checks, brand_cfg)
     return explain.explain(req, valid, ai_factory)
 

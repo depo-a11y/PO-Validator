@@ -26,6 +26,7 @@ import re
 
 from . import common
 from .. import housestyle
+from ..brand import code_for
 from ..finalize import raw_code_in_title
 from ..resolve import AI_DRAFT, COLOUR, GREEN, RANK, RED
 from ..util import code_match, norm_code, slug
@@ -47,6 +48,7 @@ MEASURE = re.compile(r"\d+(?:[.,]\d+)?(?:cm|mm|cc|oz|ml)", re.I)
 SHORT_NAME = re.compile(r"\d{1,2}[^\W\d_]{1,4}")          # 5AC, 1CON, 6CC: product names, not codes
 ALLOWED_TEXT = re.compile(r"[A-Za-zÀ-ÖØ-öø-ÿ0-9 /&'\-.,]+")
 GENDER_WORDS = {"womens", "mens", "women's", "men's", "women", "men"}
+GENDER_ANY = GENDER_WORDS | {"woman", "woman's", "man", "man's", "ladies", "lady", "female", "male", "unisex"}
 
 SYSTEM = """You draft product titles for NEW products on a purchase order at Marais, a fashion retailer in \
 Melbourne. A person checks every value you give, and the tool checks them too; anything it cannot use is replaced \
@@ -248,9 +250,16 @@ def request(block, evs, brand):
         betas=[common.FALLBACK_BETA], fallbacks="default")
 
 
+def oc_forms(R):
+    """Every code an OC line goes by: its join_key code and its join_key_alt code (landing 3), whichever the draft
+    joined it on, so the hold-out leaves an OC product out under either form."""
+    return [c for l in R.oc.values() for c in (code_for(R.b, l["style"], l["fabric"], l["colour"]), l.get("code_alt"))
+            if c]
+
+
 def plan(pending, R):
     """(requests, evidence by code, few-shot examples): everything that would be sent, nothing sent."""
-    ex = examples(R.hist, R.b, [n["code"] for n in pending] + list(R.oc))
+    ex = examples(R.hist, R.b, [n["code"] for n in pending] + list(R.oc) + oc_forms(R))
     block = few_shot_block(ex, R.b)
     evs = {n["code"]: evidence(n, R) for n in pending}
     codes = list(evs)
@@ -306,6 +315,8 @@ def _text_problems(v, brand, code, heel, kind):
         out.append(("code-like token", f"{len(codes)} code-like token(s)"))   # counted: a token may be a planted link
     if kind in ("name", "example") and toks and toks[0].lower() in GENDER_WORDS:
         out.append(("gender prefix", f"starts with '{toks[0]}' (the tool adds a gender prefix itself)"))
+    elif any(t.lower() in GENDER_ANY for t in toks):   # landing 3's readers put the print's gender in the evidence
+        out.append(("gender word", "a gender word (a title names no gender; the tool adds a gender prefix itself)"))
     if kind == "name" and re.search(r"\bin\b", v):
         out.append(("the word 'in'", "holds the word 'in', which would split the title in the wrong place"))
     hcodes = [t.upper() for t in toks if HCODE.fullmatch(t)]
@@ -505,13 +516,16 @@ def run(pending, R, factory=None, policy="non-green"):
     if client is None:
         return []
     saved = [(list(n["title"]), n["fam"]) for n in pending]
+    products = len({n["code"] for n in pending})   # one code ordered for two genders is one product on two listings
     usage, stats = common.Usage(), collections.Counter()
     failed = []
     try:
         reqs, evs, _ = plan(pending, R)
         guarded = gate_guarded(pending, R)
         codes = list(evs)
-        by_code = {n["code"]: n for n in pending}
+        by_code = collections.defaultdict(list)
+        for n in pending:
+            by_code[n["code"]].append(n)
         for i, req in enumerate(reqs):
             chunk = codes[i * CHUNK:(i + 1) * CHUNK]
             try:
@@ -529,7 +543,8 @@ def run(pending, R, factory=None, policy="non-green"):
             if len(verdicts) < len(chunk):
                 failed.append((len(chunk) - len(verdicts), "the AI's answer left them out"))
             for c, v in verdicts.items():
-                apply(by_code[c], v, answers[c], policy, stats, guarded[c])
+                for k, n in enumerate(by_code[c]):   # every listing of the code takes the answer; counted once
+                    apply(n, v, answers[c], policy, stats if k == 0 else collections.Counter(), guarded[c])
     except Exception as e:
         for n, (title, fam) in zip(pending, saved):
             n["title"], n["fam"] = title, fam
@@ -541,10 +556,10 @@ def run(pending, R, factory=None, policy="non-green"):
     if failed:
         missed = sum(k for k, _ in failed)
         why = "; ".join(dict.fromkeys(r for _, r in failed))
-        head = (f"AI title drafting did not run: {why}" if missed >= len(pending) else
-                f"AI title drafting did not run for {missed} of {len(pending)} NEW products: {why}")
+        head = (f"AI title drafting did not run: {why}" if missed >= products else
+                f"AI title drafting did not run for {missed} of {products} NEW products: {why}")
         return [dict(Check=CHECK, Result="WARN", Detail=(
             head + ". The tool's own titles, colour words and colour families stand for them."
-            + (f" For the rest: {_summary(stats, len(pending))}." if stats["answered"] else "")
+            + (f" For the rest: {_summary(stats, products)}." if stats["answered"] else "")
             + (f" {usage.text()}." if usage.requests else " Nothing was sent.")))]
-    return [dict(Check=CHECK, Result="INFO", Detail=f"{_summary(stats, len(pending))}. {usage.text()}.")]
+    return [dict(Check=CHECK, Result="INFO", Detail=f"{_summary(stats, products)}. {usage.text()}.")]

@@ -17,6 +17,7 @@ import re
 
 from . import common
 from ..adapters import ai
+from ..brand import hold_row
 from ..util import cost_currency, norm_code
 
 EFFORT = "medium"
@@ -144,6 +145,18 @@ def request(payload):
                                                                                     indent=1, default=str)}]}],
         output_config={"effort": EFFORT, "format": {"type": "json_schema", "schema": SCHEMA}},
         betas=[common.FALLBACK_BETA], fallbacks="default")
+
+
+HELD = "this brand's config is on hold, so nothing was read or sent"
+
+
+def held(brand_cfg):
+    """The record for a brand config on hold (landing 3's `hold`), else None: its OC or PO is never read or sent, and
+    its refusal already names the reason."""
+    if not hold_row(brand_cfg):
+        return None
+    usage = common.Usage()
+    return dict(ok=False, reason=HELD, usage=usage.as_dict(), usage_text=usage.text())
 
 
 def draft_request(oc_path, checks, brand_cfg):

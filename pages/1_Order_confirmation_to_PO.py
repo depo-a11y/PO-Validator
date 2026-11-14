@@ -157,6 +157,8 @@ def offer_explanation(record, key, label, explain, filename, data_key):
     spreadsheet OC or from the cart alone has no PDF to send, so it offers none."""
     if not agent or record.get("explain") or record.get("explain_note") or record.get(data_key) is None:
         return
+    if brandm.hold_row(cfg):   # a config on hold: its refusal names the reason, and its files are never sent
+        return
     if st.button(label, key=key):
         with tempfile.TemporaryDirectory(prefix="oc-explain-") as tmp:
             path = save(tmp, filename, record[data_key])

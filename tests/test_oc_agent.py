@@ -384,6 +384,11 @@ BAD_NAMES = [
     ("Paint Sneaker H55", "heel code H55 is not one of H30, H50, H60, H80"),
     ("Paint Sneaker H100", "heel code H100 is not one of"),
     ("Womens Paint Sneaker", "starts with 'Womens'"),
+    ("Woman Paint Sneaker", "a gender word"),
+    ("Paint Sneaker for Women", "a gender word"),
+    ("Ladies Paint Sneaker", "a gender word"),
+    ("Man Paint Sneaker", "a gender word"),
+    ("Paint Sneaker Unisex", "a gender word"),
     ("Sneaker in Leather", "holds the word 'in'"),
     ("Paint Sneaker 123", "'Paint Sneaker 123' rejected (1 code-like token(s)"),
     ("Paint Sneaker see evil-shop.com", "holds a link or a web address"),
@@ -425,7 +430,8 @@ def test_a_rejected_title_part_or_family_is_never_echoed(tmp_path, key, field, p
 
 BAD_COLOURS = [("900", "raw code 900"), ("T0013", "raw code T0013") , ("Black H80", "heel code H80 in the colour words"),
                ("Maison Black", "brand word(s) MAISON"), ("Black" + "k" * 40, "longer than 40 characters"),
-               ("=Black", "starts with '='"), ("Black (Shiny)", "outside letters, digits")]
+               ("=Black", "starts with '='"), ("Black (Shiny)", "outside letters, digits"),
+               ("Womens Black", "a gender word"), ("Black Unisex", "a gender word")]
 
 
 @pytest.mark.parametrize("bad,reason", BAD_COLOURS)
@@ -456,6 +462,57 @@ def test_titles_from_ai_meet_the_same_dedupe_and_handle_checks(tmp_path, key):
 def _pair(*lines):
     return [dict(doc=f"SS - {i}", collection=c, gender=g, currency="European Euro", label="MM", lines=[l], total_qty=1,
                  net=200.0) for i, (c, g, l) in enumerate(lines, 1)]
+
+
+def test_one_code_on_two_listings_takes_one_answer_on_both(tmp_path, key):
+    """Landing 3 keeps a code ordered for two genders as two listings (draft.merge_repeats). The agent sends the code
+    once and both listings take the answer; the de-dupe's prefix parts them, and it counts as one product."""
+    sneaker = _line(1, "S97XX0009", "P0001", "101", "SNEAKERS", {"42": 1}, 200.0)
+    d = _pair(("MM MALE SHOES AVP", "MEN", sneaker), ("MM FEMALE SHOES AVP", "WOMEN", dict(sneaker, sizes={"38": 1})))
+    fake = Fake(answers={"S97XX0009P0001 101": dict(product_name="Paint Sneaker", colour_words="Optic White",
+                                                    colour_family="WHITE", basis="b")})
+    rows, review, checks, fills = build(tmp_path, fake, d=d)
+    assert [sent_codes(c) for c in fake.calls] == [["S97XX0009P0001 101"]]
+    assert {(x["Value"], x["Source"]) for x in cells(review, "S97XX0009P0001 101", "Title")} == \
+        {("Paint Sneaker in White", AI_DRAFT), ("Womens Paint Sneaker in White", AI_DRAFT)}   # the green colour stays
+    assert agent_row(checks)["Detail"].startswith("1 of 1 NEW products answered")
+
+
+def _alt_service_draft(tmp_path, sheet_rows, live, past_rows, fake):
+    import test_oc_sheet as tsh
+    path = tsh.write_xlsx(tmp_path / "a.xlsx", [tsh.ALT_HEAD] + sheet_rows)
+    hist = tmp_path / "Past PO FW26.xlsx"
+    wb = openpyxl.Workbook()
+    wb.active.append(["Command", poxlsx.CODE, poxlsx.SEASON, "Title", "Type", "Option1 Value", "Option2 Value"])
+    for r in past_rows:
+        wb.active.append([r[0], r[1], "F/W 26", r[2], "MEN CLOTHING T-SHIRTS SHORT SLEEVE", "BLACK", "M"])
+    wb.save(hist)
+    return service.draft(str(path), tsh.alt_catalog(tmp_path, live), tsh.alt_cfg(), history_paths=[str(hist)],
+                         ai_titles=True, ai_factory=fake.factory)
+
+
+def test_the_hold_out_leaves_an_oc_product_out_under_its_join_key_alt_code_too(tmp_path, key):
+    """Landing 3's join_key_alt: a line is the same product under its join_key code and its alternative. Neither
+    found live (NEW under the join_key code), a past PO holding the alternative form is held out."""
+    fake = Fake(reply=lambda kw, n: message(dict(products=[])))
+    _alt_service_draft(tmp_path, [["QQ-AB700", "C07", "M", 1, 50.0]], [("901", "Short Tee in Black", "AB100 C01")],
+                       [("NEW", "QQ-AB700 C07", "Alt Form Tee in Black"),
+                        ("NEW", "QQ-AB800 C08", "Other Form Tee in Black")], fake)
+    block = fake.calls[0]["system"][1]["text"]
+    assert "Other Form Tee in Black" in block and "Alt Form Tee" not in block
+
+
+def test_the_hold_out_leaves_a_line_joined_by_its_alternative_out_under_its_join_key_code(tmp_path, key):
+    """The alternative found live (MERGE, its code swapped): a past PO holding the join_key form is held out."""
+    fake = Fake(reply=lambda kw, n: message(dict(products=[])))
+    po, review, checks = _alt_service_draft(
+        tmp_path, [["QQ-AB200", "C02", "M", 1, 50.0], ["QQ-AB900", "C09", "M", 1, 50.0]],
+        [("903", "Other Tee in Black", "QQ-AB200 C02")],
+        [("NEW", "AB200 C02", "Join Form Tee in Black"), ("NEW", "QQ-AB800 C08", "Other Form Tee in Black")], fake)
+    swaps = [c["Detail"] for c in checks if c["Check"].startswith("Joined by join_key_alt")]
+    assert swaps == ["AB200 C02 -> QQ-AB200 C02"]
+    block = fake.calls[0]["system"][1]["text"]
+    assert "Other Form Tee in Black" in block and "Join Form Tee" not in block
 
 
 def _active_twin(title, handle):
