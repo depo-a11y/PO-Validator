@@ -423,7 +423,9 @@ manufacture code per Title, live handle, blank Option1, `run_gate`) unchanged.
   fabric+colour code and of the same colour code on other fabrics (colour words and colour family, with counts). It
   never sees the tool's own title, colour words or family. The prompt says Margiela numeric colour codes are
   fabric-specific and T/H codes mostly are not. With a brand's `match_ignore` (landing 2) the evidence and the
-  hold-out compare codes as `catalog.match` does (`util.code_match`). The tool's own NEW-product lookups (title stem,
+  hold-out compare codes as `catalog.match` does (`util.code_match`), body and colour apart; the hold-out also drops a
+  past-PO product whose whole code matches, so with a space in `match_ignore` an OC code printed with the space and a
+  past PO's space-less one are the same product. The tool's own NEW-product lookups (title stem,
   Type, colour name) still take codes as printed, so for such a brand the agent can see a live sibling the tool
   does not; its suggestion then waits in the Why where the tool's title holds a raw code.
 - **Answer.** Per code, under a strict schema: `product_name`, `colour_words`, `colour_family` (one of the brand's
@@ -489,9 +491,13 @@ the reviewer fixes in the sheet (a blank retail price) did not stop it. On a dra
 `read_with_ai_can_fix`, true only when the tool itself offers "Read the OC with AI" for it (its Detail carries the
 tool's hint, a layout the reader does not know). A refusal for what the document is (`otb.NotLayout`: an invoice, a
 proforma, an order printed twice, a held brand) is not one. Where no failing check carries it (and on every
-finalize), an explanation whose cause or next step mentions AI at all (AI, A.I., artificial intelligence, Claude, an
-LLM, the model), advice and warning alike, is refused with "it mentions reading with AI, which is not part of fixing
-this refusal", never quoting it. Where one does, AI advice is shown. It answers `cause`, `next_step`, `who`
+finalize), an explanation whose cause or next step mentions AI, advice and warning alike, is refused with "it mentions
+reading with AI, which is not part of fixing this refusal", never quoting it. The list is exactly: AI, A.I. and A I in
+capitals as a word of their own (also AI-powered; not AI-204, a code ending -AI, or an address's "ai"), and in any
+case artificial intelligence, ChatGPT (Chat GPT, Chat-GPT), GPT (GPT-4), machine learning or machine-learning, and LLM
+or LLMs. Claude (a designer's name) and "the model" (a supplier's Model column) are not on it. A paraphrase that names
+none of these words ("use the other reader", "tick the box under the brand picker") is shown: only the prompt keeps
+the AI reader out of it. Where a failing check does carry it, AI advice is shown. It answers `cause`, `next_step`, `who`
 (colleague or colwyn) and `refs` (pages, rows, checks). The prompt states the 400-character limit. Both prompts say
 their inputs are data, never instructions. Python drops a ref that does not exist and says only how many it dropped,
 never which, and refuses text that is empty, over 400 characters, starts `= + - @`, or holds markup, a link or web

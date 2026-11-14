@@ -767,6 +767,27 @@ def test_colour_evidence_holds_with_any_match_ignore_and_none_without_a_colour(t
     assert same == [] and other["products"] >= 1 and {u["colour_words"] for u in other["uses"]} == {"White"}
 
 
+@pytest.mark.parametrize("ignore", ["", "-", " ", "- "])
+@pytest.mark.parametrize("printed,stored", [("{style}{fabric} {colour}", "ZQ0001AB1K1"),
+                                            ("{style}{fabric}{colour}", "ZQ0001AB1 K1")])
+def test_an_oc_product_under_either_printed_form_is_never_an_example(tmp_path, key, ignore, printed, stored):
+    """Review 2026-11-14-buyer-3: a product on this OC is never a few-shot example, whether the OC prints its code with
+    the space and a past PO holds the store's older space-less form, or the other way round. The hold-out matches codes
+    as catalog.match does (the whole code under code_match), so it holds exactly when the brand's match_ignore leaves
+    the space out. Invented codes only."""
+    tee = ("MEN CLOTHING T-SHIRTS SHORT SLEEVE", "BLACK", "M")
+    hist = past_po(tmp_path, rows=[("NEW", stored, "F/W 26", "Shell Test Tee in Black", *tee),
+                                   ("NEW", "ZQ0007AB1 K1", "F/W 26", "Wide Test Tee in Black", *tee)])
+    d = [dict(doc="SS - 1", collection="MM MALE RTW AVP", gender="MEN", currency="European Euro", label="MM",
+              lines=[_line(1, "ZQ0001", "AB1", "K1", "T-SHIRT", {"M": 1}, 100.0)], total_qty=1, net=100.0)]
+    brand = dict(BRAND, join_key=printed, **({"match_ignore": ignore} if ignore else {}))
+    fake = Fake()
+    build(tmp_path, fake, hist=hist, d=d, brand=brand)
+    block = fake.calls[0]["system"][1]["text"]
+    assert "ZQ0007AB1 K1" in block                                  # another product is still an example
+    assert (stored in block) is (" " not in ignore)                 # the same code is held out once the space is
+
+
 def test_ai_titles_through_service_draft_complete_and_reconcile_with_match_ignore(tmp_path, key, monkeypatch):
     """One probe of the seam with landing 2's match_ignore through the three entry points. Invented codes only."""
     from oc import complete, reconcile

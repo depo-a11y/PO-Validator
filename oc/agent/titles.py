@@ -110,10 +110,12 @@ def _brand_words(brand):
 
 def examples(hist, brand, exclude_codes):
     """Past POs' NEW products, one per code, newest PO first: (code, Type, colour family, Title). A product on this
-    OC is never an example (hold-out), and neither is one whose title breaks the house rules the drafts are held
-    to. Round robin over Types for variety, capped at FEW_SHOT_CAP; deterministic."""
+    OC is never an example (hold-out: its code split into body and colour, or the whole code, equal under the brand's
+    match_ignore), and neither is one whose title breaks the house rules the drafts are held to. Round robin over
+    Types for variety, capped at FEW_SHOT_CAP; deterministic."""
     ign = brand.get("match_ignore") or ""   # an OC code and a past PO's store code, matched as catalog.match does
     exclude = {code_parts(c, ign) for c in exclude_codes}
+    whole = {code_match(c, ign) for c in exclude_codes}   # a space in match_ignore: OC "B C" is a past PO's "BC"
     families = set(brand.get("colour_families") or {})
     seen, by_type = set(), collections.OrderedDict()
     for _, rows in hist.seasons:
@@ -122,7 +124,7 @@ def examples(hist, brand, exclude_codes):
             if r["command"] != "NEW" or code in seen:
                 continue
             seen.add(code)
-            if code_parts(code, ign) in exclude:
+            if code_parts(code, ign) in exclude or code_match(code, ign) in whole:
                 continue
             title, fam, ptype = str(r["title"] or "").strip(), r["option1"].upper(), r["type"]
             if not ptype or fam not in families or not title or _text_problems(title, brand, code, set(), "example"):

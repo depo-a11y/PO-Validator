@@ -190,8 +190,9 @@ def _thug_invoice(tmp_path):
 AI_ADVICE = ["Tick the AI box", "Use AI to read the PDF", "Try the AI option", "Switch the reader to AI",
              "Build again with the AI ticked", "Rebuild using AI", "Ask the AI to read it",
              "Tick Read the OC with AI and build again.", "Have the A.I. read the PDF instead.",
-             "Let Claude read it.", "An LLM could read it.", "Have the model read the file.",
-             "Artificial intelligence could read it."]
+             "An LLM could read it.", "Artificial intelligence could read it.",
+             "Tick 'Read the OC with A I' and rebuild", "Paste the PDF into ChatGPT",
+             "Have the machine-learning reader take it", "Have GPT read it.", "Try the AI-powered reader."]
 AI_NEGATIONS = ["Do not tick Read the OC with AI.", "Reading it with AI will not fix this."]
 
 
@@ -210,6 +211,23 @@ def test_a_refusal_the_ai_reader_cannot_fix_gets_no_word_about_ai(tmp_path, key,
     ok = Fake(answer("This is a commercial invoice, not an order confirmation.",
                      "Upload the order confirmation instead.", "colleague", pages=[1]))
     assert service.explain_draft(pdf, checks, brand, ai_factory=ok.factory)["ok"]
+
+
+NOT_AI = ["Check the model number on page 1 against the cart.", "The Model column holds a code the catalog lacks.",
+          "This is a Claude Montana order, not one for this brand.", "Style AI-204 is not in the catalog.",
+          "The ship-to is 4 Via ai Pini, DUBAI, not the store."]
+UNCAUGHT = ["Tick the box under the brand picker and build again", "Use the other reader", "Try the smart reader"]
+
+
+def test_a_refusal_the_ai_reader_cannot_fix_shows_words_that_only_look_like_ai(tmp_path, key):
+    """Review 2026-11-14-buyer-3: a model number, a Model column, a designer named Claude, a code holding AI and an
+    address holding "ai" are not AI, and are shown. UNCAUGHT is the residual risk, asserted so it stays visible: a
+    paraphrase that names no AI word is shown too, and only the prompt keeps the AI reader out of it."""
+    pdf, brand, (po, review, checks) = _thug_invoice(tmp_path)
+    for text in NOT_AI + UNCAUGHT:
+        fake = Fake(answer("This is a commercial invoice, not an order confirmation.", text, "colleague", pages=[1]))
+        e = service.explain_draft(pdf, checks, brand, ai_factory=fake.factory)
+        assert e["ok"] and e["next_step"] == text, text
 
 
 def test_a_refusal_the_ai_reader_may_fix_keeps_its_ai_advice(tmp_path, key):

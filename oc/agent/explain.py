@@ -33,8 +33,12 @@ PO_COLS = ["Command", "Title", "Type", "Option1 Value", "Option2 Value", "Varian
 # in a check's Detail); a document refused for what it is (otb.NotLayout: an invoice, a proforma, a repeat, a held
 # brand) is not something the AI reader can fix, and following such advice drafts from the refused document. Advice
 # about AI takes too many forms to tell "use it" from "do not", so where no failing check carries
-# read_with_ai_can_fix an explanation that mentions AI at all is refused (review 2026-11-14-buyer-2 F2).
-AI_MENTION = re.compile(r"\bA\.?I\b|artificial intelligence|\bclaude\b|\bllms?\b|\bthe model\b", re.I)
+# read_with_ai_can_fix an explanation that mentions AI at all is refused (review 2026-11-14-buyer-2 F2). The words:
+# AI, A.I. and A I in capitals as a word of their own (AI-powered is one, AI-204 or a code ending -AI is not, nor an
+# address's "ai"), artificial intelligence, ChatGPT, GPT, machine learning, LLM. Not Claude (a designer's name) and not
+# "the model" (a supplier's Model column); a paraphrase without these words is shown (review 2026-11-14-buyer-3).
+AI_MENTION = re.compile(r"(?<![\w-])(?:AI(?!\w|-[A-Z0-9])|A\.I\.?(?!\w)|A I(?![\w-]))"
+                        r"|(?i:artificial intelligence|chat[ -]?gpt|\bgpt\b|machine[ -]learning|\bllms?\b)")
 
 SYSTEM = """You help a buying assistant at Marais, a fashion retailer in Melbourne, understand why the \
 order-confirmation-to-PO tool refused to make a draft PO from a supplier's order confirmation (OC) PDF, or refused \
