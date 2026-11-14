@@ -746,6 +746,27 @@ def test_with_match_ignore_the_agent_matches_codes_as_catalog_match_does(tmp_pat
     assert set(ev) == {"ZQ-0001AB1 K1", "ZQ-0001AB1 K2"} and not ev["ZQ-0001AB1 K2"]["same_style_products"]
 
 
+@pytest.mark.parametrize("ignore", ["", "-", " ", "- "])
+def test_colour_evidence_holds_with_any_match_ignore_and_none_without_a_colour(tmp_path, key, ignore):
+    """Review 2026-11-14-buyer-2 F1: a space in match_ignore once joined every code's body to its colour, so a colour
+    no product carries came back as every product's colour. Codes split on the raw string first. Invented codes."""
+    brand = dict(BRAND, match_ignore=ignore) if ignore else BRAND
+    plain = base._variant("8", "Bare Test Tote", "MEN BAGS TOTE BAGS", "Active", "ZQ0009AB9", "BLACK", "OS",
+                          "ZXFW26809", "300.00", "300.00", "90.00", True)   # a store code with no colour part
+
+    def colour_evidence(colour):
+        d = [dict(doc="SS - 1", collection="MM MALE RTW AVP", gender="MEN", currency="European Euro", label="MM",
+                  lines=[_line(1, "ZQ0002", "AB1", colour, "T-SHIRT", {"M": 1}, 100.0)], total_qty=1, net=100.0)]
+        fake = Fake()
+        build(tmp_path, fake, d=d, brand=brand, cat_extra=[plain])
+        (e,) = [e for req in fake.calls for e in sent_evidence(req)]
+        return e["same_fabric_and_colour_code"], e["same_colour_code_other_fabrics"]
+    assert colour_evidence("K2") == ([], dict(products=0, uses=[]))      # a colour no product carries
+    assert colour_evidence("") == ([], dict(products=0, uses=[]))        # no colour on the code: no colour evidence
+    same, other = colour_evidence("101")                                  # a colour the catalog carries still counts
+    assert same == [] and other["products"] >= 1 and {u["colour_words"] for u in other["uses"]} == {"White"}
+
+
 def test_ai_titles_through_service_draft_complete_and_reconcile_with_match_ignore(tmp_path, key, monkeypatch):
     """One probe of the seam with landing 2's match_ignore through the three entry points. Invented codes only."""
     from oc import complete, reconcile

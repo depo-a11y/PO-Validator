@@ -187,20 +187,45 @@ def _thug_invoice(tmp_path):
     return pdf, tt.BRAND, service.draft(pdf, ts._catalog(tmp_path), tt.BRAND)
 
 
-@pytest.mark.parametrize("advice", ["Tick Read the OC with AI and build again.", "Try the AI reader on this file.",
-                                    "Have the AI read the PDF instead."])
-def test_a_refusal_the_ai_reader_cannot_fix_never_gets_ai_reader_advice(tmp_path, key, advice):
+AI_ADVICE = ["Tick the AI box", "Use AI to read the PDF", "Try the AI option", "Switch the reader to AI",
+             "Build again with the AI ticked", "Rebuild using AI", "Ask the AI to read it",
+             "Tick Read the OC with AI and build again.", "Have the A.I. read the PDF instead.",
+             "Let Claude read it.", "An LLM could read it.", "Have the model read the file.",
+             "Artificial intelligence could read it."]
+AI_NEGATIONS = ["Do not tick Read the OC with AI.", "Reading it with AI will not fix this."]
+
+
+@pytest.mark.parametrize("advice", AI_ADVICE + AI_NEGATIONS)
+def test_a_refusal_the_ai_reader_cannot_fix_gets_no_word_about_ai(tmp_path, key, advice):
+    """Review 2026-11-14-buyer-2 F2: where no failing check carries read_with_ai_can_fix, an explanation that mentions
+    AI at all is refused, advice and warning alike, with a reason that never quotes it."""
     pdf, brand, (po, review, checks) = _thug_invoice(tmp_path)
     (f,) = service.blocking(checks)
     assert po is None and "not an order confirmation" in f["Detail"] and service.AI_HINT not in f["Detail"]
     fake = Fake(answer("This is a commercial invoice, not an order confirmation.", advice, "colleague", pages=[1]))
     e = service.explain_draft(pdf, checks, brand, ai_factory=fake.factory)
     assert [x["read_with_ai_can_fix"] for x in fake.payload["failing_checks"]] == [False]
-    assert e["ok"] is False and e["reason"] == "it suggests reading the OC with AI, which cannot fix this refusal"
+    assert e["ok"] is False and e["reason"] == "it mentions reading with AI, which is not part of fixing this refusal"
     assert advice not in explain.as_text(e)
     ok = Fake(answer("This is a commercial invoice, not an order confirmation.",
                      "Upload the order confirmation instead.", "colleague", pages=[1]))
     assert service.explain_draft(pdf, checks, brand, ai_factory=ok.factory)["ok"]
+
+
+def test_a_refusal_the_ai_reader_may_fix_keeps_its_ai_advice(tmp_path, key):
+    pdf, po, review, checks = case_unknown_layout(tmp_path)
+    for advice in ("Check the brand; if it is right, tick Read the OC with AI.", "Do not tick Read the OC with AI."):
+        fake = Fake(answer("This PDF is not in the layout the reader knows.", advice, pages=[1]))
+        e = service.explain_draft(pdf, checks, _cfg(), ai_factory=fake.factory)
+        assert [x["read_with_ai_can_fix"] for x in fake.payload["failing_checks"]] == [True]
+        assert e["ok"] and e["next_step"] == advice
+
+
+def test_a_finalize_explanation_never_mentions_ai():
+    valid = dict(pages=set(), rows={5}, checks={"A"})
+    with pytest.raises(ValueError, match="^it mentions reading with AI, which is not part of fixing this refusal$"):
+        explain.check_answer(answer("Row 5 has no price.", "Ask the AI to fill it.", rows=[5]), valid)
+    assert explain.check_answer(answer("Row 5 has no price.", "Fill the price on row 5.", rows=[5]), valid)
 
 
 def test_the_explanation_prompt_ties_ai_reader_advice_to_the_tools_own_hint():

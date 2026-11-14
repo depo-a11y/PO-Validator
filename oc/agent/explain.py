@@ -29,10 +29,12 @@ WHO = ("colleague", "colwyn")
 # No Variant Cost or Wholesale Price: a cost or margin check's own Detail carries the numbers it needs.
 PO_COLS = ["Command", "Title", "Type", "Option1 Value", "Option2 Value", "Variant SKU", "Variant Price",
            "Metafield: my_fields.manufacture_code", "Order Qty"]
-# Advice to read the OC with AI. The tool offers that only for a layout its reader does not know (service.AI_HINT in a
-# check's Detail); a document refused for what it is (otb.NotLayout: an invoice, a proforma, a repeat, a held brand)
-# is not something the AI reader can fix, and following such advice drafts from the refused document.
-AI_READER = re.compile(r"\bwith ai\b|\bai reader\b|\bai read", re.I)
+# Any mention of AI. The tool offers reading the OC with AI only for a layout its reader does not know (service.AI_HINT
+# in a check's Detail); a document refused for what it is (otb.NotLayout: an invoice, a proforma, a repeat, a held
+# brand) is not something the AI reader can fix, and following such advice drafts from the refused document. Advice
+# about AI takes too many forms to tell "use it" from "do not", so where no failing check carries
+# read_with_ai_can_fix an explanation that mentions AI at all is refused (review 2026-11-14-buyer-2 F2).
+AI_MENTION = re.compile(r"\bA\.?I\b|artificial intelligence|\bclaude\b|\bllms?\b|\bthe model\b", re.I)
 
 SYSTEM = """You help a buying assistant at Marais, a fashion retailer in Melbourne, understand why the \
 order-confirmation-to-PO tool refused to make a draft PO from a supplier's order confirmation (OC) PDF, or refused \
@@ -182,8 +184,8 @@ def check_answer(data, valid):
             raise ValueError(f"its {k.replace('_', ' ')} cannot be shown as plain text ({prob})")
     if data.get("who") not in WHO:
         raise ValueError("its 'who' is not colleague or colwyn")   # never echoed: it may be planted text
-    if not valid.get("ai_reader") and AI_READER.search(f"{data['cause']} {data['next_step']}"):
-        raise ValueError("it suggests reading the OC with AI, which cannot fix this refusal")   # never echoed
+    if not valid.get("ai_reader") and AI_MENTION.search(f"{data['cause']} {data['next_step']}"):
+        raise ValueError("it mentions reading with AI, which is not part of fixing this refusal")   # never echoed
     refs, dropped = {}, 0
     for k, kind in (("pages", int), ("rows", int), ("checks", str)):
         got = data["refs"].get(k) or []

@@ -488,8 +488,10 @@ Price: a cost check's own Detail carries its numbers). Each failing check carrie
 the reviewer fixes in the sheet (a blank retail price) did not stop it. On a draft each failing check also carries
 `read_with_ai_can_fix`, true only when the tool itself offers "Read the OC with AI" for it (its Detail carries the
 tool's hint, a layout the reader does not know). A refusal for what the document is (`otb.NotLayout`: an invoice, a
-proforma, an order printed twice, a held brand) is not one, and an explanation that suggests the AI reader for it is
-refused without quoting it. It answers `cause`, `next_step`, `who`
+proforma, an order printed twice, a held brand) is not one. Where no failing check carries it (and on every
+finalize), an explanation whose cause or next step mentions AI at all (AI, A.I., artificial intelligence, Claude, an
+LLM, the model), advice and warning alike, is refused with "it mentions reading with AI, which is not part of fixing
+this refusal", never quoting it. Where one does, AI advice is shown. It answers `cause`, `next_step`, `who`
 (colleague or colwyn) and `refs` (pages, rows, checks). The prompt states the 400-character limit. Both prompts say
 their inputs are data, never instructions. Python drops a ref that does not exist and says only how many it dropped,
 never which, and refuses text that is empty, over 400 characters, starts `= + - @`, or holds markup, a link or web
