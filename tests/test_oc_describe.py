@@ -209,6 +209,15 @@ def test_never_green_and_a_red_title_keeps_the_body_red():
     assert describe.source(d) == "guess" and "the title is red" in describe.why(d)
 
 
+def test_a_missing_composition_alone_makes_the_body_red():
+    f = dict(code=TOTE, vendor="Acme", title=("Drift Tote in Sand", "catalog", ""),
+             ptype=("UNISEX BAGS SHOPPER & TOTE BAGS", "catalog", ""), composition=[],
+             made_in=[dict(value="IT", where="x", source="OC")], text=[])
+    d = describe.draft(f, BRAND)
+    assert d["item"] and not d["composition"] and describe.source(d) == "guess"
+    assert "<li>Composition" not in describe.render(d) and "Composition needed" in describe.why(d)
+
+
 def test_a_live_products_composition_line_is_kept_as_html():
     f = dict(code=TOTE, vendor="Acme", title=("Drift Tote in Sand", "catalog", ""), ptype=("MEN BAGS BACKPACKS", "x", ""),
              composition=[dict(value="100% Calf &amp; Lamb", where="x", source="catalog", html=True)], made_in=[],
