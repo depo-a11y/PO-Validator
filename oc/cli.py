@@ -135,7 +135,17 @@ def cmd_draft(args):
                 return titles.run(pending, R)
         else:
             print(f"AI title drafting is off: {NO_KEY}; the tool's own titles, colour words and colour families stand.")
+    describer = None
+    if args.ai_describe:
+        if service.agent_ready():
+            from .agent import describe
+
+            def describer(pending, R):
+                return describe.run(pending, R)
+        else:
+            print(f"AI description drafting is off: {NO_KEY}; the tool's own descriptions stand.")
     rows, review, checks, fills = draft.build(docs, b, cat, hist, tags, cart=cart, titler=titler,
+                                              describer=describer,
                                               prior_prices=prior["typed"] if prior else None)
     extra = None
     if prior:
@@ -261,6 +271,10 @@ def main(argv=None):
         sp.add_argument("--reader", choices=["ai"], help="read the OC with the AI reader whatever the brand's adapter")
     d.add_argument("--ai-titles", action="store_true",
                    help="AI drafts NEW titles, colour words and colour family (amber, check every one); "
+                        "needs ANTHROPIC_API_KEY")
+    d.add_argument("--ai-describe", action="store_true",
+                   help="AI adds prose (adjective, second sentence, bullets) to the NEW descriptions the tool drafts, "
+                        "each claim quoted from the product's own order-time fields (amber, check every one); "
                         "needs ANTHROPIC_API_KEY")
     for sp in (d, f):
         sp.add_argument("--ai-explain", action="store_true",

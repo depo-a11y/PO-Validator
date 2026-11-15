@@ -33,7 +33,11 @@ it red, and red when the Composition line or the intro is missing. The Why names
 the house shape. AI prose (oc/agent/describe.py) may fill the adjective, second sentence and bullets the tool could
 not ground; nothing else. An AI second sentence whose subject is another kind of product than the item noun (a
 sweater where the Type says sweatshirt) keeps the body red, and so does a title naming another kind than the item
-noun (a cap the Type calls a T-shirt): the Type and the title are checked, never changed. A brand config that sets its own body_html keeps that template (oc/brand.py).
+noun (a cap the Type calls a T-shirt): the Type and the title are checked, never changed.
+
+The description is not the PO's Body HTML, which keeps the brand's template (Colwyn, 2026-11-16, option B: "Separate
+import"). It is drafted beside it, one Review row per product (review_rows), which the workbook writes as its
+Descriptions sheet, and finalize turns into the separate description import (oc/descimport.py).
 """
 import html
 import re
@@ -678,13 +682,21 @@ def structure(d):
                 shading=COLOUR.get(source(d), RED), source=source(d))
 
 
+# ---- where the description goes (Colwyn, 2026-11-16, option B: "Separate import") -----------------------
+DESC_COLUMN = "Description"   # its Review rows' Column; the workbook writes them as the Descriptions sheet
+
+
+def review_rows(pending):
+    """One Review row per NEW product (each listing of a code is its own product), pointing at its first PO row."""
+    from .poxlsx import review_row
+    return [review_row(n["row0"] + 2, n["code"], None, DESC_COLUMN, *n["body"]) for n in pending if n.get("body")]
+
+
 # ---- the step draft.build runs ------------------------------------------------------------------
 def run(pending, R, describer=None):
-    """Draft every pending NEW product's Body HTML in place (n['describe'] the parts, n['body'] the cell), then let
-    `describer(pending, R)` (oc/agent/describe.run) add AI prose. -> the check rows the AI job adds (none with no
-    describer or no key). A brand config with its own body_html keeps its template: nothing is drafted."""
-    if R.b.get("body_html"):
-        return []
+    """Draft every pending NEW product's house description in place (n['describe'] the parts, n['body'] the cell),
+    then let `describer(pending, R)` (oc/agent/describe.run) add AI prose. -> the check rows the AI job adds (none
+    with no describer or no key). The PO's Body HTML keeps the brand's template whatever this drafts (option B)."""
     for n in pending:
         n["describe"] = draft(facts(n, R), R.b)
         n["body"] = cell(n["describe"])

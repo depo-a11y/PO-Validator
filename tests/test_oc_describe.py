@@ -11,7 +11,7 @@ import pytest
 
 import test_oc_agent as ag
 import test_oc_tool as base
-from oc import brand as brandm, catalog as catm, cli, describe, draft as draftm, history as histm, service
+from oc import brand as brandm, catalog as catm, cli, describe, draft as draftm, history as histm, poxlsx, service
 from oc.adapters import ai
 from oc.agent import common, describe as job
 from oc.resolve import AI_DRAFT, COLOUR, TOOL_DRAFT
@@ -22,8 +22,8 @@ TOTE = "ZQ0003EF3P0003 T001"      # no composition anywhere (red), no made in
 SHIRT = "ZQ0004GH4P0004 202"      # composition '-' (red), a season word in its colour
 CODES = [JACKET, LOAFER, TOTE, SHIRT]
 
-BRAND = {k: v for k, v in base.BRAND.items() if k != "body_html"}
-BRAND.update(vendor="Acme Studio", oc_label=["ACME"], body_html=None,
+BRAND = dict(base.BRAND)   # the template body_html stays: the description is its own import (option B)
+BRAND.update(vendor="Acme Studio", oc_label=["ACME"],
              product_class_types={"ORBIT FIELD JACKET": "CLOTHING JACKETS LIGHTWEIGHT", "LOAFER": "SHOES LOAFERS",
                                   "TOTE": "BAGS SHOPPER & TOTE BAGS",
                                   "SHIRT": ["CLOTHING SHIRTS LONG SLEEVE", "CLOTHING TOPS SHIRTS"]},
@@ -80,7 +80,7 @@ def build(tmp_path, fake=None, brand=BRAND, d=None, with_cart=True):
 
 
 def body(review, code):
-    return ag.one(review, code, "Body HTML")
+    return ag.one(review, code, describe.DESC_COLUMN)
 
 
 # ---- the fake AI ------------------------------------------------------------------------------------------
@@ -321,6 +321,54 @@ def test_a_claim_must_rest_on_a_quote_from_its_own_field():
 
 
 # ---- the shape --------------------------------------------------------------------------------------------
+def test_the_house_shape_in_order(tmp_path, no_key):
+    rows, review, checks, fills = build(tmp_path)
+    b = body(review, JACKET)
+    assert b["Value"] == (
+        "<p>ACME STUDIO's Orbit Field Jacket in Slate is a waxed lightweight jacket.</p>\n"
+        "<ul>\n"
+        "<li>Composition: Shell: 100% Cotton &amp; Linen - Lining: 100% Cupro</li>\n"
+        "  <li>Slate colourway</li>\n"
+        "  <li>Cupro lining</li>\n"
+        "  <li>Waxed finish</li>\n"
+        "  <li>Zip fastening</li>\n"
+        "<li>Made in Italy</li>\n"
+        "</ul><br><p>SKU: ZQ0001AB1P0001 101</p>")
+    assert b["Source"] == TOOL_DRAFT and b["Colour"] == "amber"
+    assert "gaps against the house shape: no second sentence" in b["Why"]
+
+
+def test_composition_is_verbatim_and_the_other_source_is_named(tmp_path, no_key):
+    b = body(build(tmp_path)[1], JACKET)
+    assert "Composition: Shell: 100% Cotton &amp; Linen - Lining: 100% Cupro</li>" in b["Value"]   # spaces only
+    assert "composition from the OC line (AC - 1 line 1)" in b["Why"]
+    assert "says 'Shell: 100% Cotton', used the OC line (AC - 1 line 1) first" in b["Why"]
+
+
+@pytest.mark.parametrize("value,why", [
+    ("-", "placeholder"), ("", "no order-time source"), ("U:LE L:TE S:RU", "codes, not words"),
+    ("100% CO", "codes, not words"), ("63% WOOL/16% NYLON/16% COTT", "adds up to 95%"),
+    ("52% COTTON/24% NYLON/20% VISCOSE/4", "adds up to 96%"), ("1_x001b_0_x001b_0% COTTON", "garbled"),
+    ("100% <b>Cotton</b>", "markup"),
+])
+def test_a_missing_or_unusable_composition_is_red_and_never_written(tmp_path, no_key, value, why):
+    d = docs()
+    d[0]["lines"][2]["composition"] = value
+    b = body(build(tmp_path, d=d)[1], TOTE)
+    assert "Composition" not in b["Value"].split("Made in")[0].replace("Composition needed", "")
+    assert "<li>Composition" not in b["Value"]
+    assert b["Source"] == "guess" and b["Colour"] == "red" and "Composition needed" in b["Why"] and why in b["Why"]
+
+
+def test_a_joor_export_fabrication_is_the_composition_where_materials_is_blank(tmp_path, no_key):
+    d = docs()
+    d[0]["lines"][2]["fabrication"] = "BOILED WOOL GABARDINE"
+    d[0]["lines"][0]["fabrication"] = "WAXED COTTON CANVAS"
+    rev = build(tmp_path, d=d)[1]
+    tote, jacket = body(rev, TOTE), body(rev, JACKET)
+    assert "<li>Composition: Boiled Wool Gabardine</li>" in tote["Value"] and "fabrication" in tote["Why"]
+    assert "Composition: Shell: 100% Cotton &amp; Linen" in jacket["Value"] and "Waxed Cotton" not in jacket["Value"]
+    assert "WAXED COTTON CANVAS" not in jacket["Why"]   # a fallback that was not needed is not a disagreement
 
 
 def test_the_sheet_reader_reads_a_fabrication_column(tmp_path):
@@ -332,6 +380,47 @@ def test_the_sheet_reader_reads_a_fabrication_column(tmp_path):
         csv.writer(fh).writerows(rows)
     docs_ = sheet.parse_checked(str(path), ts.cfg(columns=dict(ts.COLUMNS, fabrication="Fabrication")))
     assert {l["fabrication"] for d in docs_ for l in d["lines"]} == {"Loopback fleece"}
+
+
+def test_no_made_in_placeholder_and_an_unknown_place_is_named(tmp_path, no_key):
+    rev = build(tmp_path)[1]
+    for code in (LOAFER, TOTE):
+        b = body(rev, code)
+        assert "Made in" not in b["Value"] and "no Made in (no known country of origin)" in b["Why"]
+    assert "prints 'Atlantis', not a country the tool knows" in body(rev, LOAFER)["Why"]
+
+
+def test_part_bullets_from_a_labelled_composition_even_when_the_line_is_coded(tmp_path, no_key):
+    b = body(build(tmp_path)[1], LOAFER)
+    assert "  <li>Leather upper</li>\n  <li>Textile lining</li>\n  <li>Rubber sole</li>" in b["Value"]
+    assert "is a pair of loafers." in b["Value"] and b["Colour"] == "red"
+
+
+def test_the_title_is_verbatim_with_a_gender_word_and_no_other_gender_or_season_word(tmp_path, no_key):
+    d = docs()
+    d[0]["lines"].append(dict(d[0]["lines"][3], line_no=5, gender="WOMEN", sizes={"S": 1}, qty=1, line_value=100.0))
+    d[0]["lines"][3]["gender"] = "MEN"
+    d[0]["total_qty"], d[0]["net"] = 5, 500.0
+    rev = build(tmp_path, d=d)[1]
+    vals = {x["Value"] for x in rev if x["Code"] == SHIRT and x["Column"] == describe.DESC_COLUMN}
+    titles = {x["Value"] for x in rev if x["Code"] == SHIRT and x["Column"] == "Title"}
+    assert any(t.startswith("Womens ") for t in titles)
+    for t in titles:
+        assert any(re.search(rf"ACME STUDIO's {re.escape(t)} is a (?:long-sleeve )?shirt\.", v) for v in vals)
+    for v in vals:
+        intro = v.split("</p>")[0]
+        rest = v[len(intro):]
+        assert not describe.banned(rest) and "Summer Blue colourway" not in v
+    assert any("colour bullet (season word)" in x["Why"] for x in rev if x["Code"] == SHIRT
+               and x["Column"] == describe.DESC_COLUMN)
+
+
+def test_an_adjective_and_features_only_from_this_products_printed_words(tmp_path, no_key):
+    d = docs()
+    d[0]["lines"][2]["description"] = "DRIFT TOTE"
+    b = body(build(tmp_path, d=d)[1], TOTE)
+    assert "is a tote bag.</p>" in b["Value"] and "no adjective" in b["Why"]
+    assert "<li>" not in b["Value"]   # its title is red (a raw colour code), so not even a colour bullet
 
 
 def test_every_type_in_expected_tags_has_an_item_noun():
@@ -374,7 +463,53 @@ def test_a_live_products_composition_line_is_kept_as_html():
     assert "<li>Composition: 100% Calf &amp; Lamb</li>" in describe.render(describe.draft(f, BRAND))
 
 
+def _no_describe(monkeypatch):
+    """The draft as 7ba21f0 makes it: no description step."""
+    monkeypatch.setattr(describe, "run", lambda pending, R, describer=None: [])
+    monkeypatch.setattr(describe, "review_rows", lambda pending: [])
+
+
+def test_the_po_keeps_the_template_and_the_description_is_its_own_review_rows(tmp_path, no_key, monkeypatch):
+    rows, review, checks, fills = build(tmp_path)
+    _no_describe(monkeypatch)
+    rows0, review0, checks0, fills0 = build(tmp_path)
+    assert rows == rows0 and checks == checks0 and fills == fills0   # Body HTML: the template, cell for cell
+    assert all(r["Body HTML"].startswith("<p>Composition: ") for r in rows if r["Command"] == "NEW")
+    assert review[:len(review0)] == review0   # every PO cell's Review row, where it was
+    extra = review[len(review0):]
+    assert [x["Column"] for x in extra] == [describe.DESC_COLUMN] * 4 and {x["Code"] for x in extra} == set(CODES)
+    for x in extra:
+        po = rows[x["Row"] - 2]
+        assert po[poxlsx.CODE] == x["Code"] and po is next(r for r in rows if r[poxlsx.CODE] == x["Code"])
+        assert x["Value"].startswith("<p>ACME STUDIO's ") and x["Colour"] in ("amber", "red")
+
+
+def test_the_workbook_writes_the_descriptions_sheet_last_keyed_and_shaded(tmp_path, no_key):
+    import openpyxl
+    rows, review, checks, fills = build(tmp_path)
+    path = tmp_path / "draft.xlsx"
+    poxlsx.write_po(str(path), poxlsx.PO_HEADER, rows, review, checks, fills)
+    wb = openpyxl.load_workbook(path)
+    assert wb.sheetnames == ["Sheet1", "Review", "Checks", poxlsx.DESCRIPTIONS]
+    ws = wb[poxlsx.DESCRIPTIONS]
+    assert [c.value for c in ws[1]] == poxlsx.DESCRIPTION_COLS
+    got = {ws.cell(r, 2).value: [ws.cell(r, c).value for c in range(1, 7)] for r in range(2, ws.max_row + 1)}
+    assert set(got) == set(CODES)
+    first = {r[poxlsx.CODE]: r for r in reversed(rows)}
+    for code, (sku, _, title, desc, src, why) in got.items():
+        assert sku == first[code]["Variant SKU"] and title == first[code]["Title"]
+        assert desc == body(review, code)["Value"] and src == body(review, code)["Source"] and why
+    fill = {ws.cell(r, 2).value: ws.cell(r, 4).fill.fgColor.rgb for r in range(2, ws.max_row + 1)}
+    assert fill[JACKET].endswith(poxlsx.FILLS["amber"].fgColor.rgb[-6:]) and fill[TOTE].endswith(
+        poxlsx.FILLS["red"].fgColor.rgb[-6:])
+    assert poxlsx.read_descriptions(str(path))[0]["Description"] == got[next(iter(got))][3]
+
+
 # ---- the AI job ---------------------------------------------------------------------------------------------
+def test_no_key_sends_nothing_and_the_draft_is_the_tools_own(tmp_path, no_key):
+    fake = Fake()
+    assert build(tmp_path, fake) == build(tmp_path)
+    assert fake.keys == [] and fake.calls == []
 
 
 def test_a_held_config_reads_and_sends_nothing(tmp_path, key):
@@ -386,6 +521,101 @@ def test_a_held_config_reads_and_sends_nothing(tmp_path, key):
     assert job.plan([describe.draft(dict(code=TOTE, vendor="A", title=("T in S", "catalog", ""),
                                          ptype=("MEN BAGS BACKPACKS", "x", ""), composition=[], made_in=[], text=[]),
                                     held)], held) == ([], {})
+
+
+def test_the_ai_fills_only_the_missing_parts_and_python_inserts_the_rest(tmp_path, key):
+    fake = Fake()
+    rows, review, checks, _ = build(tmp_path, fake)
+    b = body(review, JACKET)
+    assert b["Value"].startswith("<p>ACME STUDIO's Orbit Field Jacket in Slate is a waxed lightweight jacket. "
+                                 "This jacket has a zip front.</p>")
+    assert "  <li>Zip front closure</li>\n<li>Made in Italy</li>" in b["Value"]
+    assert b["Source"] == AI_DRAFT and b["Colour"] == "amber"
+    assert "second sentence by AI from 'ZIP FRONT' in the description" in b["Why"]
+    assert "adjective by tool" in b["Why"]   # the tool's own adjective stood: the AI's was not asked for
+    (row,) = [c for c in checks if c["Check"] == job.CHECK]
+    assert row["Result"] == "INFO" and "US$" in row["Detail"]
+    assert "adjective not asked for" not in row["Detail"]
+
+
+def test_each_listing_of_one_code_keeps_its_own_title_and_takes_the_ai_prose(tmp_path, key):
+    d = docs()
+    d[0]["lines"][3]["description"] = "OXFORD SHIRT - BUTTON DOWN COLLAR"
+    d[0]["lines"].append(dict(d[0]["lines"][3], line_no=5, gender="WOMEN", sizes={"S": 1}, qty=1, line_value=100.0))
+    d[0]["lines"][3]["gender"] = "MEN"
+    d[0]["total_qty"], d[0]["net"] = 5, 500.0
+    collar = claim("Button down collar detail", "description", "BUTTON DOWN COLLAR")
+    fake = Fake({SHIRT: dict(adjective=NONE, sentence_2=NONE, bullets=[collar])})
+    rows, review, checks, _ = build(tmp_path, fake, d=d)
+    descs = [x for x in review if x["Code"] == SHIRT and x["Column"] == describe.DESC_COLUMN]
+    titles = {rows[x["Row"] - 2]["Title"] for x in descs}
+    assert len(descs) == 2 and len(titles) == 2 and any(t.startswith("Womens ") for t in titles)
+    for x in descs:
+        title = rows[x["Row"] - 2]["Title"]
+        assert f"ACME STUDIO's {title} is a" in x["Value"] and "<li>Button down collar detail</li>" in x["Value"]
+    (row,) = [c for c in checks if c["Check"] == job.CHECK]
+    assert "2 bullets" in row["Detail"]   # the jacket's and the shirt's: one code on two listings counts once
+
+
+def test_a_red_body_stays_red_with_ai_prose(tmp_path, key):
+    fake = Fake({TOTE: dict(adjective=claim("cotton", "product_class", "TOTE"), sentence_2=NONE, bullets=[])})
+    b = body(build(tmp_path, fake)[1], TOTE)
+    assert b["Colour"] == "red"
+
+
+@pytest.mark.parametrize("bad,cat", [
+    (claim("Zip front for women", "description", "ZIP FRONT"), "gender word"),
+    (claim("Zip front for SS26", "description", "ZIP FRONT"), "season word"),
+    (claim("Zip front by Acme", "description", "ZIP FRONT"), "brand word"),
+    (claim("Zip front made with AI", "description", "ZIP FRONT"), "AI word"),
+    (claim("Zip front <b>closure</b>", "description", "ZIP FRONT"), "characters"),
+    (claim("Zip front closure.", "description", "ZIP FRONT"), "bullet shape"),
+    (claim("Made in Portugal", "description", "ZIP FRONT"), "labelled line"),
+    (claim("Composition: 100% Cotton", "composition", "100% Cotton"), "labelled line"),
+    (claim("Zip front closure", "description", "ZIP BACK"), "quote not in its field"),
+    (claim("Zip front closure", "fabric_name", "ZIP FRONT"), "field"),
+    (claim("Zip front in cashmere", "description", "ZIP FRONT"), "words not in the quote"),
+    (claim("Two way zip front", "description", "ZIP FRONT"), "words not in the quote"),
+    (claim("Zip " * 10 + "front", "description", "ZIP FRONT"), "word count"),
+    (claim("Zip front ZQ0001AB1", "description", "ZIP FRONT"), "code-like token"),
+])
+def test_a_bullet_that_breaks_a_rule_is_dropped_and_never_shown(tmp_path, key, bad, cat):
+    fake = Fake({JACKET: dict(adjective=NONE, sentence_2=NONE, bullets=[bad])})
+    rows, review, checks, _ = build(tmp_path, fake)
+    b = body(review, JACKET)
+    assert bad["text"] not in b["Value"] and bad["text"] not in b["Why"]
+    assert f"an AI bullet ({cat}" in b["Why"] or cat in b["Why"]
+    (row,) = [c for c in checks if c["Check"] == job.CHECK]
+    assert f"bullet: {cat}" in row["Detail"] and bad["text"] not in row["Detail"]
+
+
+def test_an_ai_bullet_given_twice_is_used_once(tmp_path, key):
+    d = docs()
+    d[0]["lines"][2]["description"] = "DRIFT TOTE - TWIN HANDLES"
+    twice = claim("Twin handles detail", "description", "TWIN HANDLES")
+    b = body(build(tmp_path, Fake({TOTE: dict(adjective=NONE, sentence_2=NONE, bullets=[twice, twice])}), d=d)[1], TOTE)
+    assert b["Value"].count("Twin handles detail") == 1 and "an AI bullet (repeats a bullet)" in b["Why"]
+
+
+def test_a_live_same_style_and_fabric_composition_is_kept_as_html(tmp_path, no_key):
+    p = write_catalog(tmp_path)
+    r = base._variant("8", "Drift Tote in Black", "UNISEX BAGS SHOPPER & TOTE BAGS", "Active", "ZQ0003EF3P0003 900",
+                      "BLACK", "OS", "ZXFW26800", "800.00", "800.00", "300.00", True)
+    r.update(Vendor="Acme Studio", **{"Body HTML": "<ul><li>Composition: 100% Calf &amp; Lamb</li></ul>"})
+    with open(p, "a", encoding="utf-8", newline="") as fh:
+        csv.DictWriter(fh, fieldnames=base.CAT_COLS).writerow(r)
+    rows, review, *_ = draftm.build(docs(), BRAND, catm.load(p), histm.History([("F/W 26", [])]), base._tags())
+    b = body(review, TOTE)
+    assert "<li>Composition: 100% Calf &amp; Lamb</li>" in b["Value"] and "same style+fabric" in b["Why"]
+
+
+def test_grounding_is_per_product_never_the_whole_request(tmp_path, key):
+    other = claim("Square toe shape", "description", "SQUARE TOE")   # a fact of no product here
+    d = docs()
+    d[0]["lines"][1]["description"] = "MESA LOAFER - SQUARE TOE"
+    fake = Fake({JACKET: dict(adjective=NONE, sentence_2=NONE, bullets=[other])})
+    b = body(build(tmp_path, fake, d=d)[1], JACKET)
+    assert "Square toe" not in b["Value"] and "quote not in its field" in b["Why"]
 
 
 def test_run_gives_each_listing_of_a_code_the_prose_under_its_own_title(key):
@@ -421,6 +651,27 @@ def test_the_invented_examples_pass_every_check_and_name_no_brand():
         assert set(ev) == {k for k, _ in job.SENT}
 
 
+def test_the_caption_names_exactly_what_the_request_sends(tmp_path, key):
+    fake = Fake()
+    build(tmp_path, fake)
+    req = fake.calls[0]
+    evs = sent(req)
+    assert {p["code"] for p in evs} == set(CODES)
+    for ev in evs:
+        assert list(ev) == [k for k, _ in job.SENT]
+        assert set(ev["fields"]) <= set(job.FIELDS)
+    caption = job.sends()
+    assert all(words in caption for _, words in job.SENT)
+    assert "No prices, costs, quantities, gender or season" in caption
+    text = json.dumps(req)
+    for leak in ("100.0", "ACME FW", "WOMEN", '"MEN"', "gender", "collection", "price", "qty"):
+        assert leak not in text.split('"messages"')[1], leak
+    assert req["model"] == "claude-opus-5-5" and req["output_config"]["effort"] == "medium"
+    assert req["betas"] == [common.FALLBACK_BETA] and req["fallbacks"] == "default"
+    assert req["system"][1]["cache_control"] == {"type": "ephemeral"} and req["system"][1]["text"] == job.FEW_SHOT
+    assert all(c["system"] == req["system"] for c in fake.calls)
+
+
 def test_every_limit_the_checks_enforce_is_stated_in_the_prompt():
     s = job.SYSTEM
     for cap in (job.ADJ_CAP, job.SENTENCE_CAP, job.BULLET_CAP, job.QUOTE_CAP):
@@ -432,8 +683,38 @@ def test_every_limit_the_checks_enforce_is_stated_in_the_prompt():
         assert w in s
 
 
+def test_a_failed_request_keeps_the_tools_descriptions(tmp_path, key):
+    import anthropic
+    err = anthropic.APIConnectionError(request=types.SimpleNamespace(method="POST", url="https://x"))
+    fake = Fake(error=err)
+    rows, review, checks, _ = build(tmp_path, fake)
+    (row,) = [c for c in checks if c["Check"] == job.CHECK]
+    assert row["Result"] == "WARN" and ag.SENTINEL not in row["Detail"]
+    assert body(review, JACKET)["Source"] == TOOL_DRAFT
+
+
+def test_a_refusal_or_bad_json_keeps_the_tools_descriptions(tmp_path, key):
+    for msg in (ag.message(text="{}", stop="refusal", category="cyber"), ag.message(text="not json")):
+        fake = Fake(reply=lambda kw, n, m=msg: m)
+        rows, review, checks, _ = build(tmp_path, fake)
+        assert [c["Result"] for c in checks if c["Check"] == job.CHECK] == ["WARN"]
+        assert body(review, JACKET)["Source"] == TOOL_DRAFT
+
+
 def _oc(monkeypatch):
     monkeypatch.setattr(service, "adapter", lambda cfg: types.SimpleNamespace(parse_checked=lambda p: docs()))
+
+
+def test_the_service_drafts_prose_only_when_asked(tmp_path, key, monkeypatch):
+    _oc(monkeypatch)
+    fake = Fake()
+    po, review, checks = service.draft("oc.pdf", write_catalog(tmp_path), BRAND, ai_factory=fake.factory)
+    assert fake.calls == [] and not service.describe_ran(checks)
+    assert set(review[review["Column"] == describe.DESC_COLUMN]["Source"]) <= {TOOL_DRAFT, "guess"}
+    po, review, checks = service.draft("oc.pdf", write_catalog(tmp_path), BRAND, ai_factory=fake.factory,
+                                       ai_describe=True)
+    assert len(fake.calls) == 1 and service.describe_ran(checks)
+    assert any("by AI from" in w for w in review[review["Column"] == describe.DESC_COLUMN]["Why"])
 
 
 def _cfg(tmp_path):
@@ -441,6 +722,27 @@ def _cfg(tmp_path):
     cfgp = tmp_path / "b.yaml"
     cfgp.write_text(yaml.safe_dump({k: v for k, v in BRAND.items() if not k.startswith("_")}))
     return str(cfgp)
+
+
+def test_the_cli_flag_says_when_there_is_no_key(tmp_path, no_key, monkeypatch, capsys):
+    _oc(monkeypatch)
+    out, plain = tmp_path / "d.xlsx", tmp_path / "p.xlsx"
+    args = ["draft", "--oc", "oc.pdf", "--catalog", write_catalog(tmp_path), "--brand", "x", "--brand-config",
+            _cfg(tmp_path)]
+    cli.main(args + ["--out", str(out), "--ai-describe"])
+    text = capsys.readouterr().out
+    assert "AI description drafting is off: no ANTHROPIC_API_KEY" in text and job.CHECK not in text
+    cli.main(args + ["--out", str(plain)])
+    assert ag.workbook(out.read_bytes()) == ag.workbook(plain.read_bytes())
+
+
+def test_the_cli_flag_drafts_with_a_key(tmp_path, key, monkeypatch, capsys):
+    _oc(monkeypatch)
+    fake = Fake()
+    monkeypatch.setattr(ai, "make_client", fake.factory)
+    cli.main(["draft", "--oc", "oc.pdf", "--catalog", write_catalog(tmp_path), "--brand", "x", "--brand-config",
+              _cfg(tmp_path), "--out", str(tmp_path / "d.xlsx"), "--ai-describe"])
+    assert len(fake.calls) == 1 and f"[INFO] {job.CHECK}" in capsys.readouterr().out
 
 
 def test_the_sheet_reader_reads_a_composition_column_whitespace_collapsed(tmp_path):
@@ -457,5 +759,18 @@ def test_the_sheet_reader_reads_a_composition_column_whitespace_collapsed(tmp_pa
 
 
 # ---- the page ------------------------------------------------------------------------------------------------
+def test_the_page_offers_the_description_box_off_by_default_saying_what_it_sends(tmp_path, monkeypatch, key):
+    import test_oc_page as tp
+    at = tp._page_with_brand(tmp_path, monkeypatch, "adapter: otb\noc_label: MM\noc_supplier: X Ltd\n")
+    (box,) = [c for c in at.checkbox if c.label.startswith("Write the NEW descriptions' prose with AI")]
+    assert box.value is False and "never writes the Composition line" in box.help
+    assert [c.value for c in at.caption if c.value.startswith("Ticking the description box")] == [job.sends()]
 
 
+def test_the_page_has_no_description_box_without_a_key(tmp_path, monkeypatch):
+    import test_oc_page as tp
+    monkeypatch.delenv(ai.KEY_NAME, raising=False)
+    monkeypatch.setattr(ai, "api_key", lambda: None)
+    at = tp._page_with_brand(tmp_path, monkeypatch, "adapter: otb\noc_label: MM\noc_supplier: X Ltd\n")
+    assert not [c for c in at.checkbox if c.label.startswith("Write the NEW descriptions")]
+    assert not [c for c in at.caption if c.value.startswith("Ticking the description box")]

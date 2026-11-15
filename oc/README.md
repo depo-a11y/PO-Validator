@@ -2,7 +2,7 @@
 
 Pure Python, files in and files out. Nothing here talks to Shopify, Matrixify or Drive.
 
-    python -m oc draft    --oc OC.pdf --catalog export.csv --brand <brand> --out PO-draft.xlsx [--ai-titles] [--ai-explain]
+    python -m oc draft    --oc OC.pdf --catalog export.csv --brand <brand> --out PO-draft.xlsx [--ai-titles] [--ai-describe] [--ai-explain]
     python -m oc complete --po hand_PO.xlsx --oc OC.pdf --catalog export.csv --brand <brand> --out PO.xlsx [--set-price "CODE=EUR"]
     python -m oc finalize --po PO.xlsx --catalog export.csv --brand <brand> --out-prefix <name>- [--ai-explain]
     python -m oc reconcile --draft PO-draft.xlsx --po hand_PO.xlsx --oc OC.pdf --brand <brand> --out accuracy.md
@@ -41,7 +41,9 @@ now off by Colwyn's rule of 2026-11-12.
 - `complete` fills the blanks of a PO someone started by hand and never changes a typed cell, except a
   wholesale price named with `--set-price`, which must equal the OC's.
 - `finalize` turns a reviewed PO into `PU-new.xlsx` (through `validator_core.run_gate`, the same gate as
-  `app.py`), `PU-merge.xlsx`, `PU-merge-new-sizes.xlsx`, `PU-merge-ROLLBACK.xlsx` and `Delivery.xlsx`. PU-merge
+  `app.py`), `PU-merge.xlsx`, `PU-merge-new-sizes.xlsx`, `PU-merge-ROLLBACK.xlsx` and `Delivery.xlsx`, and the
+  NEW products' descriptions as a separate `PU-description.xlsx` to import after the products are created (see "The
+  description import"). PU-merge
   changes three things on each re-bought product: the season, the season tag, and `Variant Cost` on every live
   size (the OC's wholesale x the brand's cost multiplier, sizes not on the OC included), keyed on ID and Variant
   ID with Command and Variant Command UPDATE. It does not rewrite the `Variant.cost_price` metafield on existing
@@ -553,6 +555,68 @@ address, an e-mail address or a phone number, without quoting it, and a `who` th
 colwyn, also unquoted. It reads copies of the checks and files and returns only its own record, so no check, file
 or result changes and a refused run stays refused (tested on every refusal case
 in `tests/test_oc_explain.py`). It adds no check row, for that reason: its cost is in its own record, shown with it.
+
+### House description and its prose (`oc/describe.py`, `oc/agent/describe.py`)
+
+    python -m oc draft ... --ai-describe
+
+Colwyn, 2026-11-13, "C, exactly as live", and 2026-11-16, option B, "Separate import": the PO's Body HTML keeps the
+brand's template (Composition / Made in / SKU, as before, so the assistant's description workbook and `complete`'s
+"Made in -" check keep working), and each NEW product's house description is drafted beside it, in the draft
+workbook's **Descriptions** sheet (one row per product: Variant SKU of its first PO row, manufacture code, Title as
+drafted, Description, Source, Why; the Description cell shaded like any drafted cell) and as one Review row per
+product with Column `Description`:
+
+    <p>{VENDOR}'s {Title} is a {adjective} {item}. {Sentence 2}.</p>
+    <ul>
+    <li>Composition: {composition, the order-time text in Title Case}</li>
+      <li>{feature}</li>
+    <li>Made in {Country}</li>
+    </ul><br><p>SKU: {manufacture code}</p>
+
+With no key `oc/describe.py` writes only what an order-time fact grounds: the vendor in capitals and the Title
+verbatim (a gender word in it included); the item noun from the Type (`ITEMS`, the gender left out); an adjective and
+feature bullets only where a phrase of `ADJECTIVES` or `FEATURES` is printed, as whole words, in the order line's
+description (a material or finish also in its fabric name), only on a kind of product that has the part (a waist, a
+leg, a neckline), never from the product class or the cart's Style Name; the title's colour words as
+"{Colour} colourway" (AU spelling); a labelled part of the composition given as one material ("Cupro lining", or
+adidas footwear's `U:LE L:TE S:RU`); Made in only for a country the tool knows, never "Made in -". No gender or season
+word anywhere but the Title. Composition comes whole from, in this order, the OC line's composition, its fabrication
+(a sheet OC maps them with `columns: composition: <header>` and `fabrication: <header>`), the cart's Materials, the
+live same style+fabric product's line; it is written in Title Case as live lines are (the printed text is in the
+Why); a blank, placeholder, garbled, markup, coded or cut-off value is never written. The cell is never green: amber
+"tool draft, check", or red when the Composition line or the intro is missing, the title or Type is red, or the
+title names another kind of product than the Type's item noun.
+
+`--ai-describe` (the page's "Write the NEW descriptions' prose with AI" box, off by default, under the same key gate
+as the title job, 10 runs per browser session) asks the AI only for the adjective, the second sentence and bullets up
+to 5 that the tool could not ground. It never writes the Composition line, Made in, the SKU, the Title, the Type or
+the vendor. Each value is a claim resting on one field of the product (its description, fabric name or composition)
+with a quote copied from it; Python drops a claim whose quote or words are not in that field and refuses gender,
+season, brand and AI words, codes, markup, links, contacts and over-long text; the prompt states every limit. A body
+with AI prose is "AI-drafted, check" (amber), and stays red where the tool's draft is red or where its second
+sentence is about another kind of product than the item noun. What is sent is in the box's caption
+(`oc/agent/describe.sends`): no prices, costs, quantities, gender or season. A brand config on hold reads and sends
+nothing.
+
+### The description import (`PU-description.xlsx`, `oc/descimport.py`)
+
+`finalize` writes `<out-prefix>PU-description.xlsx` beside PU-new, in the slot of the hand-made
+"<Brand> Description.xlsx": sheet `Products`, columns `Variant SKU`, `Command`, `Body HTML` and no other (a blank cell
+clears a field in Matrixify). One row per NEW product, keyed on the Variant SKU of its first variant as PU-new has it.
+**Command is UPDATE on every row**, the one change from the hand sheets, which carry no Command: Matrixify reads that
+as MERGE, and MERGE creates a new product when the SKU is not found, where UPDATE fails the row. **Import order:**
+PU-new, then PU-merge and PU-merge-new-sizes, then PU-description once the products exist.
+
+The text is the reviewed PO's Descriptions sheet. A title fixed in review is one edit: when the description still
+holds the drafted Title, the PO's final Title replaces it; when the person edited the description so that it no
+longer does, their text is kept and must hold the final Title. A description is left out, named with its reason in
+the check row "Description import (...)" (a WARN; the upload files are still written), when it does not open with
+"{VENDOR}'s", its last line is not the SKU line or names another code, it has no Composition line or a placeholder
+one, it says "Made in -", it names a gender or season word outside the title, its intro does not hold the final
+Title, or the final Title or its second sentence names another kind of product than the final Type's item noun.
+The check counts what was written and what was held back. A PO with no Descriptions sheet (a hand-built PO) writes no
+import; a PO drafted from the cart writes PU-new only, so no import either; a config on hold writes nothing.
 
 ### Cost
 

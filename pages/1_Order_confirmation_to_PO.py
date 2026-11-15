@@ -23,6 +23,7 @@ if str(ROOT) not in sys.path:
 
 from oc import brand as brandm, catalog as catm, service  # noqa: E402
 from oc.agent import explain as explainm  # noqa: E402
+from oc.agent import describe as describem  # noqa: E402
 from oc.cartorder import REFUSED_CHECK  # noqa: E402
 
 st.set_page_config(page_title="Order confirmation to PO", layout="wide")
@@ -66,11 +67,22 @@ TITLES_SENDS = ("Ticking it sends to Anthropic, for each new product: its codes 
                 " statuses, colour names and colour families the catalog and past POs hold for its style and colour "
                 "code. It also sends the brand's name and colour families, and up to 200 past-PO products of any "
                 "style (code, Type, colour family, title) as examples. No prices, costs or quantities.")
+DESCRIBE_BOX = "Write the NEW descriptions' prose with AI (check every one)"
+DESCRIBE_HELP = ("The tool drafts every new product's description itself, from the order confirmation, the cart and "
+                 "the Type: the Composition line, Made in and SKU, and only what those documents say. AI adds the "
+                 "adjective, the second sentence and feature bullets it still lacks, each one copied from that "
+                 "product's own fields or dropped. It never writes the Composition line, Made in, the SKU, the "
+                 "title or the brand. Every description is amber (red where the composition is missing): check each "
+                 "one. It costs cents to about a dollar per order confirmation.")
+DESCRIBE_SENDS = describem.sends()
 EXPLAIN_DRAFT_BUTTON = "Ask the AI what went wrong (sends the PDF's text to Anthropic)"
 EXPLAIN_FINAL_BUTTON = "Ask the AI what went wrong (sends the PO rows the failing checks name to Anthropic)"
 EXPLAIN_HEAD = "AI explanation (check it)"
 # Per browser session, like AI_CAP for the AI reader, so a stuck rerun loop cannot spend without limit.
 TITLES_CAP, EXPLAIN_CAP = 10, 20
+DESCRIBE_CAP = 10
+DESCRIBE_CAP_MSG = (f"AI description drafting is off: this browser session has used its {DESCRIBE_CAP} AI description "
+                    "drafts. Each one is paid for; ask Colwyn if you need more.")
 TITLES_CAP_MSG = (f"AI title drafting is off: this browser session has used its {TITLES_CAP} AI title drafts. Each "
                   "one is paid for; ask Colwyn if you need more.")
 EXPLAIN_CAP_MSG = (f"No AI explanation: this browser session has used its {EXPLAIN_CAP} AI explanations. Each one is "
@@ -379,6 +391,14 @@ if cfg and agent:
 if cfg and agent and titles_capped:
     st.caption(TITLES_CAP_MSG)
 ai_titles = ai_titles and not titles_capped
+describe_capped = S.get("ai_describe_runs", 0) >= DESCRIBE_CAP
+ai_describe = bool(cfg) and agent and st.checkbox(DESCRIBE_BOX, value=False, key="w_ai_describe", help=DESCRIBE_HELP,
+                                                  disabled=describe_capped)
+if cfg and agent:
+    st.caption(DESCRIBE_SENDS)
+if cfg and agent and describe_capped:
+    st.caption(DESCRIBE_CAP_MSG)
+ai_describe = ai_describe and not describe_capped
 
 need = [n for n, ok in (("a brand", cfg), ("the catalog export", S.get("catalog")),
                         ("the order confirmation (or, before it arrives, the cart)", oc_up or cart_up),
@@ -400,11 +420,13 @@ if build:
                     cart_path=save(tmp, "cart.xlsx", cart_up.getvalue()) if cart_up else None,
                     history_paths=hist_paths or None, reader="ai" if use_ai else None,
                     prior_path=save(tmp, "prior.xlsx", prior_up.getvalue()) if prior_up and oc_up else None,
-                    ai_titles=ai_titles)
+                    ai_titles=ai_titles, ai_describe=ai_describe)
             if service.ai_read_sent(checks):
                 S["ai_reads"] = S.get("ai_reads", 0) + 1
             if service.titles_ran(checks):
                 S["ai_title_runs"] = S.get("ai_title_runs", 0) + 1
+            if service.describe_ran(checks):
+                S["ai_describe_runs"] = S.get("ai_describe_runs", 0) + 1
             S["draft"] = dict(po=po, review=review, checks=checks, file=service.draft_file(cfg, checks),
                               made_from=f"{(oc_up or cart_up).name} and {S['catalog'][0]}, brand config {cfg['_path']}",
                               oc_pdf=oc_up.getvalue() if po is None and oc_up and not is_sheet else None,
@@ -515,6 +537,9 @@ if S.get("final"):
                 "PU-merge-new-sizes adds the ordered sizes a product lacks, at that cost. The order is PU-new, then "
                 "PU-merge, then PU-merge-new-sizes. Keep PU-merge-ROLLBACK: it puts the season, the tag and the old "
                 "costs back. "
+                "PU-description holds the new products' descriptions (Variant SKU, Command UPDATE, Body HTML): "
+                "import after the products are created, once PU-new is in. Its UPDATE rows fail rather than "
+                "create a product if it goes in first; the Checks say which descriptions were held back and why. "
                 "Use the PU-merge-ROLLBACK from the same zip as the PU-merge you import, made before importing. "
                 f"Every file in this zip carries run id {f['run']}. If you "
                 "change the PO and make the files again, import the new zip's PU-merge and keep the new zip's "

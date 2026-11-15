@@ -498,6 +498,12 @@ def titles_ran(checks):
     return any(c["Check"] == titles.CHECK for c in checks)
 
 
+def describe_ran(checks):
+    """True when a draft's checks show the AI description job ran (the page counts it against its session cap)."""
+    from .agent import describe
+    return any(c["Check"] == describe.CHECK for c in checks)
+
+
 def explain_draft(oc_path, checks, brand_cfg, ai_factory=None):
     """A refused draft explained in plain English: None with no key (nothing sent), else the record from
     agent.explain.explain. Reads the PDF and a copy of the checks; changes neither. A config on hold: nothing read
@@ -522,13 +528,14 @@ def explain_finalize(po_path, checks, brand_cfg, ai_factory=None):
 
 # ---- step 1 --------------------------------------------------------------------
 def draft(oc_path, catalog_path, brand_cfg, cart_path=None, history_paths=None, reader=None, ai_factory=None,
-          prior_path=None, ai_titles=False):
+          prior_path=None, ai_titles=False, ai_describe=False):
     """OC + catalog (+ linesheet, + past POs) -> (draft PO xlsx bytes | None, Review DataFrame, checks).
 
     oc_path None with a cart_path drafts from the selling-session cart before the OC exists (oc/cartorder.py:
     UNCONFIRMED). prior_path, a PO drafted before (from the cart), adds a Changes sheet: what the OC changed.
     `ai_titles` lets AI redraft NEW titles, colour words and colour family (oc/agent/titles.py); it does nothing
-    when the app has no API key."""
+    when the app has no API key. `ai_describe` lets AI add prose to the house descriptions the tool drafts
+    (oc/agent/describe.py), likewise."""
     from . import draft as draftm
     empty = pd.DataFrame()
     core = _core()
@@ -583,7 +590,14 @@ def draft(oc_path, catalog_path, brand_cfg, cart_path=None, history_paths=None, 
 
         def titler(pending, R):
             return titles.run(pending, R, factory=ai_factory)
+    describer = None
+    if ai_describe:
+        from .agent import describe
+
+        def describer(pending, R):
+            return describe.run(pending, R, factory=ai_factory)
     rows, review, checks, fills = draftm.build(docs, brand_cfg, cat, hist, tags, cart=cart, titler=titler,
+                                               describer=describer,
                                                prior_prices=prior["typed"] if prior else None)
     extra = None
     if prior:

@@ -15,6 +15,7 @@ from . import cartorder
 from .draft import oc_lines, cart_checks, join_alt, money_matches, oc_value
 from .poxlsx import (FILLS, CODE, MADE_IN, COST_PRICE, TITLE_TAG, SEASON, NEW_SALE, PO_FORMULA,
                      resolve_formula, write_table, review_row, clean_text, as_text)
+from .poxlsx import DESCRIPTIONS
 from .draft import PRICE_CHECK
 from .resolve import Resolver, COLOUR, AI_OC, NO_RRP
 from .brand import hold_row
@@ -136,6 +137,8 @@ def run(po_path, docs, brand, catalog, history, tag_lookup, out, price_overrides
     write_table(wb, "Checks", checks, colour_key="Result")
     if changed is not None:
         write_table(wb, "Changes", changed)
+    if DESCRIPTIONS in wb.sheetnames:   # a drafted PO's descriptions stay, last, as the draft wrote them
+        wb.move_sheet(DESCRIPTIONS, len(wb.sheetnames) - 1 - wb.sheetnames.index(DESCRIPTIONS))
     wb.save(out)
     return checks
 

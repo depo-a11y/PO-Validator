@@ -582,7 +582,7 @@ def test_draft_from_the_oc_with_the_cart_po_as_prior_writes_changes_and_carries_
     po, review, checks = service.draft(str(tmp_path / "oc.pdf"), catalog_csv(tmp_path), BRAND, prior_path=prior)
     out = tmp_path / "oc-draft.xlsx"
     out.write_bytes(po)
-    assert openpyxl.load_workbook(out).sheetnames == ["Sheet1", "Review", "Checks", "Changes"]
+    assert openpyxl.load_workbook(out).sheetnames == ["Sheet1", "Review", "Checks", "Changes", "Descriptions"]
     assert _check(checks, cartorder.CHANGES_CHECK)[0]["Result"] == "WARN"
     header, rows = poxlsx.read_po(str(out))
     assert "Order Qty" in header and cartorder.po_source(header) is None
@@ -600,7 +600,8 @@ def test_complete_on_a_cart_po_replaces_its_sheets_and_lists_what_the_oc_changed
     cat = catm.load(catalog_csv(tmp_path))
     checks = complete.run(prior, _oc(), BRAND, cat, histm.History([]), core.load_tag_lookup(),
                           str(tmp_path / "done.xlsx"))
-    assert openpyxl.load_workbook(tmp_path / "done.xlsx").sheetnames == ["Sheet1", "Review", "Checks", "Changes"]
+    assert openpyxl.load_workbook(tmp_path / "done.xlsx").sheetnames == ["Sheet1", "Review", "Checks", "Changes",
+                                                                         "Descriptions"]
     (c,) = _check(checks, cartorder.CHANGES_CHECK)
     assert c["Detail"].startswith("this PO 7 units, OC 7 units") and "with this PO as --prior" in c["Detail"]
     assert _check(checks, "Qty per code+size equals the OC")[0]["Result"] == "FAIL"

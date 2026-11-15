@@ -5,6 +5,9 @@ or delivery file is written (stale ones from an earlier run at the same prefix
 are removed) and only the checks workbook is saved, so a failed gate can never
 leave a half set of importable files behind.
 
+PU-description  the NEW products' house descriptions (Variant SKU, Command UPDATE, Body HTML), imported after PU-new
+         has created them (oc/descimport.py); a description that fails its gate is left out with a WARN and never
+         stops the other files.
 PU-new   NEW rows through validator_core.run_gate, the same gate as app.py, plus
          blocks on a Title still holding a raw colour/fabric/style code and on a
          blank Option1 (what an unreviewed draft leaves behind).
@@ -55,6 +58,7 @@ from .poxlsx import (read_po, CODE, MADE_IN, SEASON, NEW_SALE, COST_PRICE, TITLE
                      write_table, write_frame, append_text)
 from .draft import PRICE_CHECK
 from .brand import hold_row
+from . import descimport
 from .util import blank, cost_currency, norm_code, norm_size, money, slug
 
 REPO = Path(__file__).resolve().parent.parent
@@ -81,6 +85,7 @@ NEW_SIZE_COLS = ["ID", "Command", "Variant Command", "Option1 Name", "Option1 Va
                  "Variant Metafield: custom.new_sale [single_line_text_field]", COST_PRICE]
 
 OUTPUTS = ["PU-new.xlsx", "PU-merge.xlsx", "PU-merge-new-sizes.xlsx", "PU-merge-ROLLBACK.xlsx", "Delivery.xlsx"]
+OUTPUTS += [descimport.FILE]   # the separate description import, after PU-new (oc/descimport.py, option B)
 RUN_CHECK = "Run id (in every file name of this run and in each workbook's Title)"
 # A NEW title is "<name> in <colour words>"; one ending in "in" lost its colour words (a code with no colour code
 # drafts "Pants in "). A person retypes it in the sheet, but it never imports: the check is not FIXABLE_IN_SHEET.
@@ -148,6 +153,8 @@ def run(po_path, brand, catalog, out_prefix):
     from .cartorder import finalize_refusal
     refused = finalize_refusal(po_path, header, new, brand)   # from a cart: PU-new only; a missing column: FAIL
     builds = [_pu_new(new, brand, catalog, core, out_prefix)]
+    if refused is None:   # a PO from the cart writes PU-new only, so no description import either
+        builds.append(descimport.build(po_path, new, brand, out_prefix))
     if refused:
         checks.append(refused)
     if not refused:

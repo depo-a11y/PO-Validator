@@ -64,7 +64,7 @@ def _past_po(path, season, code="S11ZZ0001P9 1"):
 def test_draft_returns_a_shaded_workbook_that_opens(tmp_path, oc_stub):
     po, review, checks = service.draft("oc.pdf", _catalog(tmp_path), _cfg())
     wb = openpyxl.load_workbook(io.BytesIO(po))
-    assert wb.sheetnames == ["Sheet1", "Review", "Checks"]
+    assert wb.sheetnames == ["Sheet1", "Review", "Checks", "Descriptions"]   # the house descriptions (option B)
     ws = wb["Sheet1"]
     assert [c.value for c in ws[1]][:len(poxlsx.PO_HEADER)] == poxlsx.PO_HEADER
     assert sum(ws.cell(r, poxlsx.PO_HEADER.index("Order Qty") + 1).value for r in range(2, ws.max_row + 1)) == 6

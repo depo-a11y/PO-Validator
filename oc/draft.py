@@ -13,6 +13,7 @@ import collections
 
 from .brand import ColourCodeError, code_for, unmapped_colours
 from . import cartorder, housestyle
+from . import describe
 from .poxlsx import PO_HEADER, CODE, MADE_IN, SEASON, NEW_SALE, COST_PRICE, TITLE_TAG, review_row, col_letter
 from .resolve import Resolver, COLOUR, AI_OC, AI_NEW_SIZE, OFF_RUN, NO_RRP, split_code, worse
 
@@ -134,10 +135,16 @@ def _src(l):
     return " + ".join(l.get("sources") or [f"{l['doc']} line {l['line_no']}"])
 
 
-def build(docs, brand, catalog, history, tag_lookup, cart=None, prior_prices=None, titler=None):
+def build(docs, brand, catalog, history, tag_lookup, cart=None, prior_prices=None, titler=None, describer=None):
     """`titler(pending, R) -> checks` (oc/agent/titles.run) may redraft NEW titles, colour words and colour family
     after they are resolved and before the title de-dupe, so its values meet the same de-dupe, prefix, handle,
-    live-title and title checks. None leaves the draft exactly as the resolvers make it."""
+    live-title and title checks. None leaves the draft exactly as the resolvers make it.
+
+    The PO's Body HTML stays the brand's template. Each NEW product's house description (oc/describe.py, from the
+    final title, Type and order-time facts) is drafted beside it, as one Review row per product with Column
+    'Description', which the workbook writes as the Descriptions sheet and finalize turns into the separate
+    description import (Colwyn, 2026-11-16, option B). `describer(pending, R) -> checks` (oc/agent/describe.run) may add
+    AI prose to it."""
     lines = oc_lines(docs, brand)
     swapped = join_alt(lines, catalog, brand.get("match_ignore") or "")
     lines, merged = merge_repeats(lines)
@@ -259,6 +266,7 @@ def build(docs, brand, catalog, history, tag_lookup, cart=None, prior_prices=Non
         checks += titler(pending, R)
     _dedupe_titles(pending, R, brand, checks)
     housestyle.mark_live_titles(pending, catalog, checks)
+    checks += describe.run(pending, R, describer)
     for n in pending:
         l, code, eur = n["l"], n["code"], n["eur"]
         cur["line"] = l
@@ -270,6 +278,7 @@ def build(docs, brand, catalog, history, tag_lookup, cart=None, prior_prices=Non
         price, p_src, p_why = n["price"]
         made, made_src, made_why = n["made"]
         comp, comp_src, comp_why = n["comp"]
+        n["row0"] = len(rows)   # the product's first PO row, where the Review points for its description
         for size in run:
             row = {}
             cell(row, "Command", "NEW", "catalog", f"join key {code} is not a live product")
@@ -334,6 +343,7 @@ def build(docs, brand, catalog, history, tag_lookup, cart=None, prior_prices=Non
         checks = cartorder.cart_wording(checks)
     review = [review_row(i + 2, rows[i].get(CODE), rows[i].get("Option2 Value"), k, v, s, w)
               for i, k, v, s, w in cells]
+    review += describe.review_rows(pending)   # after every PO cell's row: one per NEW product, its own place
     fills = {(i, k): COLOUR.get(s, "red") for i, k, v, s, w in cells}
     return rows, review, checks, fills
 
