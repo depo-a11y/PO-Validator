@@ -2016,8 +2016,10 @@ MUTANTS += [   # the house description (oc/describe.py) and its AI prose (oc/age
      "describe: a live product's Composition line escaped twice"),
     (D, """        lines.append(f"<li>Composition: {c['text'] if c['html'] else e(c['text'])}</li>")""",
      """        lines.append(f"<li>Composition: {c['text']}</li>")""", "describe: OC composition not escaped"),
-    (D, "    return squash(text).title()", "    return str(text).title()", "describe: composition whitespace kept"),
-    (D, "    return squash(text).title()", "    return squash(text)", "describe: composition not in the house's Title Case"),
+    (D, "lambda m: m.group(1) + m.group(2).lower(), squash(text).title())",
+     "lambda m: m.group(1) + m.group(2).lower(), str(text).title())", "describe: composition whitespace kept"),
+    (D, "lambda m: m.group(1) + m.group(2).lower(), squash(text).title())",
+     "lambda m: m.group(1) + m.group(2).lower(), squash(text))", "describe: composition not in the house's Title Case"),
     (D, """                                text=squash(c["value"]) if c["html"] else house_case(c["value"]))""",
      """                                text=house_case(c["value"]))""", "describe: a live product's Composition line recased"),
     (D, "            if field not in fields or kind not in kinds:", "            if kind not in kinds:",
@@ -2157,6 +2159,26 @@ MUTANTS += [   # option B (Colwyn, 2026-11-16): the template stays, the descript
      "B: a second sentence about another kind written"),
     ("pages/1_Order_confirmation_to_PO.py", '"import after the products are created, once PU-new is in.',
      '"import it whenever, once PU-new is in.', "page: the description import's order not said"),
+]
+
+MUTANTS += [   # review case 2026-11-16-buyer-1 (flagged), round 5
+    (A, '            if len(w) >= 3 or re.search(r"\\d", w) or w in NEGATORS]',
+     '            if len(w) >= 3 or re.search(r"\\d", w)]', "describe AI: a negation not quoted passes as grounded"),
+    (A, '"and supplier names (oc_supplier), as words never to write. No prices, costs or quantities. Gender and "',
+     '"names, as words never to write. No prices, costs or quantities. Gender and "',
+     "describe AI: the caption leaves out the supplier words it sends"),
+    ("pages/1_Order_confirmation_to_PO.py",
+     '"the title is red, or the title or the AI\'s text names a different kind of product than the Type: "', '""',
+     "page: the description help understates when a description is red"),
+    (D, """    return re.sub(r"(?<=[^\\W\\d_])(['’])([^\\W\\d_])", lambda m: m.group(1) + m.group(2).lower(), squash(text).title())""",
+     "    return squash(text).title()", "describe: a letter after an apostrophe capitalised (D'Acme)"),
+    (D, '    for n in pending:\n        n["describe"] = draft(facts(n, R), R.b)',
+     '    if R.b.get("body_html"):\n        return []\n    for n in pending:\n        n["describe"] = draft(facts(n, R), R.b)',
+     "describe: a config with the template body gets no description"),
+    ("oc/service.py", 'describe.NOTHING_SENT not in str(c["Detail"]).lower() for c in checks)', "True for c in checks)",
+     "service: a run that sent nothing counted against the description cap"),
+    (X, "    if intro and raw_codes(_text(intro.group(1)), code):", "    if False:",
+     "B: an edited intro that kept a raw code written"),
 ]
 
 

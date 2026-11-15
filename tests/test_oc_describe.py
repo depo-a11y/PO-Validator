@@ -296,6 +296,62 @@ def test_an_items_kind_is_its_head_noun():
     assert describe.item_kind("belt bag", last=True) == "bag" and describe.item_kind("belt bag") == "accessory"
 
 
+def test_a_negation_is_a_word_the_quote_must_hold():
+    ev = dict(item="coat", fields=dict(fabric_name="LINING 100% COTTON", description="LOOP COAT - NO LINING, UNLINED"))
+    cats = lambda c: [k for k, _ in job.problems("bullets", c, ev, [])]
+    assert job._words("Made with no lining") == ["made", "with", "no", "lining"]
+    assert cats(claim("Made with no lining", "fabric_name", "LINING 100% COTTON")) == ["words not in the quote"]
+    assert cats(claim("Made with no lining", "description", "NO LINING")) == []
+    assert cats(claim("Un-lined coat body", "fabric_name", "LINING 100% COTTON")) == ["words not in the quote"]
+    assert cats(claim("Not lined at all", "description", "NO LINING")) == ["words not in the quote"]
+    assert "no lining" in job.SYSTEM and all(n in job.SYSTEM for n in job.NEGATORS[:-1])
+
+
+def test_a_letter_after_an_apostrophe_stays_small():
+    assert describe.house_case("100% COTON D'ACME") == "100% Coton D'acme"
+    assert describe.house_case("100% CUIR D\u2019ACME") == "100% Cuir D\u2019acme"
+    assert describe.house_case("SHELL: 100% COTTON - D'ACME TRIM: 100% WOOL") == "Shell: 100% Cotton - D'acme Trim: 100% Wool"
+
+
+def test_the_default_template_body_still_gets_a_description():
+    assert BRAND["body_html"] == brandm.DEFAULTS["body_html"]   # option B: the template stays the default
+    f = dict(code=TOTE, vendor="Acme", title=("Drift Tote in Sand", "catalog", ""),
+             ptype=("MEN BAGS SHOPPER & TOTE BAGS", "x", ""), composition=[], made_in=[], text=[])
+    n = dict(l=dict(doc="AC - 1", line_no=1), code=TOTE, title=list(f["title"]), ptype=f["ptype"],
+             comp=("-", "guess", ""), made=("-", "guess", ""), row0=0)
+    R = types.SimpleNamespace(b=brandm.from_mapping({k: v for k, v in BRAND.items() if not k.startswith("_")}, "t"),
+                              cart_row=lambda code: None)
+    assert R.b["body_html"] == brandm.DEFAULTS["body_html"]
+    describe.run([n], R)
+    assert n["body"][0].startswith("<p>ACME STUDIO's Drift Tote in Sand is a tote bag.")
+    assert describe.review_rows([n])[0]["Column"] == describe.DESC_COLUMN
+
+
+def test_a_run_that_sent_nothing_is_not_counted_against_the_cap(key):
+    held = types.SimpleNamespace(b=dict(BRAND, hold="parked"))
+    assert not service.describe_ran(job.run([], held, factory=Fake().factory))
+    f = dict(code=TOTE, vendor="Acme", title=("Drift Tote in Sand", "catalog", ""), ptype=("MEN BAGS BACKPACKS", "x", ""),
+             composition=[], made_in=[], text=[])
+    full = describe.draft(f, BRAND)
+    full["adjective"] = dict(text="small", field="description", by="tool", basis="x")
+    full["sentence2"] = dict(text="It is small.", field="description", by="tool", basis="x")
+    full["bullets"] = [dict(text=f"Bullet {i} here", field="description", by="tool", basis="x") for i in range(5)]
+    fake = Fake()
+    rows = job.run([dict(code=TOTE, describe=full)], types.SimpleNamespace(b=BRAND), factory=fake.factory)
+    assert fake.calls == [] and not service.describe_ran(rows)
+    pending = [dict(code=TOTE, describe=describe.draft(f, BRAND))]
+    assert service.describe_ran(job.run(pending, types.SimpleNamespace(b=BRAND), factory=Fake().factory))
+
+
+def test_the_page_help_says_where_the_sources_and_the_red_come_from():
+    from pathlib import Path
+    src = (Path(__file__).resolve().parent.parent / "pages" / "1_Order_confirmation_to_PO.py").read_text()
+    help_ = src[src.index("DESCRIBE_HELP = ("):src.index("DESCRIBE_SENDS = ")]
+    for words in ("live catalog's same style and fabric", "the title is red", "a different kind of product than the Type",
+                  "PU-description", "import after the products are created"):
+        assert words in help_, words
+
+
 def test_countries_from_codes_names_and_the_config():
     assert [describe.country(v, BRAND) for v in ("IT", "ITA", "PORTUGAL", "Made in China", "tr", "Atlantis", "-")] \
         == ["Italy", "Italy", "Portugal", "China", "Turkey", None, None]
@@ -662,7 +718,8 @@ def test_the_caption_names_exactly_what_the_request_sends(tmp_path, key):
         assert set(ev["fields"]) <= set(job.FIELDS)
     caption = job.sends()
     assert all(words in caption for _, words in job.SENT)
-    assert "No prices, costs, quantities, gender or season" in caption
+    assert "No prices, costs or quantities." in caption and "supplier names (oc_supplier)" in caption
+    assert "the title goes as written and can carry them" in caption   # gender and season can ride in the title
     text = json.dumps(req)
     for leak in ("100.0", "ACME FW", "WOMEN", '"MEN"', "gender", "collection", "price", "qty"):
         assert leak not in text.split('"messages"')[1], leak

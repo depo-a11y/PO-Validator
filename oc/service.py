@@ -499,9 +499,10 @@ def titles_ran(checks):
 
 
 def describe_ran(checks):
-    """True when a draft's checks show the AI description job ran (the page counts it against its session cap)."""
+    """True when a draft's checks show the AI description job sent a request (the page counts it against its session
+    cap); a run that sent nothing, a held config's or one with nothing to ask, is not counted."""
     from .agent import describe
-    return any(c["Check"] == describe.CHECK for c in checks)
+    return any(c["Check"] == describe.CHECK and describe.NOTHING_SENT not in str(c["Detail"]).lower() for c in checks)
 
 
 def explain_draft(oc_path, checks, brand_cfg, ai_factory=None):

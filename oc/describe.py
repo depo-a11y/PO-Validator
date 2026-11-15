@@ -322,8 +322,9 @@ def country(value, brand):
 
 def house_case(text):
     """A composition as the house writes it: the order-time text, whitespace collapsed, in Title Case
-    (str.title: '100% COTTON-BCI' -> '100% Cotton-Bci'). Live Composition lines are the source text so cased."""
-    return squash(text).title()
+    (str.title: '100% COTTON-BCI' -> '100% Cotton-Bci'), a letter after an apostrophe inside a word left small
+    ("CUIR D'AGNEAU" -> "Cuir D'agneau", where str.title writes "D'Agneau"). Live lines are the source text so cased."""
+    return re.sub(r"(?<=[^\W\d_])(['’])([^\W\d_])", lambda m: m.group(1) + m.group(2).lower(), squash(text).title())
 
 
 def composition_problem(text):

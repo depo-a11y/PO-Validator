@@ -68,12 +68,15 @@ TITLES_SENDS = ("Ticking it sends to Anthropic, for each new product: its codes 
                 "code. It also sends the brand's name and colour families, and up to 200 past-PO products of any "
                 "style (code, Type, colour family, title) as examples. No prices, costs or quantities.")
 DESCRIBE_BOX = "Write the NEW descriptions' prose with AI (check every one)"
-DESCRIBE_HELP = ("The tool drafts every new product's description itself, from the order confirmation, the cart and "
-                 "the Type: the Composition line, Made in and SKU, and only what those documents say. AI adds the "
-                 "adjective, the second sentence and feature bullets it still lacks, each one copied from that "
-                 "product's own fields or dropped. It never writes the Composition line, Made in, the SKU, the "
-                 "title or the brand. Every description is amber (red where the composition is missing): check each "
-                 "one. It costs cents to about a dollar per order confirmation.")
+DESCRIBE_HELP = ("The tool drafts every new product's description itself, beside the template body, in the draft's "
+                 "Descriptions sheet: from the order confirmation, the cart, the live catalog's same style and fabric "
+                 "product (its composition) and the Type, only what those say. AI adds the adjective, the second "
+                 "sentence and feature bullets it still lacks, each one copied from that product's own description, "
+                 "fabric name or composition, or dropped. It never writes the Composition line, Made in, the SKU, the "
+                 "title, the Type or the brand. Every description is amber, and red where the composition is missing, "
+                 "the title is red, or the title or the AI's text names a different kind of product than the Type: "
+                 "check each one. Step 2 writes them as PU-description, to import after the products are created. "
+                 "It costs cents to about a dollar per order confirmation.")
 DESCRIBE_SENDS = describem.sends()
 EXPLAIN_DRAFT_BUTTON = "Ask the AI what went wrong (sends the PDF's text to Anthropic)"
 EXPLAIN_FINAL_BUTTON = "Ask the AI what went wrong (sends the PO rows the failing checks name to Anthropic)"

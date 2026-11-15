@@ -121,8 +121,21 @@ def test_a_title_fixed_in_review_is_swapped_into_the_description(tmp_path):
     path, _ = reviewed(tmp_path, fix)
     run(tmp_path, path)
     bodies = {r[0]: r[2] for r in imported(tmp_path)[2]}
-    loafer = next(b for b in bodies.values() if "Loafer" in b)
+    loafer = next(b for b in bodies.values() if "Loafer" in b)   # drafted with a raw colour code in its title
     assert "ACME STUDIO's Mesa Loafer in Black is a pair of loafers." in loafer and "Loafer in 900" not in loafer
+
+
+def test_an_edited_description_that_kept_the_raw_code_is_held_back(tmp_path):
+    def edit(ws):   # the drafted title edited away, but the colour code typed back in
+        c = desc_cell(ws, td.LOAFER)
+        c.value = (c.value.replace("Loafer in 900 is a pair of loafers.",
+                                   "Mesa Loafer in Black is a pair of loafers, colour 900.")
+                   .replace("<ul>\n", "<ul>\n<li>Composition: Upper: 100% Calf Leather</li>\n"))
+    path, _ = reviewed(tmp_path, edit)
+    checks = run(tmp_path, path)
+    assert not any("Loafer" in r[2] for r in imported(tmp_path)[2])
+    c = check(checks)
+    assert c["Result"] == "WARN" and f"{td.LOAFER} 'Mesa Loafer in Black': its intro still holds a raw code" in c["Detail"]
 
 
 def test_an_edited_description_is_kept_and_must_hold_the_final_title(tmp_path):

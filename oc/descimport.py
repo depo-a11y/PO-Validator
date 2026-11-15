@@ -48,10 +48,19 @@ def swap_title(body, drafted, final):
     return body, False
 
 
+def raw_codes(text, code):
+    """The parts of the manufacture code (style, style+fabric, fabric, colour) that have a digit in them and stand as a
+    word of `text`: a colour code left in an intro. A colour word such as BLACK in a code is no code."""
+    body, _, colour = norm_code(code).partition(" ")
+    parts = {p for p in (body, body[:9], body[9:], colour) if len(p) >= 2 and re.search(r"\d", p)}
+    return sorted(parts & set(re.findall(r"[A-Z0-9]+", str(text or "").upper())))
+
+
 def problems(body, title, code, vendor, ptype):
     """Why a description cannot go in the import, else []: the house frame, a real Composition line, no 'Made in -',
-    no gender or season word outside the title, the SKU line on the product's own code, the final Title in the intro,
-    and the red checks re-run on the final Title and Type (the title's kind and an AI second sentence's against the
+    no gender or season word outside the title, the SKU line on the product's own code, the final Title in the intro
+    and no raw code left in it (after the swap: an edited description that kept a coded title), and the red checks
+    re-run on the final Title and Type (the title's kind and an AI second sentence's against the
     Type's item noun)."""
     body = str(body or "").strip()
     out = []
@@ -74,6 +83,8 @@ def problems(body, title, code, vendor, ptype):
         out.append(f"it names a {word} outside the title")
     if not intro or html.escape(str(title), quote=False) not in intro.group(1):
         out.append("its intro does not hold the final Title")
+    if intro and raw_codes(_text(intro.group(1)), code):   # after the final-Title swap: an edited intro kept the code
+        out.append("its intro still holds a raw code: put the final Title in it")
     item = describe.item_noun(ptype, title) if describe.squash(ptype) else None
     named, mine = describe.title_kind(title), describe.item_kind(item, last=True)
     if named and mine and named != mine:

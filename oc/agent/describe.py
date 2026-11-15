@@ -50,6 +50,8 @@ GENERIC = ("about", "and", "are", "back", "both", "but", "closure", "colourway",
            "piece", "profile", "set", "shape", "side", "sit", "sits", "style", "that", "the", "their", "these",
            "they", "this", "those", "through", "under", "while", "with")
 LABELLED = re.compile(r"(?i)^\s*(?:composition|made\s+in|sku)\b")
+NEGATORS = ("no", "not", "non", "nor", "never", "without", "un")   # a negation is a claim: it must be quoted too
+NOTHING_SENT = "nothing was sent"   # in every check row of a run that sent no request (service.describe_ran)
 ALLOWED = re.compile(r"[A-Za-zÀ-ÖØ-öø-ÿ0-9 \-',./&%()]+")
 NOT_BRAND = {"AND", "THE", "FOR", "DES", "DEL", "LES", "LTD", "LLC", "INC", "SRL", "SPA", "PTY", "CORP", "GMBH"}
 PARTS = (("adjective", "adjective"), ("sentence_2", "second sentence"), ("bullets", "bullet"))
@@ -75,8 +77,10 @@ Every value you give is a claim with three parts:
 composition; never the title or the context).
 - quote: a passage copied exactly from that field's text, at most {QUOTE_CAP} characters.
 Every word of three or more letters in your text, and every number, must appear in your quote, as the same word or \
-its plural, -ed or -ing form. Only these words need no quote: {", ".join(GENERIC)}, and the words of the product's \
-item noun. A claim that breaks this is dropped. Never join facts from two fields in one claim.
+its plural, -ed or -ing form. A negation counts as a word however short: {", ".join(NEGATORS[:-1])} and an \
+un- prefix must appear in the quote too ("no lining" needs a quote that says no lining). Only these words need no \
+quote: {", ".join(GENERIC)}, and the words of the product's item noun. A claim that breaks this is dropped. Never \
+join facts from two fields in one claim.
 
 Write only what the quote states: no fit, fabric, construction, closure, comfort, quality or styling claim the quote \
 does not state. Never contradict the item noun: the second sentence is about the same kind of product (if the \
@@ -144,8 +148,9 @@ def sends():
     words = [w for _, w in SENT]
     return ("Ticking the description box sends to Anthropic, for each new product the tool could not describe in "
             "full: "
-            + ", ".join(words[:-1]) + " and " + words[-1] + ". It also sends the brand's name and label words "
-            "(as words never to write). No prices, costs, quantities, gender or season.")
+            + ", ".join(words[:-1]) + " and " + words[-1] + ". It also sends the words of the brand's vendor, label "
+            "and supplier names (oc_supplier), as words never to write. No prices, costs or quantities. Gender and "
+            "season are not sent as fields of their own, but the title goes as written and can carry them.")
 
 
 def need(d):
@@ -224,7 +229,10 @@ def plan(drafts, brand):
 
 # ---- checking an answer -------------------------------------------------------------------------------
 def _words(text):
-    return [w for w in re.findall(r"[^\W_]+", str(text or "").lower()) if len(w) >= 3 or re.search(r"\d", w)]
+    """The words a claim must ground: three letters or more, every number, and every negator however short ('no',
+    'un-'): 'Made with no lining' must quote the 'no'."""
+    return [w for w in re.findall(r"[^\W_]+", str(text or "").lower())
+            if len(w) >= 3 or re.search(r"\d", w) or w in NEGATORS]
 
 
 def stem(w):
@@ -366,7 +374,7 @@ def run(pending, R, factory=None):
     rows to add (none with no key). A config on hold: nothing read, built or sent."""
     if hold_row(R.b):
         return [dict(Check=CHECK, Result="WARN", Detail="AI description drafting did not run: this brand's config is "
-                                                        "on hold, so nothing was read or sent.")]
+                                                        f"on hold, so nothing was read, and {NOTHING_SENT}.")]
     client, key = common.connect(factory)
     if client is None:
         return []
@@ -422,5 +430,5 @@ def run(pending, R, factory=None):
         return [dict(Check=CHECK, Result="WARN", Detail=(
             head + ". The tool's own descriptions stand for them."
             + (f" For the rest: {_summary(stats, total)}." if stats["answered"] else "")
-            + (f" {usage.text()}." if usage.requests else " Nothing was sent.")))]
+            + (f" {usage.text()}." if usage.requests else f" {NOTHING_SENT.capitalize()}.")))]
     return [dict(Check=CHECK, Result="INFO", Detail=f"{_summary(stats, total)}. {usage.text()}.")]
