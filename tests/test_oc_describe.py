@@ -230,6 +230,21 @@ def test_a_held_config_reads_and_sends_nothing(tmp_path, key):
                                     held)], held) == ([], {})
 
 
+def test_run_gives_each_listing_of_a_code_the_prose_under_its_own_title(key):
+    f = dict(code=SHIRT, vendor="Acme Studio", title=("Shirt in Black", "catalog", ""),
+             ptype=("MEN CLOTHING SHIRTS LONG SLEEVE", "catalog", ""),
+             composition=[dict(value="100% Cotton", where="x", source="OC", html=False)], made_in=[],
+             text=[("description", "OXFORD SHIRT - BUTTON DOWN COLLAR")])
+    pending = [dict(code=SHIRT, describe=describe.draft(f, BRAND)),
+               dict(code=SHIRT, describe=describe.draft(dict(f, title=("Womens Shirt in Black", "rule", "")), BRAND))]
+    collar = claim("Button down collar detail", "description", "BUTTON DOWN COLLAR")
+    fake = Fake({SHIRT: dict(adjective=NONE, sentence_2=NONE, bullets=[collar])})
+    (row,) = job.run(pending, types.SimpleNamespace(b=BRAND), factory=fake.factory)
+    assert len(fake.calls) == 1 and len(sent(fake.calls[0])) == 1 and "1 bullet " in row["Detail"]
+    for n, title in zip(pending, ("Shirt in Black", "Womens Shirt in Black")):
+        assert f"ACME STUDIO's {title} is a" in n["body"][0] and "<li>Button down collar detail</li>" in n["body"][0]
+
+
 def test_the_stem_rule_matches_forms_of_one_word():
     assert job.ungrounded("Zipped front with padding", "ZIP FRONT, PADDED", "jacket") == []
     assert job.ungrounded("Zipped front in wool", "ZIP FRONT", "jacket") == ["wool"]

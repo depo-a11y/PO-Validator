@@ -368,8 +368,8 @@ def run(pending, R, factory=None):
     for n in pending:
         if n.get("describe") is not None:
             by_code[n["code"]].append(n)
-    drafts = {c: ns[0]["describe"] for c, ns in by_code.items()}
-    saved = {c: json.dumps(d) for c, d in drafts.items()}
+    drafts = {c: ns[0]["describe"] for c, ns in by_code.items()}   # one product's evidence per code
+    saved = [(n, json.dumps(n["describe"])) for ns in by_code.values() for n in ns]
     usage, stats, failed = common.Usage(), collections.Counter(), []
     words = brand_words(R.b)
     try:
@@ -394,16 +394,15 @@ def run(pending, R, factory=None):
             if len(answers) < len(chunk):
                 failed.append((len(chunk) - len(answers), "the AI's answer left them out"))
             for c, a in answers.items():
-                apply(drafts[c], a, evs[c], words, stats)
-        for c, ns in by_code.items():
+                for k, n in enumerate(by_code[c]):   # each listing keeps its own title; counted once
+                    apply(n["describe"], a, evs[c], words, stats if k == 0 else collections.Counter())
+        for ns in by_code.values():
             for n in ns:
-                n["describe"] = drafts[c]
-                n["body"] = describem.cell(drafts[c])
-    except Exception as e:
-        for c, ns in by_code.items():
-            for n in ns:
-                n["describe"] = json.loads(saved[c])
                 n["body"] = describem.cell(n["describe"])
+    except Exception as e:
+        for n, s in saved:
+            n["describe"] = json.loads(s)
+            n["body"] = describem.cell(n["describe"])
         return [dict(Check=CHECK, Result="WARN", Detail=(
             f"AI description drafting did not run: the tool hit an error ({type(e).__name__}: "
             f"{common.ai._scrub(e, key)}). The tool's own descriptions stand."
