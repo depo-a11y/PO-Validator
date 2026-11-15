@@ -401,9 +401,13 @@ def item_mismatch(sentence, item):
 
 def title_kind(title):
     """The kind of product the title's name part names (the words before ' in <colour>'), else None. In a
-    'CATEGORY - NAME' string the name after ' - ' is read first ('KNIT SWEATSHIRT - TRACK JKT' is a jacket)."""
+    'CATEGORY - NAME' string the name after ' - ' is read first ('KNIT SWEATSHIRT - TRACK JKT' is a jacket). A trailing
+    'Short' after a plural noun is its length ('Socks Short' are socks); after anything else it is shorts."""
     parts = (title_colour(title)[0] or "").split(" - ")
     for part in parts[1:] + parts[:1]:
+        toks = re.findall(r"[a-z]+(?:-[a-z]+)*", part.lower())
+        if len(toks) >= 2 and toks[-1] == "short" and toks[-2] in ITEM_KINDS and toks[-2].endswith("s"):
+            return ITEM_KINDS[toks[-2]]   # 'Socks Short': a length word after a plural noun, not a pair of shorts
         kind = item_kind(part, last=True, table=TITLE_KINDS)
         if kind:
             return kind

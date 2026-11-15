@@ -279,6 +279,17 @@ def test_a_title_naming_another_kind_than_the_type_keeps_the_body_red(title, pty
     assert d["title"] == title and d["item"] == describe.item_noun(ptype, title)   # neither is changed
 
 
+def test_a_trailing_short_after_a_plural_noun_is_a_length():
+    assert describe.title_kind("Loop Socks Short in Grey") == "accessory"
+    assert describe.title_kind("Loop Knit Short in Black") == "bottom"
+    assert describe.title_kind("Moto Cargo Pant in Black") == "bottom"
+    assert describe.title_kind("Loop Hooded Sweater in Stone") == "knit"
+    f = dict(code=TOTE, vendor="Acme", title=("Loop Socks Short in Grey", "catalog", ""), ptype=("MEN ACCS SOCKS", "x", ""),
+             composition=[dict(value="100% Cotton", where="x", source="OC", html=False)], made_in=[], text=[])
+    d = describe.draft(f, BRAND)
+    assert describe.TITLE_MISMATCH not in d["red"] and "is a pair of socks." in describe.render(d)
+
+
 def test_an_items_kind_is_its_head_noun():
     assert not describe.item_mismatch("This bag has a zip pocket.", "belt bag")
     assert not describe.item_mismatch("This short jacket has a stand collar.", "lightweight jacket")
