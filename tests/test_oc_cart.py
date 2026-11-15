@@ -46,7 +46,7 @@ CART_ROWS = [
               "Primary Fabric: 100% Nylon", "", 300),
     _cart_row("Minimal Logo 8mm", "S97UQ0003", "P0003", "951", "Shiny palladium", "Female", "Rings",
               "Body: 100% Silver", "MADE IN ITALY", 80),
-    _cart_row("KEY RING", "S95XX0005", "P0005", "T8013", "Black", "Unisex", "Key Rings", "", "", 50),
+    _cart_row("KEY RING", "S95XX0005", "P0005", "T0005", "Black", "Unisex", "Key Rings", "", "", 50),
 ]
 
 
@@ -138,11 +138,11 @@ def _check(checks, name):
 def test_load_finds_header_by_content_and_keys_on_full_join_key(tmp_path):
     c = cartm.load(write_cart(tmp_path / "c.xlsx"))
     assert c["label"] == "cart TESTSES" and c["sheet"] == "DOOR 001-TEST"
-    assert set(c["rows"]) == {SNEAKER, JACKET_A, JACKET_B, RING, "S95XX0005P0005 T8013"}
+    assert set(c["rows"]) == {SNEAKER, JACKET_A, JACKET_B, RING, "S95XX0005P0005 T0005"}
     assert c["rows"][SNEAKER]["row"] == 6 and c["rows"][SNEAKER]["gender"] == "MEN"
     assert c["rows"][JACKET_A]["colour"] == "Beige" and c["rows"][JACKET_B]["colour"] == "Optic white"
     assert c["rows"][RING]["made_in"] == "Italy" and c["rows"][SNEAKER]["made_in"] == "Italy"
-    assert c["rows"]["S95XX0005P0005 T8013"]["gender"] is None
+    assert c["rows"]["S95XX0005P0005 T0005"]["gender"] is None
     assert c["rows"][SNEAKER]["wholesale"] == 210.0
     assert cartm.load(write_cart(tmp_path / "bare.xlsx", preamble=False))["label"] == "cart bare.xlsx"
 
@@ -220,11 +220,11 @@ def test_coverage_checks_count_both_sides(tmp_path, catalog):
     assert oc_only["Result"] == "INFO" and oc_only["Detail"].startswith("1 code(s)") and STRAY in oc_only["Detail"]
     cart_only = _check(checks, "Cart codes not on the OC")[0]
     assert cart_only["Result"] == "INFO" and cart_only["Detail"].startswith("1 code(s)")
-    assert "S95XX0005P0005 T8013" in cart_only["Detail"]
+    assert "S95XX0005P0005 T0005" in cart_only["Detail"]
 
 
 def test_a_cart_for_another_order_fails_and_changes_nothing(tmp_path, catalog):
-    other = [_cart_row("KEY RING", "S95XX0005", "P0005", "T8013", "Black", "Unisex", "Key Rings", "", "", 50)]
+    other = [_cart_row("KEY RING", "S95XX0005", "P0005", "T0005", "Black", "Unisex", "Key Rings", "", "", 50)]
     rows, review, checks, fills = _draft(catalog, cartm.load(write_cart(tmp_path / "c.xlsx", rows=other)))
     m = _check(checks, "Cart matches this OC")
     assert len(m) == 1 and m[0]["Result"] == "FAIL" and "wrong cart" in m[0]["Detail"]
@@ -441,7 +441,7 @@ def test_write_frame_matches_to_excel_cell_for_cell(tmp_path):
         "Qty": [1, 2, 3, 4],
         "Int64": pd.array([1, None, 3, pd.NA], dtype="Int64"),
         "Flag": [True, False, True, False],
-        "Code": ["S52AH0089M36273 115", "+61 3", "@home", "OS"],
+        "Code": ["S99ZZ0001M00001 101", "+61 3", "@home", "OS"],
     })
     ours, theirs = tmp_path / "ours.xlsx", tmp_path / "theirs.xlsx"
     poxlsx.write_frame(str(ours), frame, "Products")

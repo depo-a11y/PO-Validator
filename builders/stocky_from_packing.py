@@ -55,7 +55,7 @@ class PackLine:
     qty: int
 
     @property
-    def mfc(self) -> str:              # manufacture code, e.g. 807881WHAEG9079
+    def mfc(self) -> str:              # manufacture code, e.g. 990001ZXAAA9001
         return f"{self.style}{self.part}{self.color}"
 
 
@@ -97,7 +97,7 @@ class LocationReport:
 def tail(code: str) -> str:
     """Return a manufacture code from its first letter onward (drops the style
     prefix), so a source typo in the leading digits still joins. e.g.
-    '53770WIAIH9061 ' and '553770WIAIH9061' both -> 'WIAIH9061'."""
+    '90003ZXCCC9003 ' and '990003ZXCCC9003' both -> 'ZXCCC9003'."""
     m = re.search(r"[A-Za-z].*", code.strip())
     return re.sub(r"\s+", "", m.group()) if m else code.strip()
 

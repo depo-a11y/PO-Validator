@@ -511,25 +511,25 @@ Total order q.ty 2 Total net value 200,00 Example Atelier Ltd"""
     assert ai.interpret(raw, _layout_cfg(raw), [text])[1] == []
 
 
-@pytest.mark.parametrize("value,ok", [("VINTAGE BLACK", True), ("BLACK/CREAM LOGO", True), ("VINTAGE GREY", False),
-                                      ("101", False), ("0031", True), ("20%", True)])
+@pytest.mark.parametrize("value,ok", [("WASHED GREEN", True), ("GREEN/WHITE STRIPE", True), ("WASHED GREY", False),
+                                      ("101", False), ("0042", True), ("30%", True)])
 def test_a_wrapped_cell_is_spelled_from_whole_words_but_a_short_code_never_is(value, ok):
-    block = ("rw01614 80% 0031 : 4 4 2 10 $85.00 $850.00 cotton, vintag 20% e black polyester "
-             "nylon, black/ 13% cream elastane logo 1 x 01").split()
+    block = ("zx07357 70% 0042 : 3 2 1 6 $65.00 $390.00 wool, washe 30% d green acrylic "
+             "silk, green/ 11% white spandex stripe 1 x 02").split()
     assert ai.has_words(block, value) is ok
 
 
 @pytest.mark.parametrize("label,ok", [("S", True), ("OSFM", True), ("15", False), ("XL", False), ("7.5/9", True)])
 def test_a_size_is_a_word_or_the_head_of_a_size_cell(label, ok):
-    words = "1 in2391 osfm/4 s/3 m/3 15/10/2026 7.5/9 8/9.5".split()
+    words = "1 zx5550 osfm/4 s/3 m/3 15/10/2026 7.5/9 8/9.5".split()
     assert ai.has_size(words, label) is ok
 
 
 def test_words_run_together_by_the_default_extraction_are_read_from_the_tight_one():
-    """adidas: the default extraction prints 'Y-3DADCAPBLACK', the tight one 'Y-3 DAD CAP BLACK'."""
-    loose = "Example Atelier Ltd Order Number : 900000001\n1 ZZ0001 Y-3DADCAPBLACK 4 OSFM/4 30.00 120.00\n" \
+    """adidas: the default extraction prints 'Y-3ZXCAPBLACK', the tight one 'Y-3 ZX CAP BLACK'."""
+    loose = "Example Atelier Ltd Order Number : 900000001\n1 ZZ0001 Y-3ZXCAPBLACK 4 OSFM/4 30.00 120.00\n" \
             "Quantity 4 Order Value 120.00"
-    tight = loose.replace("Y-3DADCAPBLACK", "Y-3 DAD CAP BLACK")
+    tight = loose.replace("Y-3ZXCAPBLACK", "Y-3 ZX CAP BLACK")
     raw = RAW("Example Atelier Ltd", "900000001", [L("ZZ0001", None, "BLACK", [("OSFM", "4")], "4", "30.00", "120.00")],
               "4", "120.00", cur="USD")
     assert ai.interpret(copy.deepcopy(raw), _layout_cfg(raw), [loose])[1] != []

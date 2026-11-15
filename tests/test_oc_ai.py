@@ -334,26 +334,26 @@ def test_bold_text_printed_twice_is_still_found(tmp_path, key):
     assert "SO-90001" not in ai.pdf_text(doubled)
     docs, warns, _ = ai.read(doubled, _cfg(), factory=FakeClient(message(RESPONSE)).factory)
     assert docs == EXPECTED and warns == []
-    assert ai.undouble("PPRROOFFOORRMMAA - Deposit 44 1488.60") == "PROFORMA - Deposit 4 1488.60"
+    assert ai.undouble("PPRROOFFOORRMMAA - Deposit 44 2377.40") == "PROFORMA - Deposit 4 2377.40"
 
 
 def test_amounts_are_found_without_their_currency_mark():
-    hay = ai.Haystack("Total € 1,488.60 and 30.00")
-    assert hay.has("EUR 1,488.60", amount=True) and hay.has("€ 30.00", amount=True)
-    assert not hay.has("€ 1,488.61", amount=True) and not hay.has("", amount=True)
+    hay = ai.Haystack("Total € 2,377.40 and 30.00")
+    assert hay.has("EUR 2,377.40", amount=True) and hay.has("€ 30.00", amount=True)
+    assert not hay.has("€ 2,377.41", amount=True) and not hay.has("", amount=True)
 
 
 # ---- numbers -------------------------------------------------------------------------
 @pytest.mark.parametrize("text,value", [
-    ("€ 1,488.60", 1488.6), ("1.234,56", 1234.56), ("315.610,00", 315610.0), ("EUR 100,00", 100.0),
-    ("100", 100.0), ("$1,962.00", 1962.0), ("1488.60", 1488.6), ("1,50", 1.5), ("100,00 EUR", 100.0),
+    ("€ 2,377.40", 2377.4), ("1.234,56", 1234.56), ("315.610,00", 315610.0), ("EUR 100,00", 100.0),
+    ("100", 100.0), ("$1,962.00", 1962.0), ("2377.40", 2377.4), ("1,50", 1.5), ("100,00 EUR", 100.0),
     ("US$ 490.50", 490.5), ("1 962,00", 1962.0), ("1,234,567.89", 1234567.89),
 ])
 def test_money_parses_printed_amounts(text, value):
     assert ai.parse_money(text) == value
 
 
-@pytest.mark.parametrize("text", ["1,488", "1.234", "12.5", "1.488.60", "1,234,56", "about 120", "-", "", None,
+@pytest.mark.parametrize("text", ["2,377", "1.234", "12.5", "2.377.40", "1,234,56", "about 120", "-", "", None,
                                   "1,23,456.00", "-100,00", "100,000", "1.234.56,00"])
 def test_money_refuses_what_is_ambiguous(text):
     assert ai.parse_money(text) is None

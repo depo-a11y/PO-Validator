@@ -57,7 +57,7 @@ X_STYLE = (65, 115)
 X_FAB, X_COL = (115, 210), (210, 290)
 X_FABRIC, X_CONTENT = (115, 155), (155, 210)   # Spring 2026 prints a fabric word ("Knit") left of the content
 # That word is `fabric_name`, never `fabric`: `fabric` is a join field (a code in the store's key, otb's P0001), and
-# the default join_key "{style}{fabric} {colour}" would otherwise build 192SP266941FKnit for a config without one.
+# the default join_key "{style}{fabric} {colour}" would otherwise build ZX00266FKnit for a config without one.
 X_SIZES_LO = 280
 CURRENCIES = {"US Dollar": "USD", "Euro": "EUR"}
 

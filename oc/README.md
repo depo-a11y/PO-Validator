@@ -55,7 +55,7 @@ now off by Colwyn's rule of 2026-11-12.
   whatever the change added, such as a re-bought product. Every file of a run carries one run id: its file-name
   prefix, which is also each workbook's Title and the first row of finalize-checks. A catalog that already carries
   the season, its tag or the OC cost is a WARN (its ROLLBACK would put nothing back).
-  It is all or nothing: if any check fails (the gate, a title still holding a raw code such as "in T2180", a
+  It is all or nothing: if any check fails (the gate, a title still holding a raw code such as "in T0004", a
   blank colour family) no upload or delivery file is written, and exit code is 1.
 
 **Inputs**
@@ -336,8 +336,8 @@ this way; `--reader ai` (the page's "Read the OC with AI" box) forces it for an 
 Nothing falls back from one reader to the other on its own.
 
 The model transcribes and Python decides. Every number comes back as the printed text and is parsed here:
-money needs a 2-digit decimal part or is a bare integer (`€ 1,488.60`, `1.234,56`, `EUR 100,00`, `100`), and
-`1,488` or `12.5` is refused, never guessed. The docs have the otb shape and pass `otb.gate_problems` unchanged
+money needs a 2-digit decimal part or is a bare integer (`€ 2,377.40`, `1.234,56`, `EUR 100,00`, `100`), and
+`2,377` or `12.5` is refused, never guessed. The docs have the otb shape and pass `otb.gate_problems` unchanged
 (sizes sum to the line, qty x price = line value, lines sum to the printed totals). On top of that, a read is
 refused when: a line has no sizes (a proforma prints none: upload the order confirmation), the currency is not the
 brand's `cost_currency`, the issuer is not one of the brand's `oc_supplier` names (case and punctuation ignored),

@@ -9,52 +9,52 @@ HERE = Path(__file__).resolve().parent
 DOWNLOADS = Path.home() / "Downloads"
 
 MENS_TXT = """Page 1 / 1
-Packing List 26001400758
-IPO Invoice Ref. 1128-3260001545
-Consignee (Ship-to 0000754800)
+Packing List 90000000001
+IPO Invoice Ref. 0000-9000000001
+Consignee (Ship-to 0000000001)
 ALEXANDER MCQUEEN MARAIS - MENS (ROYAL ARCADE)
 Total number of parcels : 1 Total number of Units Added : 3
-Parcel 210001390001638923
+Parcel 900000000000000001
 Customs tariff code SKU ID EAN PO ID Quantity
 Model / Part / Color / Size Description
-64039996 8139653611 3667316012638 2 Pair
+90000001 9000000001 2000000000011 2 Pair
 LEATHER UPPER AND RUBBER SOLE
-807881 WHAEG 9079 43
+990001 ZXAAA 9001 43
 SNEAKER
-64039996 8139653638 3667316012652 1 Pair
+90000001 9000000002 2000000000028 1 Pair
 LEATHER UPPER AND RUBBER SOLE
-807881 WHAEG 9079 44
+990001 ZXAAA 9001 44
 SNEAKER
 """
 
-WOMENS_TXT = """Packing List 26001400770
-IPO Invoice Ref. 1128-3260001547
-Consignee (Ship-to 0000754801)
+WOMENS_TXT = """Packing List 90000000002
+IPO Invoice Ref. 0000-9000000002
+Consignee (Ship-to 0000000002)
 ALEXANDER MCQUEEN MARAIS - WOMENS (BOURKE ST)
 Total number of Units Added : 1
-64039998 8139652844 3667316011860 1 Pair
+90000002 9000000003 2000000000035 1 Pair
 LEATHER UPPER AND RUBBER SOLE
-553770 WIAIH 9182 37
+990002 ZXBBB 9002 37
 SNEAKER
 """
 
 
 def test_parse_basic():
     pl = S.parse_packing_text(MENS_TXT)
-    assert pl.prep == "26001400758"
-    assert pl.ipo_ref == "1128-3260001545"
+    assert pl.prep == "90000000001"
+    assert pl.ipo_ref == "0000-9000000001"
     assert "MARAIS - MENS (ROYAL ARCADE)" in pl.ship_to
     assert pl.stated_units == 3
     assert len(pl.lines) == 2
     l0 = pl.lines[0]
-    assert (l0.style, l0.part, l0.color, l0.size) == ("807881", "WHAEG", "9079", "43")
-    assert l0.ean == "3667316012638" and l0.qty == 2
-    assert l0.mfc == "807881WHAEG9079"
+    assert (l0.style, l0.part, l0.color, l0.size) == ("990001", "ZXAAA", "9001", "43")
+    assert l0.ean == "2000000000011" and l0.qty == 2
+    assert l0.mfc == "990001ZXAAA9001"
     assert pl.units == 3
 
 
 def test_parse_rejects_unbalanced():
-    bad = MENS_TXT + "64039996 8139653654 3667316012676 1 Pair\n"  # item with no code line
+    bad = MENS_TXT + "90000001 9000000004 2000000000042 1 Pair\n"  # item with no code line
     try:
         S.parse_packing_text(bad)
     except ValueError:
@@ -71,25 +71,25 @@ def test_resolve_location():
 
 
 def test_tail_absorbs_leading_typo():
-    assert S.tail("53770WIAIH9061 ") == S.tail("553770WIAIH9061") == "WIAIH9061"
+    assert S.tail("90003ZXCCC9003 ") == S.tail("990003ZXCCC9003") == "ZXCCC9003"
 
 
 def test_mapping_full_and_tail_fallback():
     m = S.Mapping()
-    m.add("53770WIAIH9061", "35", "AMQWF20137", 263.2)   # note the leading-5 typo
+    m.add("90003ZXCCC9003", "35", "ZXWF99037", 250.0)   # note the leading-9 typo
     # exact (normalized) hit
-    assert m.lookup("53770WIAIH9061", "35") == ("AMQWF20137", 263.2)
+    assert m.lookup("90003ZXCCC9003", "35") == ("ZXWF99037", 250.0)
     # corrected code still resolves via tail fallback
-    assert m.lookup("553770WIAIH9061", "35") == ("AMQWF20137", 263.2)
-    assert m.lookup("807881WHAEG9079", "43") is None
+    assert m.lookup("990003ZXCCC9003", "35") == ("ZXWF99037", 250.0)
+    assert m.lookup("990001ZXAAA9001", "43") is None
 
 
 def test_mapping_ambiguous_tail_raises():
     m = S.Mapping()
-    m.add("111111WIAIH9061", "35", "SKU_A", 1.0)
-    m.add("222222WIAIH9061", "35", "SKU_B", 2.0)
+    m.add("111111ZXDDD9004", "35", "SKU_A", 1.0)
+    m.add("222222ZXDDD9004", "35", "SKU_B", 2.0)
     try:
-        m.lookup("999999WIAIH9061", "35")  # not a full hit; tail matches two SKUs
+        m.lookup("999999ZXDDD9004", "35")  # not a full hit; tail matches two SKUs
     except ValueError:
         return
     raise AssertionError("expected ambiguity ValueError")
@@ -97,9 +97,9 @@ def test_mapping_ambiguous_tail_raises():
 
 def _mens_mapping():
     m = S.Mapping()
-    m.add("807881WHAEG9079", "43", "AMQFW26005", 506.12)
-    m.add("807881WHAEG9079", "44", "AMQFW26006", 506.12)
-    m.add("553770WIAIH9182", "37", "AMQWF20145", 429.02)
+    m.add("990001ZXAAA9001", "43", "ZXFW99005", 500.0)
+    m.add("990001ZXAAA9001", "44", "ZXFW99006", 500.0)
+    m.add("990002ZXBBB9002", "37", "ZXWF99045", 400.0)
     return m
 
 
@@ -107,7 +107,7 @@ def test_build_placements_single_location():
     pl = S.parse_packing_text(MENS_TXT)
     placements, errors = S.build_placements([pl], _mens_mapping())
     assert errors == []
-    assert {p.sku for p in placements} == {"AMQFW26005", "AMQFW26006"}
+    assert {p.sku for p in placements} == {"ZXFW99005", "ZXFW99006"}
     assert all(p.location == "Marais - Men" for p in placements)
     rep = S.location_check(placements)
     assert rep.multi is False
@@ -135,7 +135,7 @@ def test_stated_units_oracle_blocks():
 
 def test_location_check_unmapped():
     pl = S.parse_packing_text(WOMENS_TXT.replace("MARAIS - WOMENS (BOURKE ST)", "MARAIS - KIDS (X)"))
-    m = S.Mapping(); m.add("553770WIAIH9182", "37", "AMQWF20145", 429.02)
+    m = S.Mapping(); m.add("990002ZXBBB9002", "37", "ZXWF99045", 400.0)
     placements, _ = S.build_placements([pl], m)
     rep = S.location_check(placements)
     assert rep.unmapped and "KIDS" in rep.unmapped[0]

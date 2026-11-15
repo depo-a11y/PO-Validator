@@ -21,8 +21,8 @@ Tot. Qty x Price == Line value; per document the lines sum to the printed
 Total order q.ty and Total net value. `gate_problems` re-derives all three from
 the parsed data, so a mutated copy can be re-checked.
 
-Number format, per document: S/S 26, F/W 25 and S/S 27 print 1.446,00 and
-23/03/2026; F/W 26 prints 1,446.00 and 03/23/2026. Each confirmation's amounts
+Number format, per document: S/S 26, F/W 25 and S/S 27 print 3.517,00 and
+23/03/2026; F/W 26 prints 3,517.00 and 03/23/2026. Each confirmation's amounts
 are read as printed and decide its format; amounts in both formats, or in
 neither, refuse the confirmation. Dates come back day first either way.
 """

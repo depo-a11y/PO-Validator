@@ -142,8 +142,8 @@ def test_otb_refuses_a_date_that_is_not_in_its_amounts_format(tmp_path, fmt, del
 
 def test_number_format_is_one_format_or_none():
     nf = otb.number_format
-    assert nf([]) == "eu" and nf(["1.446,00", "828,00"]) == "eu" and nf(["828.00", "17,780.00"]) == "us"
-    assert nf(["1.446,00", "828.00"]) is None and nf(["1,446,00"]) is None and nf(["1.446.00"]) is None
+    assert nf([]) == "eu" and nf(["3.517,00", "737,00"]) == "eu" and nf(["737.00", "17,780.00"]) == "us"
+    assert nf(["3.517,00", "737.00"]) is None and nf(["3,517,00"]) is None and nf(["3.517.00"]) is None
     assert otb.count("1.334", "eu") == 1334 and otb.count("1,334", "us") == 1334
     assert otb.count("1,334", "eu") is None and otb.count("1.334", "us") is None
 

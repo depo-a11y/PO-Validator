@@ -274,8 +274,8 @@ def _bare(text):
 
 def parse_money(text):
     """Printed amount -> float, or None when it is not one. A bare integer, or a 2-digit decimal part with an
-    optional consistent thousands separator that differs from the decimal mark: '€ 1,488.60', '1.234,56',
-    '315.610,00', 'EUR 100,00', '100'. '1,488' and '12.5' are ambiguous and come back None."""
+    optional consistent thousands separator that differs from the decimal mark: '€ 2,377.40', '1.234,56',
+    '315.610,00', 'EUR 100,00', '100'. '2,377' and '12.5' are ambiguous and come back None."""
     if text is None:
         return None
     t = _bare(text)
@@ -363,7 +363,7 @@ def find_run(toks, value, lo, hi):
 def has_words(toks, value):
     """`value` as whole words of toks: one run of adjacent words; or, for a value with five or more letters, whole
     words in order that spell it with other words between them (a table cell wrapped over lines, even mid-word:
-    'VINTAG' ... 'E BLACK'). A short code such as '101' must be one run, never pieced together."""
+    'WASHE' ... 'D GREEN'). A short code such as '101' must be one run, never pieced together."""
     flat = _flat(value)
     if not flat:
         return False
@@ -430,7 +430,7 @@ class Pages:
     """The PDF's words page by page, case-folded: from pdfplumber's default extraction and, when given, a tight
     one (x_tolerance=1, which keeps words apart where the default runs them together), each as printed and with
     doubled bold glyphs collapsed. Codes, colours and size names must be whole words or whole runs of words;
-    amounts are matched with the spaces of their part removed ('€ 1,488.60'). Each line is judged on the variant
+    amounts are matched with the spaces of their part removed ('€ 2,377.40'). Each line is judged on the variant
     that misses least overall."""
 
     def __init__(self, pages, tight=None):
@@ -564,7 +564,7 @@ def _shape(text, exact_digits=False):
 
 
 def _money_shape(raw):
-    """The confirmation's amount format, from the amounts the AI returned: '1.446,00' -> dot thousands, comma
+    """The confirmation's amount format, from the amounts the AI returned: '3.517,00' -> dot thousands, comma
     decimals."""
     import collections
     marks = collections.Counter()
