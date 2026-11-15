@@ -2,7 +2,7 @@
 
     <p>{VENDOR}'s {Title} is a {adjective} {item}. {Sentence 2}.</p>
     <ul>
-    <li>Composition: {composition, verbatim}</li>
+    <li>Composition: {composition, the order-time text in Title Case}</li>
       <li>{feature}</li>            (the house has 4 to 6, 5 the mode)
     <li>Made in {Country}</li>
     </ul><br><p>SKU: {manufacture code}</p>
@@ -13,21 +13,26 @@ It writes only what an order-time fact grounds, and leaves out what none does:
   (Colwyn, 2026-10-13): a drafted part holding one is dropped;
 - the item noun from the Type (ITEMS, the gender word left out; "pair of" for what is sold in pairs). A Type ITEMS
   does not know gives no intro, and the cell is red;
-- an adjective only where a phrase of ADJECTIVES is printed in this product's own order-time text (the OC line's
-  description, product class and fabric name, the cart's Style Name). No order-time field is a second sentence, so
-  the tool writes none: the intro may be one sentence;
-- Composition verbatim from the first usable source in PRIORITY order: the OC line, the cart's Materials, the live
-  same style+fabric product's Composition line. Whitespace is collapsed and nothing else changed (lesson
-  composition-line-must-be-read-whole). A missing, placeholder, garbled, coded or cut-off value is never written and
-  the cell is red; sources that disagree are both named in the Why;
+- an adjective only where a phrase of ADJECTIVES is printed in this product's own OC description (a material or
+  finish also in its fabric name), and only on a kind of product it can describe (a waist on bottoms, dresses and
+  outerwear; a neckline or sleeves on tops, dresses and outerwear; a leg on bottoms). Never from the product class or
+  the cart's Style Name, which name a category ("Crewneck"), and never two of one group (two necklines). No
+  order-time field is a second sentence, so the tool writes none: the intro may be one sentence;
+- Composition from the first usable source in this order: the OC line's composition, its fabrication (the fabric in
+  words, where a JOOR export prints no composition), the cart's Materials, the live same style+fabric product's
+  Composition line. The text is taken whole (lesson composition-line-must-be-read-whole), whitespace collapsed and
+  written in Title Case, as live Composition lines are (str.title; the printed text is in the Why); a live product's
+  line is kept as it is. A missing, placeholder, garbled, coded or cut-off value is never written and the cell is red;
+  sources that disagree are both named in the Why;
 - feature bullets, each from a fact: the title's colour words ("{Colour} colourway", AU spelling), one material
-  given for a labelled part of the composition ("Rubber sole"), and FEATURES phrases printed in the order-time text;
+  given for a labelled part of the composition ("Rubber sole"), and FEATURES phrases, under the adjectives' rules;
 - Made in only for a country the tool knows (the brand config's country_names, then COUNTRIES), never "Made in -".
 
 The cell is never green: amber "tool draft, check", or the least trusted of its parts, so a red title or Type keeps
 it red, and red when the Composition line or the intro is missing. The Why names each source and every gap against
 the house shape. AI prose (oc/agent/describe.py) may fill the adjective, second sentence and bullets the tool could
-not ground; nothing else. A brand config that sets its own body_html keeps that template (oc/brand.py).
+not ground; nothing else. An AI second sentence whose subject is another kind of product than the item noun (a
+sweater where the Type says sweatshirt) keeps the body red: the Type is checked, never changed. A brand config that sets its own body_html keeps that template (oc/brand.py).
 """
 import html
 import re
@@ -99,44 +104,101 @@ ITEMS = {
     "SHOES SNEAKERS": "pair of sneakers",
 }
 
-# A phrase printed in the order-time text -> the adjective it grounds (at most two, in the order printed).
+# What kind of thing a Type is: a claim about a waist, a leg or a neckline is written only on a kind that has one.
+GARMENT = frozenset({"top", "bottom", "dress", "outerwear"})
+UPPER = frozenset({"top", "dress", "outerwear"})
+WAIST = frozenset({"bottom", "dress", "outerwear"})
+ANY = GARMENT | {"footwear", "bag", "accessory"}
+DESC, MATERIAL = ("description",), ("description", "fabric_name")   # the fields a claim may be read from
+
+
+def _e(keys, result, kinds=ANY, fields=DESC, group=None):
+    return keys, result, frozenset(kinds), fields, group
+
+
+# A phrase printed in this product's own description (or, for a material or finish, its fabric name) -> the
+# adjective it grounds, only on the kinds listed. Never the product class or the cart's Style Name: they name a
+# category ("Crewneck"), not how the product is made. Two phrases of one group (two necklines, two leg shapes)
+# contradict each other, so neither is written.
 ADJECTIVES = (
-    (("relaxed fit", "relaxed-fit"), "relaxed-fit"), (("regular fit", "regular-fit"), "regular-fit"),
-    (("slim fit", "slim-fit"), "slim-fit"), (("oversized", "oversize"), "oversized"), (("boxy",), "boxy"),
-    (("cropped",), "cropped"), (("padded",), "padded"), (("quilted",), "quilted"), (("knitted", "knit"), "knitted"),
-    (("woven",), "woven"), (("ribbed",), "ribbed"), (("washed",), "washed"), (("distressed",), "distressed"),
-    (("embroidered",), "embroidered"), (("printed",), "printed"), (("reversible",), "reversible"),
-    (("hooded",), "hooded"), (("zipped", "zip-up", "zip up"), "zip-up"), (("belted",), "belted"),
-    (("pleated",), "pleated"), (("waxed",), "waxed"), (("coated",), "coated"), (("brushed",), "brushed"),
-    (("double breasted", "double-breasted"), "double-breasted"),
-    (("single breasted", "single-breasted"), "single-breasted"), (("wide leg", "wide-leg"), "wide-leg"),
-    (("straight leg", "straight-leg"), "straight-leg"), (("tapered",), "tapered"), (("flared",), "flared"),
-    (("high waisted", "high-waisted"), "high-waisted"), (("sleeveless",), "sleeveless"),
-    (("lightweight",), "lightweight"), (("long sleeve", "long-sleeve", "long sleeved", "long-sleeved"), "long-sleeve"),
-    (("short sleeve", "short-sleeve", "short sleeved", "short-sleeved"), "short-sleeve"),
+    _e(("relaxed fit", "relaxed-fit"), "relaxed-fit", GARMENT, group="fit"),
+    _e(("regular fit", "regular-fit"), "regular-fit", GARMENT, group="fit"),
+    _e(("slim fit", "slim-fit"), "slim-fit", GARMENT, group="fit"),
+    _e(("oversized", "oversize"), "oversized", GARMENT, group="fit"), _e(("boxy",), "boxy", GARMENT, group="fit"),
+    _e(("cropped",), "cropped", GARMENT), _e(("padded",), "padded", GARMENT | {"bag"}),
+    _e(("quilted",), "quilted", GARMENT | {"bag"}), _e(("knitted", "knit"), "knitted", GARMENT | {"accessory"}, MATERIAL),
+    _e(("woven",), "woven", ANY, MATERIAL), _e(("ribbed",), "ribbed", GARMENT | {"accessory"}),
+    _e(("washed",), "washed", GARMENT | {"bag", "accessory"}, MATERIAL), _e(("distressed",), "distressed"),
+    _e(("embroidered",), "embroidered"), _e(("printed",), "printed"), _e(("reversible",), "reversible", ANY - {"footwear"}),
+    _e(("hooded",), "hooded", {"top", "outerwear"}), _e(("zipped", "zip-up", "zip up"), "zip-up", GARMENT | {"bag"}),
+    _e(("belted",), "belted", WAIST), _e(("pleated",), "pleated", GARMENT | {"bag"}),
+    _e(("waxed",), "waxed", ANY, MATERIAL), _e(("coated",), "coated", ANY, MATERIAL),
+    _e(("brushed",), "brushed", ANY, MATERIAL),
+    _e(("double breasted", "double-breasted"), "double-breasted", UPPER, group="breasted"),
+    _e(("single breasted", "single-breasted"), "single-breasted", UPPER, group="breasted"),
+    _e(("wide leg", "wide-leg"), "wide-leg", {"bottom"}, group="leg"),
+    _e(("straight leg", "straight-leg"), "straight-leg", {"bottom"}, group="leg"),
+    _e(("tapered",), "tapered", {"bottom"}, group="leg"), _e(("flared",), "flared", {"bottom"}, group="leg"),
+    _e(("high waisted", "high-waisted"), "high-waisted", {"bottom"}),
+    _e(("sleeveless",), "sleeveless", UPPER, group="sleeve"),
+    _e(("long sleeve", "long-sleeve", "long sleeved", "long-sleeved"), "long-sleeve", UPPER, group="sleeve"),
+    _e(("short sleeve", "short-sleeve", "short sleeved", "short-sleeved"), "short-sleeve", UPPER, group="sleeve"),
+    _e(("lightweight",), "lightweight", ANY, MATERIAL),
 )
-# A phrase printed in the order-time text -> the feature bullet it grounds.
+# The same, for feature bullets.
 FEATURES = (
-    (("relaxed fit", "relaxed-fit"), "Relaxed fit"), (("regular fit", "regular-fit"), "Regular fit"),
-    (("slim fit", "slim-fit"), "Slim fit"), (("oversized", "oversize"), "Oversized fit"), (("boxy",), "Boxy fit"),
-    (("cropped",), "Cropped length"), (("padded",), "Padded construction"), (("quilted",), "Quilted construction"),
-    (("ribbed",), "Ribbed texture"), (("garment dyed", "garment-dyed"), "Garment-dyed finish"),
-    (("washed",), "Washed finish"), (("distressed",), "Distressed finish"),
-    (("embroidered", "embroidery"), "Embroidered detailing"), (("logo",), "Logo detailing"),
-    (("graphic",), "Graphic print"), (("reversible",), "Reversible design"),
-    (("zip", "zipped", "zip-up", "zip up", "full zip"), "Zip fastening"),
-    (("buttoned", "button-up", "button up", "button down", "button-down"), "Button fastening"),
-    (("drawstring",), "Drawstring detail"), (("double breasted", "double-breasted"), "Double-breasted front"),
-    (("v neck", "v-neck"), "V-neckline"), (("crewneck", "crew neck", "crew-neck"), "Crew neckline"),
-    (("turtleneck", "roll neck", "rollneck"), "Roll neck"), (("mock neck", "mockneck"), "Mock neck"),
-    (("pleated",), "Pleated detailing"), (("belted",), "Belted waist"), (("waxed",), "Waxed finish"),
-    (("coated",), "Coated finish"), (("brushed",), "Brushed finish"), (("wide leg", "wide-leg"), "Wide leg"),
-    (("straight leg", "straight-leg"), "Straight leg"), (("tapered",), "Tapered leg"), (("flared",), "Flared leg"),
-    (("high waisted", "high-waisted"), "High-waisted fit"),
-    (("long sleeve", "long-sleeve", "long sleeved", "long-sleeved"), "Long sleeves"),
-    (("short sleeve", "short-sleeve", "short sleeved", "short-sleeved"), "Short sleeves"),
-    (("sleeveless",), "Sleeveless cut"), (("lightweight",), "Lightweight feel"),
+    _e(("relaxed fit", "relaxed-fit"), "Relaxed fit", GARMENT, group="fit"),
+    _e(("regular fit", "regular-fit"), "Regular fit", GARMENT, group="fit"),
+    _e(("slim fit", "slim-fit"), "Slim fit", GARMENT, group="fit"),
+    _e(("oversized", "oversize"), "Oversized fit", GARMENT, group="fit"),
+    _e(("boxy",), "Boxy fit", GARMENT, group="fit"), _e(("cropped",), "Cropped length", GARMENT),
+    _e(("padded",), "Padded construction", GARMENT | {"bag"}),
+    _e(("quilted",), "Quilted construction", GARMENT | {"bag"}),
+    _e(("ribbed",), "Ribbed texture", GARMENT | {"accessory"}),
+    _e(("garment dyed", "garment-dyed"), "Garment-dyed finish", GARMENT, MATERIAL),
+    _e(("washed",), "Washed finish", GARMENT | {"bag", "accessory"}, MATERIAL),
+    _e(("distressed",), "Distressed finish"), _e(("embroidered", "embroidery"), "Embroidered detailing"),
+    _e(("logo",), "Logo detailing"), _e(("graphic",), "Graphic print", GARMENT | {"bag", "accessory"}),
+    _e(("reversible",), "Reversible design", ANY - {"footwear"}),
+    _e(("zip", "zipped", "zip-up", "zip up", "full zip"), "Zip fastening"),
+    _e(("buttoned", "button-up", "button up", "button down", "button-down"), "Button fastening", GARMENT),
+    _e(("drawstring",), "Drawstring detail"),
+    _e(("double breasted", "double-breasted"), "Double-breasted front", UPPER, group="breasted"),
+    _e(("v neck", "v-neck"), "V-neckline", UPPER, group="neck"),
+    _e(("crewneck", "crew neck", "crew-neck"), "Crew neckline", UPPER, group="neck"),
+    _e(("turtleneck", "roll neck", "rollneck"), "Roll neck", UPPER, group="neck"),
+    _e(("mock neck", "mockneck"), "Mock neck", UPPER, group="neck"),
+    _e(("henley",), "Henley placket", UPPER, group="neck"),
+    _e(("pleated",), "Pleated detailing", GARMENT | {"bag"}), _e(("belted",), "Belted waist", WAIST),
+    _e(("waxed",), "Waxed finish", ANY, MATERIAL), _e(("coated",), "Coated finish", ANY, MATERIAL),
+    _e(("brushed",), "Brushed finish", ANY, MATERIAL),
+    _e(("wide leg", "wide-leg"), "Wide leg", {"bottom"}, group="leg"),
+    _e(("straight leg", "straight-leg"), "Straight leg", {"bottom"}, group="leg"),
+    _e(("tapered",), "Tapered leg", {"bottom"}, group="leg"), _e(("flared",), "Flared leg", {"bottom"}, group="leg"),
+    _e(("high waisted", "high-waisted"), "High-waisted fit", {"bottom"}),
+    _e(("long sleeve", "long-sleeve", "long sleeved", "long-sleeved"), "Long sleeves", UPPER, group="sleeve"),
+    _e(("short sleeve", "short-sleeve", "short sleeved", "short-sleeved"), "Short sleeves", UPPER, group="sleeve"),
+    _e(("sleeveless",), "Sleeveless cut", UPPER, group="sleeve"),
+    _e(("lightweight",), "Lightweight feel", ANY, MATERIAL),
 )
+# A noun naming what a product is -> its kind; an AI second sentence whose subject is of another kind than the Type's
+# item noun contradicts the intro, so the body stays red ("top", "tank" and the like are left out: also parts).
+ITEM_KINDS = {k: kind for kind, words in (
+    ("outerwear", "jacket jackets coat coats parka parkas blazer blazers bomber bombers trench trenches blouson "
+                  "blousons windbreaker windbreakers anorak anoraks gilet gilets vest vests puffer puffers overcoat"),
+    ("knit", "sweater sweaters jumper jumpers pullover pullovers cardigan cardigans turtleneck turtlenecks knit knits"),
+    ("top", "shirt shirts overshirt overshirts t-shirt t-shirts tee tees polo polos blouse blouses sweatshirt "
+            "sweatshirts hoodie hoodies henley henleys"),
+    ("bottom", "pants trousers jeans shorts skirt skirts chinos leggings joggers sweatpants cargos"),
+    ("dress", "dress dresses"),
+    ("footwear", "sneaker sneakers boot boots sandal sandals loafer loafers shoe shoes pump pumps mule mules ballerina "
+                 "ballerinas flats espadrilles derby derbies oxford oxfords trainer trainers slide slides"),
+    ("bag", "bag bags tote totes backpack backpacks clutch clutches shopper shoppers"),
+    ("accessory", "belt belts cap caps hat hats beanie beanies scarf scarves glove gloves sock socks ring rings "
+                  "necklace necklaces bracelet bracelets earring earrings wallet wallets keyring keyrings sunglasses "
+                  "pouch pouches"),
+) for k in words.split()}
+ITEM_MISMATCH = "the AI's text names a different item than the Type: check the Type"
 TEXT_FEATURES_MAX = 3
 # A labelled part of a composition -> the bullet's last word ("Rubber sole"); adidas footwear prints part codes.
 PARTS = {"upper": "upper", "lining": "lining", "main lining": "lining", "inner lining": "lining", "sole": "sole",
@@ -239,6 +301,12 @@ def country(value, brand):
     return names.get(v.upper()) or COUNTRY_NAMES.get(v.upper())
 
 
+def house_case(text):
+    """A composition as the house writes it: the order-time text, whitespace collapsed, in Title Case
+    (str.title: '100% COTTON-BCI' -> '100% Cotton-Bci'). Live Composition lines are the source text so cased."""
+    return squash(text).title()
+
+
 def composition_problem(text):
     """Why a composition value cannot be written as the Composition line, else ''."""
     raw = html.unescape(str(text if text is not None else ""))
@@ -259,25 +327,61 @@ def composition_problem(text):
     return ""
 
 
-def phrases(table, texts, limit):
-    """[(result, field, phrase)] for each table entry whose phrase is printed, as whole words, in a text, in the
-    order the texts print them, one per result, at most `limit`."""
+def type_kind(ptype):
+    """'top', 'bottom', 'dress', 'outerwear', 'footwear', 'bag' or 'accessory' for a Type, else None."""
+    r = type_rest(ptype)
+    for prefix, kind in (("SHOES", "footwear"), ("BAGS", "bag"), ("ACCS", "accessory"), ("CLOTHING DRESSES", "dress"),
+                         ("CLOTHING COATS", "outerwear"), ("CLOTHING JACKETS", "outerwear"), ("CLOTHING JEANS", "bottom"),
+                         ("CLOTHING PANTS", "bottom"), ("CLOTHING SHORTS", "bottom"), ("CLOTHING SKIRTS", "bottom"),
+                         ("CLOTHING", "top")):
+        if r.startswith(prefix):
+            return kind
+    return None
+
+
+def phrases(table, texts, limit, kind):
+    """([(result, field, phrase)], [groups left out]): each table entry for this kind of product whose phrase is
+    printed, as whole words, in one of the fields it may be read from, in the order the texts print them, one per
+    result, at most `limit`. A group with two different results (a crew neck and a V-neck) is left out whole."""
     found = []
     for field, text in texts:
         low = squash(text).lower()
-        for keys, result in table:
+        for keys, result, kinds, fields, group in table:
+            if field not in fields or kind not in kinds:
+                continue
             for k in keys:
                 m = re.search(r"(?<![\w-])" + re.escape(k) + r"(?![\w-])", low)
                 if m:
-                    found.append((m.start(), field, result, k))
+                    found.append((m.start(), field, result, k, group))
                     break
+    groups = {}
+    for _, _, result, _, group in found:
+        if group:
+            groups.setdefault(group, set()).add(result)
+    clash = sorted(g for g, rs in groups.items() if len(rs) > 1)
     out, seen = [], set()
     for field in dict.fromkeys(f for f, _ in texts):
-        for _, f, result, k in sorted(x for x in found if x[1] == field):
-            if result not in seen:
+        for _, f, result, k, group in sorted(x for x in found if x[1] == field):
+            if result not in seen and group not in clash:
                 seen.add(result)
                 out.append((result, f, k))
-    return out[:limit]
+    return out[:limit], clash
+
+
+def item_kind(text, words=None):
+    """The kind of the first product noun among `words` words of `text` (all of it when None), else None."""
+    toks = re.findall(r"[a-z]+(?:-[a-z]+)*", str(text or "").lower())
+    for t in toks[:words] if words else toks:
+        if t in ITEM_KINDS:
+            return ITEM_KINDS[t]
+    return None
+
+
+def item_mismatch(sentence, item):
+    """True when a second sentence's subject (a product noun in its first six words) is another kind than the item
+    noun's."""
+    mine, theirs = item_kind(item), item_kind(sentence, 6)
+    return bool(mine and theirs and mine != theirs)
 
 
 def part_bullets(value):
@@ -314,6 +418,9 @@ def facts(n, R):
     comp, made = [], []
     if squash(l.get("composition")):
         comp.append(dict(value=str(l["composition"]), where=where, source=oc_src, html=False))
+    if squash(l.get("fabrication")):   # the fabric in words, where the order prints no composition (JOOR exports)
+        comp.append(dict(value=str(l["fabrication"]), where=f"{where}, fabrication", source=oc_src, html=False,
+                         fallback=True))
     value, src, why = n["comp"]
     if src != "guess":
         comp.append(dict(value=str(value), where=why, source=src, html=src == "catalog"))
@@ -348,10 +455,13 @@ def draft(f, brand):
                         else "no intro: the Type is blank, so the tool has no item noun")
     _composition(d, f)
     _made_in(d, f, brand)
+    kind = type_kind(f["ptype"][0])
     if d["item"]:
         item_words = set(re.findall(r"[a-z]+", d["item"].lower()))
-        adj = [(a, field, k) for a, field, k in phrases(ADJECTIVES, f["text"], 4)
+        adj, clash = phrases(ADJECTIVES, f["text"], 4, kind)
+        adj = [(a, field, k) for a, field, k in adj
                if not set(re.findall(r"[a-z]+", a)) & item_words][:2]
+        d["dropped"] += [f"adjectives of the {g} (the description names two)" for g in clash]
         if adj:
             d["adjective"] = dict(text=" ".join(a for a, _, _ in adj), field=adj[0][1], by="tool",
                                   basis=" and ".join(f"'{k}' in the {field.replace('_', ' ')}" for _, field, k in adj))
@@ -368,7 +478,10 @@ def draft(f, brand):
                 d["bullets"].append(dict(text=b, field="composition", by="tool",
                                          basis=f"the {part} in the composition from {cand['where']}"))
             break
-    for b, field, k in phrases(FEATURES, f["text"], TEXT_FEATURES_MAX):
+    feats, clash = phrases(FEATURES, f["text"], TEXT_FEATURES_MAX, kind)
+    d["dropped"] += [f"bullets of the {g} (the description names two)" for g in clash if
+                     f"adjectives of the {g} (the description names two)" not in d["dropped"]]
+    for b, field, k in feats:
         d["bullets"].append(dict(text=b, field=field, by="tool", basis=f"'{k}' in the {field.replace('_', ' ')}"))
     seen, kept = set(), []
     for b in d["bullets"]:
@@ -386,14 +499,16 @@ def _composition(d, f):
         (skipped if why else usable).append((c, why))
     if usable:
         c = usable[0][0]
-        d["composition"] = dict(value=c["value"], where=c["where"], source=c["source"], html=c["html"])
+        d["composition"] = dict(value=c["value"], where=c["where"], source=c["source"], html=c["html"],
+                                text=squash(c["value"]) if c["html"] else house_case(c["value"]))
         same = squash(html.unescape(c["value"])).casefold()
         for o, _ in usable[1:]:
-            if squash(html.unescape(o["value"])).casefold() != same:
+            if not o.get("fallback") and squash(html.unescape(o["value"])).casefold() != same:
                 d["notes"].append(f"composition: {o['where']} says '{squash(html.unescape(o['value']))}', "
                                   f"used {c['where']} first (priority: the OC line, the cart, the live product)")
         for o, why in skipped:
-            d["notes"].append(f"composition from {o['where']} not used: it {why}")
+            if not o.get("fallback"):
+                d["notes"].append(f"composition from {o['where']} not used: it {why}")
         return
     if skipped:
         d["red"].append("Composition needed: " + "; ".join(
@@ -461,7 +576,7 @@ def render(d):
     lines = []
     if d["composition"]:
         c = d["composition"]
-        lines.append(f"<li>Composition: {squash(c['value']) if c['html'] else e(squash(c['value']))}</li>")
+        lines.append(f"<li>Composition: {c['text'] if c['html'] else e(c['text'])}</li>")
     lines += [f"  <li>{e(b['text'])}</li>" for b in d["bullets"]]
     if d["made_in"]:
         lines.append(f"<li>Made in {e(d['made_in']['value'])}</li>")
@@ -492,7 +607,10 @@ def why(d):
     if d["item"]:
         parts.append(f"item '{d['item']}' from the Type")
     if d["composition"]:
-        parts.append(f"composition verbatim from {d['composition']['where']}")
+        c = d["composition"]
+        raw = squash(html.unescape(c["value"]))
+        parts.append(f"composition from {c['where']}" + ("" if c["html"] or raw == c["text"] else
+                                                         f", printed '{raw}', written in Title Case as the house does"))
     if d["made_in"]:
         parts.append(f"made in {d['made_in']['value']} from {d['made_in']['where']}")
     for name, x in (("adjective", d["adjective"]), ("second sentence", d["sentence2"])):

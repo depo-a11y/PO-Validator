@@ -20,7 +20,8 @@ which printed header holds what (`check_mapping` validates it when the config lo
         doc: Order Number           # optional: one confirmation per value, else one named after the file
         # optional: line_no, fabric, product_class, gender, collection, description, delivery, issuer, label,
         #           rrp, rrp_currency, ean, hs_code, origin, style_alt (join_key_alt's {style_alt}), composition
-        #           (the description's Composition line, verbatim)
+        #           (the description's Composition line), fabrication (the fabric in words, its fallback: a JOOR
+        #           export's Fabrication where Materials is blank)
       size_columns: [XS, S, M]      # layout 2, a size matrix: one column per size, headed by the size
       size_pairs:                   # layout 3: (size, qty[, size price]) column groups, as NuORDER exports
         - [Size 1, Qty 1, Size price 1]
@@ -100,7 +101,7 @@ from ..util import iso_currency, rrp_header
 COLUMN_KEYS = ("style", "colour_code", "colour_name", "fabric", "size", "qty", "price", "line_value", "currency",
                "doc", "line_no", "product_class", "gender", "collection", "description", "delivery", "issuer",
                "label", "rrp", "rrp_currency", "ean", "hs_code", "origin", "style_alt", "qty_gross", "qty_cancelled")
-COLUMN_KEYS += ("composition",)   # free text, the house description's Composition line verbatim (oc/describe.py)
+COLUMN_KEYS += ("composition", "fabrication")   # free text for the description's Composition line (oc/describe.py)
 SHEET_KEYS = ("columns", "size_columns", "size_pairs", "size_map", "currency", "rrp_currency", "decimal",
               "line_value_per", "sheet_name", "totals", "ean_prefixes", "platform", "select", "fields",
               "footer_labels", "zero_labels", "header_rows", "sections", "stack_headers", "price_from")
@@ -1148,7 +1149,7 @@ class Reader:
                     rrp=rrp, rrp_currency=rrp_cur, rrp_found=f"column {self.head('rrp')!r}" if rrp else None,
                     rrp_note=rrp_note, rows=[r + 1 for r in rs],
                     **{k: v for k, v in per_size.items() if k in self.cols},
-                    **({"composition": text(self.cell(first, "composition"))} if "composition" in self.cols else {}))
+                    **{k: text(self.cell(first, k)) for k in ("composition", "fabrication") if k in self.cols})
 
     @staticmethod
     def _recomputed(d, what):

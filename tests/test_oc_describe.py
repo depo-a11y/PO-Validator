@@ -148,14 +148,102 @@ def test_a_usable_composition_passes_whole(value):
 
 
 def test_phrases_are_read_as_whole_words_and_an_adjective_never_repeats_the_item():
-    assert describe.phrases(describe.FEATURES, [("description", "ZIPPERED POUCH")], 3) == []
-    assert describe.phrases(describe.FEATURES, [("description", "ZIP POUCH")], 3) == \
-        [("Zip fastening", "description", "zip")]
+    assert describe.phrases(describe.FEATURES, [("description", "ZIPPERED POUCH")], 3, "accessory") == ([], [])
+    assert describe.phrases(describe.FEATURES, [("description", "ZIP POUCH")], 3, "accessory") == \
+        ([("Zip fastening", "description", "zip")], [])
     f = dict(code=TOTE, vendor="Acme", title=("Crop Pant in Sand", "catalog", ""),
              ptype=("MEN CLOTHING PANTS CROPPED", "catalog", ""), composition=[], made_in=[],
              text=[("description", "CROPPED PANT")])
     d = describe.draft(f, BRAND)
     assert d["adjective"] is None and "is a pair of cropped pants." in describe.render(d)
+
+
+def test_a_composition_is_written_in_title_case_as_the_house_does():
+    for printed, written in (("60% ORGANIC COTTON 40% POLYAMIDE (PA)", "60% Organic Cotton 40% Polyamide (Pa)"),
+                             ("SHELL: 100%  WOOL - LINING: 100% CUPRO", "Shell: 100% Wool - Lining: 100% Cupro"),
+                             ("100%COTTON", "100%Cotton"), ("52% COTTON-BCI/48% NYLON-REC", "52% Cotton-Bci/48% Nylon-Rec"),
+                             ("boiled wool gabardine", "Boiled Wool Gabardine")):
+        assert describe.house_case(printed) == written
+    f = dict(code=TOTE, vendor="Acme", title=("Drift Tote in Sand", "catalog", ""),
+             ptype=("MEN BAGS SHOPPER & TOTE BAGS", "catalog", ""),
+             composition=[dict(value="60% ORGANIC COTTON 40% POLYAMIDE (PA) & TRIM", where="the OC line", source="OC",
+                               html=False)], made_in=[], text=[])
+    d = describe.draft(f, BRAND)
+    assert "<li>Composition: 60% Organic Cotton 40% Polyamide (Pa) &amp; Trim</li>" in describe.render(d)
+    assert "printed '60% ORGANIC COTTON 40% POLYAMIDE (PA) & TRIM', written in Title Case" in describe.why(d)
+
+
+def _kinded(ptype, text, fields=("description",)):
+    f = dict(code=TOTE, vendor="Acme", title=("Drift Piece in Sand", "catalog", ""), ptype=(ptype, "catalog", ""),
+             composition=[dict(value="100% Cotton", where="x", source="OC", html=False)], made_in=[],
+             text=[(k, text) for k in fields])
+    return describe.draft(f, BRAND)
+
+
+@pytest.mark.parametrize("ptype,text,want,never", [
+    ("MEN BAGS SHOULDER BAGS", "BELTED CARRYALL", [], ["Belted waist", "belted"]),
+    ("WOMEN CLOTHING COATS", "BELTED WRAP COAT", ["Belted waist"], []),
+    ("MEN CLOTHING JACKETS LIGHTWEIGHT", "WIDE LEG JACKET", [], ["Wide leg", "wide-leg"]),
+    ("MEN CLOTHING PANTS TROUSERS", "WIDE LEG TROUSER", ["Wide leg"], []),
+    ("MEN SHOES SNEAKERS", "LONG SLEEVE RUNNER", [], ["Long sleeves", "long-sleeve"]),
+    ("MEN CLOTHING KNITWEARS SWEATERS", "HENLEY KNIT", ["Henley placket"], ["Crew neckline"]),
+    ("MEN CLOTHING SWEATSHIRTS", "CREWNECK V-NECK SWEAT", [], ["Crew neckline", "V-neckline"]),
+])
+def test_a_feature_is_written_only_on_a_kind_that_has_it(ptype, text, want, never):
+    d = _kinded(ptype, text)
+    words = [b["text"] for b in d["bullets"]] + [(d["adjective"] or {}).get("text", "")]
+    assert all(w in words for w in want) and not [w for w in never if any(w in x for x in words)]
+
+
+def test_the_product_class_is_a_category_never_a_construction():
+    d = _kinded("MEN CLOTHING SWEATSHIRTS", "CREWNECK", fields=("product_class", "style_name"))
+    assert [b["text"] for b in d["bullets"]] == ["Sand colourway"] and d["adjective"] is None
+    d = _kinded("MEN CLOTHING SWEATSHIRTS", "WAXED", fields=("fabric_name",))
+    assert d["adjective"]["text"] == "waxed"   # a finish may come from the fabric name
+    d = _kinded("MEN CLOTHING SWEATSHIRTS", "RELAXED FIT", fields=("fabric_name",))
+    assert d["adjective"] is None   # a fit may not
+
+
+def test_two_necklines_in_one_description_are_both_left_out():
+    d = _kinded("MEN CLOTHING SWEATSHIRTS", "CREWNECK SWEAT WITH V-NECK INSERT")
+    assert not [b for b in d["bullets"] if "neck" in b["text"].lower()]
+    assert "bullets of the neck (the description names two)" in describe.why(d)
+
+
+def test_an_ai_second_sentence_about_another_kind_of_product_keeps_the_body_red(key):
+    f = dict(code=SHIRT, vendor="Acme Studio", title=("Loop Crew in Black", "catalog", ""),
+             ptype=("MEN CLOTHING SWEATSHIRTS", "catalog", ""),
+             composition=[dict(value="100% Cotton", where="x", source="OC", html=False)], made_in=[],
+             text=[("description", "LOOP CREW - FINE KNIT SWEATER, RIBBED HEM")])
+    s2 = claim("This sweater has a ribbed hem.", "description", "KNIT SWEATER, RIBBED HEM")
+    for sentence, red in ((s2, True), (claim("This sweatshirt has a ribbed hem.", "description", "RIBBED HEM"), False)):
+        pending = [dict(code=SHIRT, describe=describe.draft(f, BRAND))]
+        fake = Fake({SHIRT: dict(adjective=NONE, sentence_2=sentence, bullets=[])})
+        (row,) = job.run(pending, types.SimpleNamespace(b=BRAND), factory=fake.factory)
+        d = pending[0]["describe"]
+        assert d["sentence2"]["text"] == sentence["text"]
+        assert (describe.source(d) == "guess") is red and (describe.ITEM_MISMATCH in describe.why(d)) is red
+        assert ("check their Type" in row["Detail"]) is red
+        assert d["item"] == "sweatshirt"   # the Type is never changed
+
+
+def test_the_item_kind_of_a_sentence_is_its_subject():
+    assert describe.item_mismatch("This sweater has a ribbed hem.", "sweatshirt")
+    assert not describe.item_mismatch("This bomber has a ribbed hem.", "lightweight jacket")
+    assert not describe.item_mismatch("This jacket has a shirt collar.", "lightweight jacket")
+    assert not describe.item_mismatch("This pair of loafers sits on a stacked sole.", "pair of loafers")
+    assert describe.item_mismatch("These sneakers sit on a stacked sole.", "pair of boots") is False   # one kind
+    assert describe.item_mismatch("This tote has a zip pocket.", "pair of sneakers")
+
+
+def test_a_claim_may_not_rest_on_the_title_or_the_context():
+    f = dict(code=SHIRT, vendor="Acme Studio", title=("Crew Sweat in Black", "catalog", ""),
+             ptype=("MEN CLOTHING SWEATSHIRTS", "catalog", ""), composition=[], made_in=[],
+             text=[("product_class", "CREWNECK"), ("description", "CREW SWEAT")])
+    ev = job.evidence(describe.draft(f, BRAND))
+    assert ev["context"] == {"product_class": "CREWNECK"} and set(ev["fields"]) == {"description"}
+    for field, quote in (("product_class", "CREWNECK"), ("title", "Crew Sweat")):
+        assert [k for k, _ in job.problems("bullets", claim("Crew neckline shape", field, quote), ev, [])] == ["field"]
 
 
 def test_countries_from_codes_names_and_the_config():
@@ -183,6 +271,17 @@ def test_a_claim_must_rest_on_a_quote_from_its_own_field():
 
 
 # ---- the shape --------------------------------------------------------------------------------------------
+
+
+def test_the_sheet_reader_reads_a_fabrication_column(tmp_path):
+    import test_oc_sheet as ts
+    from oc.adapters import sheet
+    rows = [ts.HEAD + ["Fabrication"]] + [r + ["Loopback  fleece"] for r in ts.ROWS]
+    path = tmp_path / "oc.csv"
+    with open(path, "w", newline="") as fh:
+        csv.writer(fh).writerows(rows)
+    docs_ = sheet.parse_checked(str(path), ts.cfg(columns=dict(ts.COLUMNS, fabrication="Fabrication")))
+    assert {l["fabrication"] for d in docs_ for l in d["lines"]} == {"Loopback fleece"}
 
 
 def test_every_type_in_expected_tags_has_an_item_noun():
