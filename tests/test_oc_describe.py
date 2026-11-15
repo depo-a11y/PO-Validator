@@ -246,6 +246,45 @@ def test_a_claim_may_not_rest_on_the_title_or_the_context():
         assert [k for k, _ in job.problems("bullets", claim("Crew neckline shape", field, quote), ev, [])] == ["field"]
 
 
+def test_the_article_follows_the_sound():
+    for phrase, a in (("U-neck T-shirt", "a"), ("L-shaped bag", "an"), ("X-ray print tee", "an"), ("unisex coat", "a"),
+                      ("euro-style bag", "a"), ("one-piece", "a"), ("oversized coat", "an"), ("upper", "an"),
+                      ("hour bag", "an"), ("T-shirt", "a"), ("pair of sneakers", "a"), ("urban jacket", "an")):
+        assert describe.article(phrase) == a, phrase
+    f = dict(code=TOTE, vendor="Acme", title=("Loop Tee in Black", "catalog", ""), ptype=("MEN CLOTHING T-SHIRTS", "x", ""),
+             composition=[], made_in=[], text=[])
+    d = describe.draft(f, BRAND)
+    d["adjective"] = dict(text="u-neck", field="description", by="tool", basis="x")
+    assert "is a u-neck T-shirt." in describe.render(d)
+
+
+@pytest.mark.parametrize("title,ptype,red", [
+    ("Loop Cap in Black", "MEN CLOTHING T-SHIRTS", True),              # a cap the Type calls a T-shirt
+    ("Loop Trousers in Black", "MEN CLOTHING KNITWEARS SWEATERS", True),
+    ("Loop Tee in Black", "MEN CLOTHING T-SHIRTS", False),
+    ("Womens Loop Tank Top in Black", "WOMEN CLOTHING T-SHIRTS", False),   # 'tank' and 'top' name parts: no kind
+    ("Loop Belt Bag in Black", "UNISEX BAGS BELT BAGS", False),           # the head of the name: a bag, not a belt
+    ("KNIT SWEATSHIRT - REV TRACK JKT in 101", "MEN CLOTHING SWEATSHIRTS", True),   # the name after ' - ' first
+    ("KNIT JACKET - LOOP HOODIE in 101", "MEN CLOTHING HOODIES", False),
+    ("Loop in Black", "MEN CLOTHING T-SHIRTS", False),                    # no kind in the title: nothing to check
+    ("Loop Knit Short in Black", "MEN CLOTHING SHORTS", False),           # a title's singular 'Short' is shorts
+    ("Loop Cargo Pant in Black", "MEN CLOTHING KNITWEARS SWEATERS", True),
+    ("Padded Loop Overshirt in Black", "MEN CLOTHING JACKETS LIGHTWEIGHT", False),   # stores type it either way
+])
+def test_a_title_naming_another_kind_than_the_type_keeps_the_body_red(title, ptype, red):
+    f = dict(code=TOTE, vendor="Acme", title=(title, "catalog", ""), ptype=(ptype, "catalog", ""),
+             composition=[dict(value="100% Cotton", where="x", source="OC", html=False)], made_in=[], text=[])
+    d = describe.draft(f, BRAND)
+    assert (describe.TITLE_MISMATCH in d["red"]) is red and (describe.source(d) == "guess") is red
+    assert d["title"] == title and d["item"] == describe.item_noun(ptype, title)   # neither is changed
+
+
+def test_an_items_kind_is_its_head_noun():
+    assert not describe.item_mismatch("This bag has a zip pocket.", "belt bag")
+    assert not describe.item_mismatch("This short jacket has a stand collar.", "lightweight jacket")
+    assert describe.item_kind("belt bag", last=True) == "bag" and describe.item_kind("belt bag") == "accessory"
+
+
 def test_countries_from_codes_names_and_the_config():
     assert [describe.country(v, BRAND) for v in ("IT", "ITA", "PORTUGAL", "Made in China", "tr", "Atlantis", "-")] \
         == ["Italy", "Italy", "Portugal", "China", "Turkey", None, None]

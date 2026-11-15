@@ -32,7 +32,8 @@ The cell is never green: amber "tool draft, check", or the least trusted of its 
 it red, and red when the Composition line or the intro is missing. The Why names each source and every gap against
 the house shape. AI prose (oc/agent/describe.py) may fill the adjective, second sentence and bullets the tool could
 not ground; nothing else. An AI second sentence whose subject is another kind of product than the item noun (a
-sweater where the Type says sweatshirt) keeps the body red: the Type is checked, never changed. A brand config that sets its own body_html keeps that template (oc/brand.py).
+sweater where the Type says sweatshirt) keeps the body red, and so does a title naming another kind than the item
+noun (a cap the Type calls a T-shirt): the Type and the title are checked, never changed. A brand config that sets its own body_html keeps that template (oc/brand.py).
 """
 import html
 import re
@@ -184,12 +185,12 @@ FEATURES = (
 # A noun naming what a product is -> its kind; an AI second sentence whose subject is of another kind than the Type's
 # item noun contradicts the intro, so the body stays red ("top", "tank" and the like are left out: also parts).
 ITEM_KINDS = {k: kind for kind, words in (
-    ("outerwear", "jacket jackets coat coats parka parkas blazer blazers bomber bombers trench trenches blouson "
+    ("outerwear", "jacket jackets jkt coat coats parka parkas blazer blazers bomber bombers trench trenches blouson "
                   "blousons windbreaker windbreakers anorak anoraks gilet gilets vest vests puffer puffers overcoat"),
     ("knit", "sweater sweaters jumper jumpers pullover pullovers cardigan cardigans turtleneck turtlenecks knit knits"),
-    ("top", "shirt shirts overshirt overshirts t-shirt t-shirts tee tees polo polos blouse blouses sweatshirt "
-            "sweatshirts hoodie hoodies henley henleys"),
-    ("bottom", "pants trousers jeans shorts skirt skirts chinos leggings joggers sweatpants cargos"),
+    ("top", "shirt shirts t-shirt t-shirts tee tees polo polos blouse blouses sweatshirt sweatshirts hoodie hoodies "
+            "henley henleys"),
+    ("bottom", "pants pnt trousers jeans shorts skirt skirts chinos leggings joggers sweatpants cargos"),
     ("dress", "dress dresses"),
     ("footwear", "sneaker sneakers boot boots sandal sandals loafer loafers shoe shoes pump pumps mule mules ballerina "
                  "ballerinas flats espadrilles derby derbies oxford oxfords trainer trainers slide slides"),
@@ -198,7 +199,13 @@ ITEM_KINDS = {k: kind for kind, words in (
                   "necklace necklaces bracelet bracelets earring earrings wallet wallets keyring keyrings sunglasses "
                   "pouch pouches"),
 ) for k in words.split()}
+# Singular forms a title uses for a garment sold as a pair ('Knit Short', 'Cargo Pant'); read in titles only, where the
+# head noun is the last word, never in a sentence ('a short jacket'). An overshirt is left out: stores type it as a
+# shirt or as a jacket.
+TITLE_KINDS = dict(ITEM_KINDS, short="bottom", pant="bottom", trouser="bottom", legging="bottom", jogger="bottom",
+                   sweatpant="bottom", cargo="bottom")
 ITEM_MISMATCH = "the AI's text names a different item than the Type: check the Type"
+TITLE_MISMATCH = "the title names a different kind of product than the Type: check the Type"
 TEXT_FEATURES_MAX = 3
 # A labelled part of a composition -> the bullet's last word ("Rubber sole"); adidas footwear prints part codes.
 PARTS = {"upper": "upper", "lining": "lining", "main lining": "lining", "inner lining": "lining", "sole": "sole",
@@ -285,11 +292,19 @@ def item_noun(ptype, title):
     return default
 
 
+LETTER_AN = set("aefhilmnorsx")   # letters whose name starts with a vowel sound: an L-shaped, an X-ray, a U-neck
+
+
 def article(phrase):
+    """'a' or 'an' by sound: a letter read as a letter by its name (a U-neck, an L-shaped), a "you" or "wun" sound
+    takes 'a' (a unisex, a euro-style, a one-piece), a silent h takes 'an' (an hour)."""
     w = phrase.split(" ", 1)[0].lower()
-    if re.match(r"(?:uni|use|one|eu)", w):
+    letter = re.match(r"([a-z])(?:-|$)", w)
+    if letter:
+        return "an" if letter.group(1) in LETTER_AN else "a"
+    if re.match(r"(?:uni|use|usu|uti|ura|ure|uro|eu|ewe|one|once)", w):
         return "a"
-    return "an" if w[:1] in "aeiou" or w.startswith(("hour", "honest")) else "a"
+    return "an" if w[:1] in "aeiou" or w.startswith(("hour", "honest", "heir")) else "a"
 
 
 def country(value, brand):
@@ -368,20 +383,31 @@ def phrases(table, texts, limit, kind):
     return out[:limit], clash
 
 
-def item_kind(text, words=None):
-    """The kind of the first product noun among `words` words of `text` (all of it when None), else None."""
+def item_kind(text, words=None, last=False, table=None):
+    """The kind of the first product noun among `words` words of `text` (all of it when None), or with `last` of the
+    last one, the head of a name ('Belt Bag' is a bag), else None."""
+    table = table or ITEM_KINDS
     toks = re.findall(r"[a-z]+(?:-[a-z]+)*", str(text or "").lower())
-    for t in toks[:words] if words else toks:
-        if t in ITEM_KINDS:
-            return ITEM_KINDS[t]
-    return None
+    kinds = [table[t] for t in (toks[:words] if words else toks) if t in table]
+    return (kinds[-1] if last else kinds[0]) if kinds else None
 
 
 def item_mismatch(sentence, item):
     """True when a second sentence's subject (a product noun in its first six words) is another kind than the item
     noun's."""
-    mine, theirs = item_kind(item), item_kind(sentence, 6)
+    mine, theirs = item_kind(item, last=True), item_kind(sentence, 6)
     return bool(mine and theirs and mine != theirs)
+
+
+def title_kind(title):
+    """The kind of product the title's name part names (the words before ' in <colour>'), else None. In a
+    'CATEGORY - NAME' string the name after ' - ' is read first ('KNIT SWEATSHIRT - TRACK JKT' is a jacket)."""
+    parts = (title_colour(title)[0] or "").split(" - ")
+    for part in parts[1:] + parts[:1]:
+        kind = item_kind(part, last=True, table=TITLE_KINDS)
+        if kind:
+            return kind
+    return None
 
 
 def part_bullets(value):
@@ -453,6 +479,9 @@ def draft(f, brand):
     if d["item"] is None:
         d["red"].append(f"no intro: the Type '{f['ptype'][0]}' gives the tool no item noun" if squash(f["ptype"][0])
                         else "no intro: the Type is blank, so the tool has no item noun")
+    named, mine = title_kind(title), item_kind(d["item"], last=True)
+    if named and mine and named != mine:
+        d["red"].append(TITLE_MISMATCH)
     _composition(d, f)
     _made_in(d, f, brand)
     kind = type_kind(f["ptype"][0])
