@@ -8,6 +8,7 @@ Every resolver returns (value, source, detail). Sources, in trust order:
   price needed -> red    (a NEW retail price left blank: no RRP in AUD from the brand)
   cart, history, rule -> amber (the selling-session cart, past POs, or a brand rule)
   AI-drafted, check -> amber (a NEW title, colour words or colour family drafted by AI; oc/agent/titles.py)
+  tool draft, check -> amber (a NEW product's house description, oc/describe.py; never green)
   guess -> red            (nothing to go on)
 A NEW product's retail price is never resolved from the catalog, past POs or other styles: only from a
 brand RRP in AUD (see Resolver.retail). Past POs still feed Type and size runs.
@@ -38,6 +39,8 @@ COLOUR = {"OC": GREEN, AI_OC: AMBER, AI_NEW_SIZE: RED, NEEDED: RED, "catalog": G
           AI_DRAFT: AMBER,
           "rule": AMBER, "guess": RED, CART_OC: AMBER, PRIOR: AMBER, OFF_RUN: AMBER}
 RANK = {GREEN: 0, AMBER: 1, RED: 2}
+TOOL_DRAFT = "tool draft, check"   # a NEW product's house description drafted from order-time facts (oc/describe.py)
+COLOUR[TOOL_DRAFT] = AMBER
 
 
 def worse(a, b):
