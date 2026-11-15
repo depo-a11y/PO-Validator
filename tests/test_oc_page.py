@@ -52,6 +52,13 @@ BRAND_YAML = ("vendor: X\nseason: S/S 27\nsku_prefix: XX\ncost_multiplier: 1.5\n
               "margin_floor: 2.5\n")
 
 
+def _choose(at, label="aaa (on this computer)"):
+    (box,) = [s for s in at.selectbox if s.label == "Brand"]
+    box.select(label).run()
+    assert not at.exception
+    return at
+
+
 def _page_with_brand(tmp_path, monkeypatch, extra):
     d = tmp_path / "brands"
     d.mkdir()
@@ -60,7 +67,7 @@ def _page_with_brand(tmp_path, monkeypatch, extra):
     at = AppTest.from_file(str(PAGE), default_timeout=60)
     at.run()
     assert not at.exception
-    return at
+    return _choose(at)
 
 
 @pytest.mark.parametrize("name", ["otb", "admilano", "adidas", "fog"])
@@ -123,7 +130,7 @@ def _capped(tmp_path, monkeypatch, extra):
     at.session_state["ai_reads"] = 10
     at.run()
     assert not at.exception
-    return at
+    return _choose(at)
 
 
 CAP = "This browser session has used its 10 AI reads. Each one is paid for; ask Colwyn if you need more."
@@ -175,3 +182,36 @@ def test_the_page_says_prices_are_blank_without_an_rrp_and_step_2_wants_them(tmp
     assert any("Retail prices of new products are blank unless the brand gave a retail price (RRP) in Australian "
                "dollars: type them in" in i.value for i in at.info)
     assert any("fill the retail price: 1 NEW row(s) have none, PO rows 2" in e.value for e in at.error)
+
+
+def test_the_brand_box_starts_with_no_brand_and_build_waits_for_one(tmp_path, monkeypatch):
+    """The box once pre-selected the alphabetically first local config, so a run could use a brand nobody chose."""
+    d = tmp_path / "brands"
+    d.mkdir()
+    for name, vendor in (("aaa", "FIRST"), ("zzz", "LAST")):
+        (d / f"{name}.local.yaml").write_text(BRAND_YAML.replace("vendor: X", f"vendor: {vendor}") + "adapter: otb\n"
+                                              "oc_label: MM\n")
+    monkeypatch.setenv("OC_BRAND_DIR", str(d))
+    at = AppTest.from_file(str(PAGE), default_timeout=60)
+    at.run()
+    at.file_uploader(key="w_catalog").set_value(("catalog.csv", b"ID\n", "text/csv"))
+    at.file_uploader(key="w_oc").set_value(("oc.pdf", b"%PDF-1.4", "application/pdf"))
+    at.file_uploader(key="w_po").set_value(("po.xlsx", b"PK", "application/octet-stream"))
+    at.run()
+    assert not at.exception
+    (box,) = [s for s in at.selectbox if s.label == "Brand"]
+    assert box.value is None and box.placeholder == "Choose a brand"
+    assert box.options == ["aaa (on this computer)", "zzz (on this computer)", "Upload a brand .yaml file"]
+    assert not [c for c in at.caption if c.value.startswith("Brand config:")]
+    assert any(c.value == "To build the draft, add a brand." for c in at.caption)
+    for label in ("Build draft PO", "Make upload files"):
+        (b,) = [b for b in at.button if b.label == label]
+        assert b.disabled, label
+    _choose(at, "zzz (on this computer)")
+    assert [c.value for c in at.caption if c.value.startswith("Brand config:")] == [
+        f"Brand config: {d / 'zzz.local.yaml'}. LAST, season S/S 27."]
+    for label in ("Build draft PO", "Make upload files"):
+        (b,) = [b for b in at.button if b.label == label]
+        assert not b.disabled, label
+    at.run()
+    assert [s for s in at.selectbox if s.label == "Brand"][0].value == "zzz (on this computer)"

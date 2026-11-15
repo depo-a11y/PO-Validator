@@ -1465,6 +1465,20 @@ MUTANTS += [   # register row oc-tool-colourless-join-key-votes-green-colour (ca
 ]
 
 
+MUTANTS += [   # the brand box starts with no brand chosen; Build and Make upload files wait for one
+    ("pages/1_Order_confirmation_to_PO.py", 'S.get("brand_choice") in labels else None,', 'S.get("brand_choice") in labels else 0,',
+     "page: the alphabetically first brand config pre-selected"),
+    ("pages/1_Order_confirmation_to_PO.py", "    kind, name, value = opts[choice] if choice is not None else (None, None, None)",
+     "    kind, name, value = opts[choice]", "page: no brand chosen crashes the page"),
+    ("pages/1_Order_confirmation_to_PO.py", '                          placeholder="Choose a brand",\n', "",
+     "page: the empty brand box does not say to choose one"),
+    ("pages/1_Order_confirmation_to_PO.py", 'need = [n for n, ok in (("a brand", cfg), ', "need = [n for n, ok in (",
+     "page: Build draft PO enabled with no brand chosen"),
+    ("pages/1_Order_confirmation_to_PO.py", 'need2 = [n for n, ok in (("a brand", cfg), ', "need2 = [n for n, ok in (",
+     "page: Make upload files enabled with no brand chosen"),
+]
+
+
 # ---- JOOR order print reader (oc/adapters/joor.py) ----
 J = "oc/adapters/joor.py"
 MUTANTS += [

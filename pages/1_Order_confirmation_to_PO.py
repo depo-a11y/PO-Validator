@@ -227,10 +227,12 @@ with col1:
     saved, hidden_why, offer_login = secret_brands()
     opts = brand_options(saved)
     labels = list(opts)
-    choice = st.selectbox("Brand", labels, index=labels.index(S["brand_choice"]) if S.get("brand_choice") in labels else 0,
+    # No brand until one is picked: a default would be the alphabetically first config, a brand nobody chose.
+    choice = st.selectbox("Brand", labels, index=labels.index(S["brand_choice"]) if S.get("brand_choice") in labels else None,
+                          placeholder="Choose a brand",
                           help="The brand config holds the season, SKU prefix, cost rule and past POs.")
     S["brand_choice"] = choice
-    kind, name, value = opts[choice]
+    kind, name, value = opts[choice] if choice is not None else (None, None, None)
     if kind == "upload":
         up = st.file_uploader("Brand config (.yaml)", type=["yaml", "yml"], key="w_brand")
         if up is not None:
