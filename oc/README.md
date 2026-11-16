@@ -141,10 +141,11 @@ now off by Colwyn's rule of 2026-11-12.
   drafted row carries it, re-bought rows included, as almost every re-bought product on the hand-made POs does
   (checked 2026-11-16), and PU-merge moves each re-bought product to it. The draft's
   "Season of this order (picked for the run)" check names the re-bought products that change season, and WARNs when
-  one is live in a later season than the one picked. Where the order confirmation prints its season (an OTB
-  document number "SS - 2099/...", or the season the p3m, thugclub or admilano reader returns; fog's "WINTER 2099"
-  and the other readers give none the tool reads), "Season printed on the order confirmation" is PASS when it is the
-  one picked and WARN when not (the page shows the WARN beside the draft). finalize takes the PO's own season: one on every row, offered by the catalog, and the one picked when one
+  one is live in a later season than the one picked. Where the order confirmation prints its season (the season the
+  p3m, thugclub or admilano reader returns, or, for an otb brand read by the built-in reader, its OTB document number
+  "SS - 2099/..."), "Season printed on the order confirmation" is PASS when it is the one picked and WARN when not
+  (the page shows the WARN beside the draft). Nothing else counts: fog's "WINTER 2099", another reader's document
+  number, a document read by AI, and a cart's label ("cart <session or file name>") give no row. finalize takes the PO's own season: one on every row, offered by the catalog, and the one picked when one
   is.
 - SKU prefix: `sku_prefix` per season half (`S/S:`, `F/W:`), each the letters before the picked season's two
   digits, or a MEN/WOMEN/UNISEX map of them where the brand's men's and women's SKUs differ (a new product takes its

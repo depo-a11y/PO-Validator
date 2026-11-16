@@ -349,6 +349,7 @@ PREFIX_CHECK = "SKU prefix of new SKUs"
 PRINTED_CHECK = "Season printed on the order confirmation"
 # A season as the readers return it (p3m "FW99", thugclub "SS99", a pre-collection "PRE-SS99", admilano "2099 SS")
 # or as an OTB document number prints it ("SS - 2099/01-62-0001").
+OTB_DOC = re.compile(r"^(SS|FW)\s*-\s*20(\d{2})/")   # the whole start of an OTB document number, as otb.parse reads it
 PRINTED = (re.compile(r"(?<![A-Z])(SS|FW|AW|S/S|F/W|A/W)\s*-?\s*(?:20)?(\d{2})(?!\d)"),
            re.compile(r"(?<!\d)20(\d{2})\s*(SS|FW|AW)(?![A-Z])"))
 
@@ -366,12 +367,24 @@ def printed_season(text):
     return f"{'S/S' if half in ('SS', 'S/S') else 'F/W'} {yy}"
 
 
+def printed_by(d, brand):
+    """The season one confirmation prints, from the two sources the README names only: the `season` a fixed reader
+    returns (p3m, thugclub, admilano), else, for an otb brand, its OTB document number ("SS - 2099/..."). None for a
+    document read by AI or from a cart (its doc is the cart's label, "cart <session or file name>"), and never another
+    reader's document number."""
+    if d.get("reader") or any(l.get("reader") for l in d.get("lines") or []):
+        return None
+    s = printed_season(d.get("season"))
+    m = OTB_DOC.match(str(d.get("doc") or "")) if s is None and brand.get("adapter") == "otb" else None
+    return f"{'S/S' if m.group(1) == 'SS' else 'F/W'} {m.group(2)}" if m else s
+
+
 def printed_season_rows(docs, brand):
-    """PASS when every season the confirmations print (the reader's `season`, else an OTB document number) is the one
-    picked; WARN naming them when one is not; nothing when none prints a season the tool can read."""
+    """PASS when every season the confirmations print (printed_by) is the one picked; WARN naming them when one is
+    not; nothing when none prints a season the tool can read."""
     seen = collections.defaultdict(list)
     for d in docs:
-        s = printed_season(d.get("season")) or printed_season(d.get("doc"))
+        s = printed_by(d, brand)
         if s:
             seen[s].append(str(d["doc"]))
     if not seen:

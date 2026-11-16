@@ -665,3 +665,50 @@ def test_an_unreadable_po_with_no_season_picked_is_a_fail_not_a_crash(tmp_path):
     bad.write_bytes(b"not a workbook")
     z, checks, _ = service.finalize(str(bad), _catalog(tmp_path), _cfg(season=None), when=None)
     assert z is None and [c["Check"] for c in service.fails(checks)] == ["The PO can be read"]
+
+
+# ---- the printed season comes only from the sources the README names (review 2026-11-17-buyer-1 F1) ------------------
+def _rows_named(checks):
+    return [c for c in checks if c["Check"] == "Season printed on the order confirmation"]
+
+
+@pytest.mark.parametrize("session,name", [("FW98 DROP SS99", "c.xlsx"), (None, "order_FW98_SS99.xlsx")])
+def test_a_cart_label_is_never_a_printed_season(tmp_path, session, name):
+    """A cart-only draft's doc is "cart <session or file name>": a season-like word there is not the OC's season."""
+    import test_oc_cartorder as tco
+    from oc import cartorder
+    path = tco.write(tmp_path / name)
+    wb = openpyxl.load_workbook(path)
+    ws = wb.active
+    for row in ws.iter_rows(max_row=4):
+        if row[0].value == "Session Code":
+            if session:
+                row[1].value = session
+            else:
+                ws.delete_rows(row[0].row)
+            break
+    wb.save(path)
+    docs, cart = cartorder.read(path)
+    assert ("FW98" in docs[0]["doc"]) and docs[0]["doc"].startswith("cart ")
+    _, _, checks, _ = build(docs, brandm.with_season(dict(tco.BRAND), "S/S 27"), catm.load(tco.catalog_csv(tmp_path)),
+                            base._hist(), base._tags(), cart=cart)
+    assert not _rows_named(checks)
+
+
+def test_another_readers_document_number_is_never_a_printed_season(tmp_path):
+    docs = _printed_docs(doc="SS - 2099/01-62-0001")
+    assert not _rows_named(_draft(tmp_path, _brand("S/S 27", adapter="joor", oc_supplier="x.example"), docs=docs)[2])
+    assert _rows_named(_draft(tmp_path, _brand("S/S 27"), docs=docs)[2])[0]["Result"] == "WARN"   # otb: read
+
+
+def test_an_ai_read_document_number_is_never_a_printed_season(tmp_path):
+    docs = _printed_docs()
+    docs[0]["reader"] = "ai"
+    for l in docs[0]["lines"]:
+        l["reader"] = "ai"
+    assert not _rows_named(_draft(tmp_path, _brand("S/S 27"), docs=docs)[2])
+
+
+def test_an_otb_document_that_is_no_document_number_prints_no_season(tmp_path):
+    for doc in ("PROFORMA FW98 1", "REORDER SS - 2099/01", "FW98"):
+        assert not _rows_named(_draft(tmp_path, _brand("S/S 27"), docs=_printed_docs(doc=doc))[2]), doc

@@ -1639,8 +1639,7 @@ MUTANTS += [   # review 2026-11-16-buyer-9: a pick never carries to another run,
      "draft: a printed season that disagrees is no WARN"),
     ("oc/draft.py", "    other = {s: ds for s, ds in seen.items() if s != season}", "    other = {}",
      "draft: a printed season never disagrees"),
-    ("oc/draft.py", '        s = printed_season(d.get("season")) or printed_season(d.get("doc"))',
-     '        s = printed_season(d.get("doc"))', "draft: a reader's own season field not read"),
+    ("oc/draft.py", '    s = printed_season(d.get("season"))\n', "    s = None\n", "draft: a reader's own season field not read"),
     ("oc/draft.py", r'(SS|FW|AW|S/S|F/W|A/W)\s*-?\s*(?:20)?(\d{2})(?!\d)', r'(SS|FW|AW|S/S|F/W|A/W)\s*-?\s*(\d{2})(?!\d)',
      "draft: an OTB document number's season (SS - 2099/...) not read"),
     ("oc/draft.py", r're.compile(r"(?<![A-Z])(SS|FW', r're.compile(r"(SS|FW', "draft: a season read inside a word (CLASS 27)"),
@@ -1712,6 +1711,32 @@ MUTANTS += [   # review 2026-11-16-buyer-9: a pick never carries to another run,
     ("pages/1_Order_confirmation_to_PO.py", 'if S.get("catalog") and not season_opts:', "if False:",
      "page: a catalog with no season to offer is not said"),
     ("pages/1_Order_confirmation_to_PO.py", "\nif cfg and season:\n", "\nif cfg:\n", "page: the config takes a season nobody picked"),
+]
+
+
+MUTANTS += [   # review 2026-11-17-buyer-1 F1: the printed season only from the sources the README names
+    ("oc/draft.py", '    if d.get("reader") or any(l.get("reader") for l in d.get("lines") or []):\n        return None',
+     "    if False:\n        return None", "printed: a document read by AI counted as printed by the OC"),
+    ("oc/draft.py", 'if s is None and brand.get("adapter") == "otb" else None', "if s is None else None",
+     "printed: another reader's document number read as an OTB one"),
+    ("oc/draft.py", r'OTB_DOC = re.compile(r"^(SS|FW)\s*-\s*20(\d{2})/")', r'OTB_DOC = re.compile(r".*?(SS|FW)\s*-?\s*(?:20)?(\d{2})")',
+     "printed: an OTB brand's document that is no document number read for a season"),
+    ("oc/draft.py", "{'S/S' if m.group(1) == 'SS' else 'F/W'} {m.group(2)}", "{'S/S' if m.group(1) == 'FW' else 'F/W'} {m.group(2)}",
+     "printed: an OTB document number's half read the wrong way round"),
+    ("oc/draft.py", '    if d.get("reader") or any(l.get("reader") for l in d.get("lines") or []):\n        return None\n'
+     '    s = printed_season(d.get("season"))\n', '    return printed_season(d.get("season")) or printed_season(d.get("doc"))\n',
+     "printed: any document's name read for a season, a cart's label included (as at b53d97c)"),
+    # review 2026-11-17-buyer-1 F2: guard lines the map first explained in words, now mutants of their own
+    ("oc/draft.py", "        if s:\n            seen[s].append", "        if True:\n            seen[s].append",
+     "printed: a document with no printed season recorded as one"),
+    ("oc/draft.py", "    if later:\n", "    if False:\n", "draft: the re-bought products live in a later season not named"),
+    ("pages/1_Order_confirmation_to_PO.py", "    if v is None:\n        return None\n", "    if False:\n        return None\n",
+     "page: no file at all crashes the season reset"),
+    ("pages/1_Order_confirmation_to_PO.py", '    S["season_for"] = pick_for\n', "",
+     "page: the season reset forgets what the pick was for (every rerun clears it)"),
+    ("pages/1_Order_confirmation_to_PO.py", "    if not up:\n        return []", "    if False:\n        return []",
+     "page: no catalog crashes the season box"),
+    ("oc/cli.py", "        if bad:\n", "        if False:\n", "cli: the season rows read but never refused"),
 ]
 
 
