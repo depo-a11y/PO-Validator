@@ -235,7 +235,8 @@ def test_a_stale_import_is_removed_when_finalize_refuses(tmp_path):
 def test_the_page_names_the_description_import_and_its_order():
     from pathlib import Path
     src = (Path(__file__).resolve().parent.parent / "pages" / "1_Order_confirmation_to_PO.py").read_text()
-    assert "PU-description" in src and "import after the products are created" in src
+    step2 = src[src.index('st.info("Nothing has been imported.'):src.index("checks_table(f[\"checks\"])")]
+    assert "PU-description" in step2 and "import after the products are created" in step2   # under the zip itself
 
 
 def test_the_cli_finalize_names_the_import_and_its_order(tmp_path, capsys):
@@ -249,3 +250,14 @@ def test_the_cli_finalize_names_the_import_and_its_order(tmp_path, capsys):
     out = capsys.readouterr().out
     assert f"cli-{descimport.FILE}" in out and "import after the products are created" in out
     assert (tmp_path / f"cli-{descimport.FILE}").exists()
+
+
+def test_a_product_of_several_sizes_is_one_import_row_on_its_first_sku(tmp_path):
+    d = td.docs()
+    jacket = d[0]["lines"][0]
+    jacket.update(sizes={"M": 1, "L": 1}, qty=2, line_value=200.0)
+    d[0]["total_qty"], d[0]["net"] = 5, 500.0
+    path, rows = reviewed(tmp_path, d=d)
+    run(tmp_path, path)
+    skus = [r["Variant SKU"] for r in rows if r[poxlsx.CODE] == td.JACKET]
+    assert len(skus) == 2 and [r[0] for r in imported(tmp_path)[2]] == skus[:1]
