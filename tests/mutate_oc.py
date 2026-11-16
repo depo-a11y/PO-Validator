@@ -1740,6 +1740,15 @@ MUTANTS += [   # review 2026-11-17-buyer-1 F1: the printed season only from the 
 ]
 
 
+MUTANTS += [   # review 2026-11-17-buyer-3: a season printed in lower or mixed case (p3m passes its text through)
+    ("oc/draft.py", '    t = str(text or "").upper()\n', '    t = str(text or "")\n', "printed: a lower- or mixed-case season not read"),
+    ("oc/brand.py", '    m = LOOSE_SEASON.search(str(season or "").upper())', '    m = LOOSE_SEASON.search(str(season or ""))',
+     "season: a lower-case live season does not sort"),
+    ("oc/draft.py", '    word = str(ptype or "").split(" ")[0].upper()', '    word = str(ptype or "").split(" ")[0]',
+     "draft: a mixed-case Type's gender not read"),
+]
+
+
 # ---- JOOR order print reader (oc/adapters/joor.py) ----
 J = "oc/adapters/joor.py"
 MUTANTS += [

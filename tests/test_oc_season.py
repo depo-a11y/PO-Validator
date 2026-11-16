@@ -541,7 +541,9 @@ def test_a_new_cart_clears_the_season(tmp_path, monkeypatch):
 @pytest.mark.parametrize("text,want", [("SS - 2099/01-62-0001", "S/S 99"), ("FW - 2098/02-61-0001", "F/W 98"),
                                        ("FW99", "F/W 99"), ("PRE-SS99", "S/S 99"), ("2099 SS", "S/S 99"),
                                        ("AW25", "F/W 25"), ("S/S 26", "S/S 26"), ("SS - 1", None), ("3999001", None),
-                                       ("cart ZXCART", None), (None, None), ("CLASS 27", None)])
+                                       ("cart ZXCART", None), (None, None), ("CLASS 27", None),
+                                       ("fw99", "F/W 99"), ("Ss 99", "S/S 99"), ("pre-ss98", "S/S 98"),
+                                       ("2099 fw", "F/W 99")])   # p3m passes its Season text through as printed
 def test_the_season_an_order_confirmation_prints(text, want):
     from oc.draft import printed_season
     assert printed_season(text) == want
@@ -712,3 +714,20 @@ def test_an_ai_read_document_number_is_never_a_printed_season(tmp_path):
 def test_an_otb_document_that_is_no_document_number_prints_no_season(tmp_path):
     for doc in ("PROFORMA FW98 1", "REORDER SS - 2099/01", "FW98"):
         assert not _rows_named(_draft(tmp_path, _brand("S/S 27"), docs=_printed_docs(doc=doc))[2]), doc
+
+
+# ---- case is not meaning: a season or a Type typed in lower or mixed case (review 2026-11-17-buyer-3) ---------------
+@pytest.mark.parametrize("season,want", [("s/s 98", (98, 0)), ("F/w 98", (98, 1)), ("a/w 98", (98, 1)),
+                                         ("S/S 98", (98, 0)), ("", None), ("PSSS99", None)])
+def test_a_live_season_sorts_in_any_case(season, want):
+    """A product's custom.product_season is free text: a lower-case one still sorts against the season picked."""
+    assert brandm.season_order(season) == want
+
+
+@pytest.mark.parametrize("ptype,want", [("WOMEN SHOES SNEAKERS", "WOMEN"), ("women shoes sneakers", "WOMEN"),
+                                        ("Men Clothing Shirts", "MEN"), ("unisex bags", "UNISEX"), ("", None),
+                                        (None, None), ("KIDS SHOES", None)])
+def test_a_types_gender_is_read_in_any_case(ptype, want):
+    """complete reads a hand-typed Type: 'Women Shoes' takes the WOMEN prefix, not the default_gender's."""
+    from oc.draft import sku_gender
+    assert sku_gender(ptype) == want
