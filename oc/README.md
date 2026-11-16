@@ -616,11 +616,15 @@ so a fix made on the PO is one edit, never two:
 | Title | the PO's Title, in the intro's `{VENDOR}'s {Title} is` frame only |
 | Item noun | the one the PO's final Type gives, in the same frame, with its article by sound |
 | Composition line | the composition in the PO's template Body HTML (the one PU-new imports), read through the brand's `body_html` template, in the house's Title Case |
-| Made in line | the PO's `custom.made_in`, which complete and PU-new treat as authoritative (the template body's Made in line is left as entered); when that is blank or `-`, the template body's Made in line |
+| Made in line | the PO's `custom.made_in`, which complete and PU-new treat as authoritative (the template body's Made in line is left as entered); when that is blank or `-`, the template body's Made in line. Only a country the tool knows is written |
+| Colourway bullet | the final title's colour words, by the draft's own rule (none for a code with a digit or a gender or season word) |
 
 The Title and the item noun: a description still holding the drafted one takes the PO's; an edited one must agree.
 A final Title already in the frame is not swapped again (a final Title that holds the drafted one would get its
-prefix twice).
+prefix twice). The colourway bullet: still as drafted, it takes the final title's colour words, or goes when the final
+title gives none (a colour code with a digit, or no " in <colour>"); edited, it must agree with the final title. Any
+other text that still names a colour word the drafted title had and the final one has not (an AI part quoting the
+order's colour, a bullet typed by hand) holds the description back.
 
 Composition and Made in are a **three-way merge whose base is the PO's own value at draft**. At draft the two sides
 draw on different sources: the description takes the OC line first, the PO's template the cart, then the live same
@@ -634,11 +638,16 @@ style+fabric product. So the PO's value only carries into the description when r
 
 The PO's value goes in at its house place (Composition first in the list, Made in last, the list made before the SKU
 line when there is none), so a composition typed into the template body of a product whose OC printed none reaches
-its description. A composition the merge replaced holds the product back while a bullet drawn from the drafted one
-("Cupro lining", from `describe.part_bullets`) is still there and the new one does not give it. A placeholder is never
-written. A composition on the PO that cannot be written (cut off, garbled, in codes), when it is the value the merge
-would use, holds the description back until it is fixed there, and so does a PO Body HTML that no longer follows the
-brand template. The Descriptions sheet keeps every value the merge needs in its "(as drafted)" columns (the Title,
+its description. Whenever the final Composition line differs from the drafted one, by the merge or by the person's
+own edit, the product is held back while it still says something drawn from the drafted composition that the final
+one does not give: a part bullet ("Cupro lining", from `describe.part_bullets`), or any bullet or intro sentence
+every word of which the drafted composition holds and the final one does not (the AI's own grounding rule, for parts
+the AI rested on the composition). A placeholder is never written: a run of dashes and any spelling of n/a count as
+one. A composition on the PO that cannot be written (cut off, garbled, in codes), when it is the value the merge would
+use, holds the description back until it is fixed there, and so does a PO Body HTML that no longer follows the brand
+template. A made in on the PO that is not a country the tool knows ("Itlay", "x") holds the product, and so does a
+`custom.made_in` and a template body Made in line that name two different countries: the description cannot know
+which is right. The Descriptions sheet keeps every value the merge needs in its "(as drafted)" columns (the Title,
 Type, Composition and Made in the description was drafted with, and the PO's own composition and made in at draft);
 a sheet without them writes no import (a WARN says to draft the PO again). The draft's Why already says where a
 description's composition or Made in differs from the PO's ("composition: cart ... says ..., used the OC line
