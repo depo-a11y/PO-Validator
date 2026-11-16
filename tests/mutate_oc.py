@@ -1423,6 +1423,48 @@ MUTANTS = [
 ]
 
 
+MUTANTS += [   # register row oc-tool-colourless-join-key-votes-green-colour (cases 2026-11-13-buyer-5 F2, 2026-11-14-buyer-2 F3,
+    # 2026-11-16-buyer-2 F3 and F6): no vote on an empty colour code; a fabric only where the config says where it is
+    ("oc/resolve.py", "        if not colour:\n            return None, 0, 0, None\n",
+     "        if False:\n            return None, 0, 0, None\n",
+     "colour vote: an empty colour code votes, so every colour-less live code shares it (green from another product)"),
+    ("oc/resolve.py", '            return (colour, "") if " " in colour else ("", None)', '            return colour, ""',
+     "colour vote: a {style} {fabric} {colour} code printed without its colour still votes"),
+    ("oc/resolve.py", '    inside = "{fabric}" in tail', "    inside = False",
+     "colour vote: a fabric after the space never read as same fabric+colour"),
+    ("oc/resolve.py", '    width = STYLE_WIDTH.get((brand or {}).get("adapter")) if head == "{style}{fabric}" else None',
+     '    width = 9 if head == "{style}{fabric}" else None',
+     "colour vote: body[9:] read as the fabric whatever the reader (Diesel, Lemaire, Stone Island)"),
+    ("oc/resolve.py", '    width = STYLE_WIDTH.get((brand or {}).get("adapter")) if head == "{style}{fabric}" else None',
+     '    width = STYLE_WIDTH.get((brand or {}).get("adapter"))',
+     "colour vote: the reader's style length read as the fabric's start whatever the join_key"),
+    ("oc/resolve.py", '    width = STYLE_WIDTH.get((brand or {}).get("adapter")) if head == "{style}{fabric}" else None',
+     "    width = None", "colour vote: Margiela's same fabric+colour never read"),
+    ("oc/resolve.py", 'STYLE_WIDTH = {"otb": 9}', 'STYLE_WIDTH = {"otb": 8}', "colour vote: otb's style length miscounted"),
+    ("oc/resolve.py", "        if width and (style is None or len(norm_code(style)) == width):", "        if width:",
+     "colour vote: a line whose style is not the reader's length read at that length"),
+    ("oc/resolve.py", 'head, _, tail = ((brand or {}).get("join_key") or DEFAULT_JOIN_KEY).partition(" ")',
+     'head, _, tail = ((brand or {}).get("join_key") or "{style} {colour}").partition(" ")',
+     "colour vote: a config with no join_key is not read as the default"),
+    ("oc/resolve.py", "        return fabric is not None and self.vote_key(body, colour)[1] == fabric",
+     "        return self.vote_key(body, colour)[1] == fabric", "colour vote: two codes with no fabric read as one fabric"),
+    ("oc/resolve.py", "        self.vote_key = vote_key(brand)", "        self.vote_key = vote_key({})",
+     "colour vote: the brand's join_key and reader not read"),
+    ("oc/resolve.py", '        colour, fabric = self.vote_key(body, colour, line["style"] if line else None)',
+     "        colour, fabric = self.vote_key(body, colour)", "colour vote: the OC line's own style length not checked"),
+    ("oc/agent/titles.py", '(same if R.same_fabric(fabric, cb, cc) else other)[key]["catalog"] += 1',
+     '(same if cb[9:] == body[9:] else other)[key]["catalog"] += 1',
+     "titles: catalog colour evidence split at character 9, not as the vote reads it"),
+    ("oc/agent/titles.py", '(same if R.same_fabric(fabric, cb, cc) else other)[key]["past_pos"] += 1',
+     '(same if cb[9:] == body[9:] else other)[key]["past_pos"] += 1',
+     "titles: past-PO colour evidence split at character 9, not as the vote reads it"),
+    ("oc/agent/titles.py", '    colour, fabric = R.vote_key(body, colour, l["style"])   # the resolver\'s own reading',
+     '    fabric = body[9:]   # the resolver\'s own reading', "titles: the evidence keeps a colour code the vote would not read"),
+    ("oc/resolve.py", '        if not colour:\n            why = f"', '        if False:\n            why = f"',
+     "colour name: a code with no colour code worded as a colour code not in the catalog"),
+]
+
+
 # ---- JOOR order print reader (oc/adapters/joor.py) ----
 J = "oc/adapters/joor.py"
 MUTANTS += [

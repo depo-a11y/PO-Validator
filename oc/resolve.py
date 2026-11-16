@@ -16,7 +16,7 @@ import collections
 import html
 import re
 
-from .brand import fill_text
+from .brand import DEFAULT_JOIN_KEY, fill_text
 from .cart import style_title
 from .util import cost_currency, iso_currency, norm_code, norm_size, sort_sizes, size_key, title_colour, slug
 
@@ -50,6 +50,35 @@ def split_code(code):
     return body[:9], body, colour
 
 
+STYLE_WIDTH = {"otb": 9}   # built-in readers whose style code has one length: otb.STYLE matches 9 characters
+
+
+def vote_key(brand):
+    """How the colour vote reads a code, from the brand's join_key and reader: key(body, colour, style=None) ->
+    (colour code, fabric), from the code's text before and after its first space and, when known, its OC line's
+    style. The one reading for the vote here and the AI title evidence (oc/agent/titles.py).
+
+    The colour code is "" when there is none to vote on: a colour-less join_key, a reader that printed no colour,
+    or a "{style} {fabric} {colour}" code missing one of the two. The fabric is None unless the config says where
+    it is, and then the vote also counts only as "same colour code":
+      "{style} {fabric} {colour}": inside the colour code compared, so every code of that colour code shares it;
+      "{style}{fabric} {colour}" read by a reader whose style has one length w (otb, Margiela and MM6: 9): body[w:],
+        and None for a line whose own style is not w characters (an AI read of that brand's OC);
+      anything else, the same join_key read by a sheet, joor or ai reader included: None, since nothing says
+        where the style ends (Diesel, Lemaire and Stone Island styles are not 9 characters)."""
+    head, _, tail = ((brand or {}).get("join_key") or DEFAULT_JOIN_KEY).partition(" ")
+    width = STYLE_WIDTH.get((brand or {}).get("adapter")) if head == "{style}{fabric}" else None
+    inside = "{fabric}" in tail
+
+    def key(body, colour, style=None):
+        if inside:
+            return (colour, "") if " " in colour else ("", None)
+        if width and (style is None or len(norm_code(style)) == width):
+            return colour, body[width:]
+        return colour, None
+    return key
+
+
 class Resolver:
     def __init__(self, brand, catalog, history, tag_lookup, oc_lines=None, cart=None):
         self.b = brand
@@ -64,6 +93,7 @@ class Resolver:
         self._cart_rows = self.cart.get("rows", {})
         self._next_sku = None
         self.used_skus = set()
+        self.vote_key = vote_key(brand)
 
     # ---- siblings ---------------------------------------------------------
     def _rank(self, ps):
@@ -108,12 +138,16 @@ class Resolver:
     def _colour_votes(self, code, field):
         """Votes for a colour attribute from products sharing the colour code.
 
-        Same fabric+colour first. Across fabrics only when the catalog's own uses
-        of that colour code agree (at least 2 products, >= 60%): Margiela's numeric RTW colour codes
-        mean different colours on different fabrics, its T-codes do not.
+        Same fabric+colour first, where the config says where the fabric is (vote_key). Across fabrics only when
+        the catalog's own uses of that colour code agree (at least 2 products, >= 60%): Margiela's numeric RTW colour
+        codes mean different colours on different fabrics, its T-codes do not. A code with no colour code (a
+        colour-less join_key, or none printed) gets no vote: every colour-less live code would "share" it.
         """
         _, body, colour = split_code(code)
-        fabric = body[9:]
+        line = self.oc.get(code)
+        colour, fabric = self.vote_key(body, colour, line["style"] if line else None)
+        if not colour:
+            return None, 0, 0, None
         same, cross = collections.Counter(), collections.Counter()
         for c, ps in self.cat.by_code.items():
             cb, _, cc = c.partition(" ")
@@ -122,7 +156,7 @@ class Resolver:
             for p in ps:
                 v = p[field]
                 if v:
-                    (same if cb[9:] == fabric else cross)[v.upper() if field == "colour_family" else v] += 1
+                    (same if self.same_fabric(fabric, cb, cc) else cross)[v.upper() if field == "colour_family" else v] += 1
         if same:
             v, n = same.most_common(1)[0]
             return v, n, sum(same.values()), "same fabric+colour"
@@ -131,6 +165,10 @@ class Resolver:
             if n >= 2 and n / sum(cross.values()) >= 0.6:
                 return v, n, sum(cross.values()), "same colour code"
         return None, 0, sum(cross.values()), None
+
+    def same_fabric(self, fabric, body, colour):
+        """Whether a code (its body and colour code) has this fabric, as vote_key reads it; never for a fabric of None."""
+        return fabric is not None and self.vote_key(body, colour)[1] == fabric
 
     def colour_name(self, code):
         _, body, colour = split_code(code)
@@ -151,6 +189,8 @@ class Resolver:
             return v, "catalog", f"{how} {colour} titled '{v}' on {n} of {tot} product(s)"
         why = f"colour code {colour} not in the catalog" if not tot else \
             f"colour code {colour} names disagree across {tot} catalog products"
+        if not colour:
+            why = f"{norm_code(code)} carries no colour code (join_key {self.b.get('join_key') or DEFAULT_JOIN_KEY})"
         return colour, "guess", why + "; the OC has no colour description"
 
     def colour_family(self, code, colour_name):

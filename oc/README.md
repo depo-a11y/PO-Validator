@@ -109,6 +109,15 @@ now off by Colwyn's rule of 2026-11-12.
 - Templates: `title_tag` may use `{vendor}` and `{title}`, `body_html` `{composition}`, `{made_in}` and `{code}`,
   `join_key` `{style}`, `{fabric}`, `{colour}` and `{colour_code}`. They are filled by plain substitution, never
   `str.format` (a config can be uploaded on the hosted page), and any other brace is refused when the config loads.
+- Colour vote: a NEW product's colour words and colour family are voted from the live products carrying its colour
+  code, the code's text after its first space. A code with none (a `{style}` join_key, or a reader that printed no
+  colour) gets no vote, so the cell falls to the cart, the brand's keywords or red, never a borrowed green. One
+  product decides only as "same fabric+colour", and only where the config says where the fabric is
+  (`resolve.vote_key`): `{style} {fabric} {colour}` compares it inside the colour code; `{style}{fabric} {colour}`
+  reads it after the style only when the reader's style has one length (`otb`: 9, Margiela and MM6), and not for
+  a line whose style is another length. That join_key read by any other reader (Diesel, Lemaire and Stone Island
+  use `sheet`) has no fabric, nor has any other join_key: those vote only as "same colour code" (2+ products, 60%
+  agree). The AI title evidence (`oc/agent/titles.py`) reads codes the same way.
 - Catalog: a Matrixify Products export (CSV, UTF-8) for the brand's vendors, all statuses, with variants,
   `Variant Cost`, `Variant Inventory Qty`, `Variant Country of Origin` and metafields in `my_fields`, `custom` and
   `global`. Required columns are `catalog.REQUIRED`, including `custom.product_season` (the rollback restores it)

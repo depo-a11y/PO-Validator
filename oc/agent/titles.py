@@ -164,7 +164,8 @@ def evidence(n, R):
     ign = R.b.get("match_ignore") or ""   # codes compared as catalog.match compares them (landing 2's code_match)
 
     body, colour = code_parts(code, ign)
-    style, fabric = body[:9], body[9:]
+    style = body[:9]
+    colour, fabric = R.vote_key(body, colour, l["style"])   # the resolver's own reading: resolve.vote_key
 
     def bod(c):
         return code_parts(c, ign)[0]
@@ -188,13 +189,13 @@ def evidence(n, R):
         if colour and cc == colour:
             for p in ps:
                 key = (p["title_colour"] or "", (p["colour_family"] or "").upper())
-                (same if cb[9:] == fabric else other)[key]["catalog"] += 1
+                (same if R.same_fabric(fabric, cb, cc) else other)[key]["catalog"] += 1
     for c, rows in R.hist.by_code.items():
         cb, cc = code_parts(c, ign)
         if colour and cc == colour:
             for r in {(r["season"], c): r for r in rows}.values():
                 key = (r["colour_name"] or "", r["option1"].upper())
-                (same if cb[9:] == fabric else other)[key]["past_pos"] += 1
+                (same if R.same_fabric(fabric, cb, cc) else other)[key]["past_pos"] += 1
 
     def uses(table):
         items = sorted(table.items(), key=lambda kv: (-sum(kv[1].values()), kv[0]))
