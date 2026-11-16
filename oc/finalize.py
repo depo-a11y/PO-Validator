@@ -134,6 +134,9 @@ def run(po_path, brand, catalog, out_prefix):
     held = hold_row(brand)
     if held:
         return [held]   # a config on hold: nothing read, nothing written
+    stale = f"{out_prefix}{descimport.FILE}"
+    if os.path.exists(stale):   # an earlier run's import at this prefix: this run writes its own or none
+        os.remove(stale)
     sys.path.insert(0, str(REPO))
     import validator_core as core
 

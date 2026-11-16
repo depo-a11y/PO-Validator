@@ -235,6 +235,15 @@ def _words(text):
             if len(w) >= 3 or re.search(r"\d", w) or w in NEGATORS]
 
 
+def unquoted_negations(text, quote):
+    """The negators of `text` the quote does not hold next to the word each governs, the next word that needs a quote
+    ('no lining' needs 'no lining' in the quote, 'un-lined' 'un-lined'; one word such as 'unlined' is a word like any
+    other): a quote with 'NO LOGO' and 'LINING' grounds no 'no lining'."""
+    t, q = _words(text), _words(quote)
+    pairs = {(q[j], stem(q[j + 1])) for j in range(len(q) - 1)}
+    return [w for i, w in enumerate(t[:-1]) if w in NEGATORS and (w, stem(t[i + 1])) not in pairs]
+
+
 def stem(w):
     for suf in ("ings", "ing", "ed", "es", "s"):
         if w.endswith(suf) and len(w) - len(suf) >= 3:
@@ -296,6 +305,10 @@ def problems(kind, claim, ev, words):
         loose = ungrounded(text, quote, ev["item"])
         if loose:
             out.append(("words not in the quote", f"{len(loose)} word(s) not in its quote"))
+        apart = unquoted_negations(text, quote)
+        if apart:
+            out.append(("negation not next to its word", f"{len(apart)} negation(s) the quote does not hold next to "
+                                                          "the word they govern"))
     return out
 
 

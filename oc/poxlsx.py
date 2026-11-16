@@ -183,13 +183,16 @@ def write_po(path, header, rows, review=None, checks=None, fills=None, title="Sh
 
 
 DESCRIPTIONS = "Descriptions"   # the draft's sheet of NEW product descriptions (oc/describe.py, option B)
-DESCRIPTION_COLS = ["Variant SKU", "Manufacture code", "Title (as drafted)", "Description", "Source", "Why"]
+DESCRIPTION_COLS = ["Variant SKU", "Manufacture code", "Title (as drafted)", "Description", "Source", "Why",
+                    "Type (as drafted)", "Composition (as drafted)", "Made in (as drafted)"]   # finalize: left or edited
 
 
 def write_descriptions(wb, rows, review):
     """The Descriptions sheet, last: one row per Review row whose Column is the description's, keyed by its product's
-    first PO row's Variant SKU, the Description cell shaded as the Review shades it. Nothing when there is none."""
+    first PO row's Variant SKU, the Description cell shaded as the Review shades it, and the drafted values finalize
+    compares with the reviewed PO's (oc/descimport.reconcile). Nothing when there is none."""
     from .describe import DESC_COLUMN
+    from .descimport import as_drafted
     desc = [r for r in review or [] if r.get("Column") == DESC_COLUMN]
     if not desc:
         return
@@ -199,11 +202,12 @@ def write_descriptions(wb, rows, review):
         c.font = Font(bold=True)
     for r in desc:
         po = rows[r["Row"] - 2]
-        append_text(ws, [po.get("Variant SKU"), r["Code"], po.get("Title"), r["Value"], r["Source"], r["Why"]])
+        append_text(ws, [po.get("Variant SKU"), r["Code"], po.get("Title"), r["Value"], r["Source"], r["Why"]]
+                    + as_drafted(r["Value"], po))
         if r["Colour"] in FILLS:
             ws.cell(ws.max_row, DESCRIPTION_COLS.index("Description") + 1).fill = FILLS[r["Colour"]]
     ws.freeze_panes = "A2"
-    for col, width in zip("ABCDEF", (14, 24, 40, 80, 18, 80)):
+    for col, width in zip("ABCDEFGHI", (14, 24, 40, 80, 18, 80, 30, 40, 16)):
         ws.column_dimensions[col].width = width
 
 

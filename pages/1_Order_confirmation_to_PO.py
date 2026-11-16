@@ -75,7 +75,8 @@ DESCRIBE_HELP = ("The tool drafts every new product's description itself, beside
                  "fabric name or composition, or dropped. It never writes the Composition line, Made in, the SKU, the "
                  "title, the Type or the brand. Every description is amber, and red where the composition is missing, "
                  "the title is red, or the title or the AI's text names a different kind of product than the Type: "
-                 "check each one. Step 2 writes them as PU-description, to import after the products are created. "
+                 "check each one. Fix a title, Type, composition or Made in on the PO itself: Step 2 writes the "
+                 "descriptions as PU-description with the PO's final values, to import after the products are created. "
                  "It costs cents to about a dollar per order confirmation.")
 DESCRIBE_SENDS = describem.sends()
 EXPLAIN_DRAFT_BUTTON = "Ask the AI what went wrong (sends the PDF's text to Anthropic)"

@@ -300,11 +300,34 @@ def test_a_negation_is_a_word_the_quote_must_hold():
     ev = dict(item="coat", fields=dict(fabric_name="LINING 100% COTTON", description="LOOP COAT - NO LINING, UNLINED"))
     cats = lambda c: [k for k, _ in job.problems("bullets", c, ev, [])]
     assert job._words("Made with no lining") == ["made", "with", "no", "lining"]
-    assert cats(claim("Made with no lining", "fabric_name", "LINING 100% COTTON")) == ["words not in the quote"]
+    assert cats(claim("Made with no lining", "fabric_name", "LINING 100% COTTON")) == \
+        ["words not in the quote", "negation not next to its word"]
     assert cats(claim("Made with no lining", "description", "NO LINING")) == []
-    assert cats(claim("Un-lined coat body", "fabric_name", "LINING 100% COTTON")) == ["words not in the quote"]
-    assert cats(claim("Not lined at all", "description", "NO LINING")) == ["words not in the quote"]
+    assert cats(claim("Unlined coat with cotton", "description", "LOOP COAT - NO LINING, UNLINED")) == \
+        ["words not in the quote"]
+    assert cats(claim("Unlined loop coat", "description", "LOOP COAT - NO LINING, UNLINED")) == []
+    assert cats(claim("Not lined at all", "description", "NO LINING")) == \
+        ["words not in the quote", "negation not next to its word"]
     assert "no lining" in job.SYSTEM and all(n in job.SYSTEM for n in job.NEGATORS[:-1])
+
+
+@pytest.mark.parametrize("negator,text,quote", [
+    ("no", "Made with no lining", "NO LOGO. LINING 100% COTTON"),
+    ("not", "Not lined with wax", "LINED, NOT WAXED"),
+    ("non", "Non-stretch cotton twill", "STRETCH COTTON TWILL, NON IRON"),
+    ("nor", "Neither lined nor padded", "NEITHER LINED, PADDED NOR WAXED"),
+    ("never", "Never washed cotton", "COTTON, WASHED, NEVER DYED"),
+    ("without", "Made without lining", "LINING, WITHOUT POCKETS"),
+    ("un", "Un-lined cotton coat", "COTTON LINED. UN-WASHED"),
+])
+def test_a_negation_must_stand_in_the_quote_next_to_the_word_it_governs(negator, text, quote):
+    ev = dict(item="coat", fields=dict(fabric_name=quote))
+    cats = lambda c: [k for k, _ in job.problems("bullets", c, ev, [])]
+    assert negator in job._words(text) and negator in job._words(quote)   # every word is quoted, the negator apart
+    assert cats(claim(text, "fabric_name", quote)) == ["negation not next to its word"]
+    words = job._words(text)
+    ev["fields"]["fabric_name"] = fixed = f"{quote}, {negator} {words[words.index(negator) + 1]}".upper()
+    assert cats(claim(text, "fabric_name", fixed)) == []   # quoted next to the word it governs, it is grounded
 
 
 def test_a_letter_after_an_apostrophe_keeps_its_capital_as_the_house_writes_it():

@@ -1,6 +1,7 @@
 """The separate description import finalize writes beside PU-new (oc/descimport.py; Colwyn, 2026-11-16, option B).
 An invented brand, codes and titles; no real order data, no network."""
 import json
+import re
 import types
 
 import openpyxl
@@ -68,6 +69,37 @@ def check(checks):
 def desc_cell(ws, code):
     r = next(r for r in range(2, ws.max_row + 1) if ws.cell(r, 2).value == code)
     return ws.cell(r, 4)
+
+
+def po_edit(path, code, column, fn):
+    """A review edit on the PO sheet: `fn(value)` into `column` of every NEW row of `code`."""
+    wb = openpyxl.load_workbook(path)
+    ws = wb.worksheets[0]
+    col = {c.value: c.column for c in ws[1]}
+    for r in range(2, ws.max_row + 1):
+        if ws.cell(r, col[poxlsx.CODE]).value == code and ws.cell(r, col["Command"]).value == "NEW":
+            ws.cell(r, col[column]).value = fn(ws.cell(r, col[column]).value)
+    wb.save(path)
+
+
+def by_code(tmp_path):
+    """{manufacture code: Body HTML} of the import, read off each description's SKU line."""
+    got = imported(tmp_path)
+    return {} if got is None else {r[2].rsplit("SKU: ", 1)[1][:-len("</p>")]: r[2] for r in got[2]}
+
+
+def silent(path, code):
+    """The PO gives no composition and no made in for `code`: its template body and custom.made_in say '-'."""
+    po_edit(path, code, "Body HTML", lambda v: re.sub(r"Composition: [^<]*", "Composition: -",
+                                                      re.sub(r"Made in [^<]*", "Made in -", v)))
+    po_edit(path, code, poxlsx.MADE_IN, lambda v: "-")
+
+
+def typed(path, code, composition, made_in=None):
+    """The person types the composition (and a made in) into the PO's template body, as they do today."""
+    po_edit(path, code, "Body HTML", lambda v: v.replace("Composition: -", f"Composition: {composition}"))
+    if made_in:
+        po_edit(path, code, poxlsx.MADE_IN, lambda v: made_in)
 
 
 # ---- the creation upload is untouched --------------------------------------------------------------------
@@ -174,6 +206,7 @@ def test_a_description_that_fails_a_gate_is_held_back_and_named(tmp_path, change
         c = desc_cell(ws, td.JACKET)
         c.value = change(c.value)
     path, _ = reviewed(tmp_path, edit)
+    silent(path, td.JACKET)   # the PO gives nothing to put right what the gates judge
     checks = run(tmp_path, path)
     assert not [c for c in checks if c["Result"] == "FAIL"]   # never stops the upload files
     assert (tmp_path / "run-PU-new.xlsx").exists() and imported(tmp_path) is None   # the jacket was the only one
@@ -229,6 +262,185 @@ def test_a_stale_import_is_removed_when_finalize_refuses(tmp_path):
     wb.save(path)
     checks = run(tmp_path, path)
     assert [c for c in checks if c["Result"] == "FAIL"] and imported(tmp_path) is None
+
+
+# ---- every field the description restates comes from the reviewed PO (review case 2026-11-16-buyer-5) -----------
+def test_an_untouched_composition_line_takes_the_pos(tmp_path):
+    path, _ = reviewed(tmp_path)
+    po_edit(path, td.JACKET, "Body HTML", lambda v: v.replace("Composition: Shell: 100% Cotton", "Composition: 100% LINEN"))
+    run(tmp_path, path)
+    jacket = by_code(tmp_path)[td.JACKET]
+    assert "<ul>\n<li>Composition: 100% Linen</li>\n" in jacket and jacket.count("Composition") == 1
+
+
+def test_a_composition_typed_into_the_po_goes_into_a_description_that_had_none(tmp_path):
+    path, _ = reviewed(tmp_path)
+    run(tmp_path, path)
+    assert td.TOTE not in by_code(tmp_path)   # the OC printed no composition: held back
+    typed(path, td.TOTE, "100% COTTON CANVAS")
+    typed(path, td.LOAFER, "Upper: 100% Calf Leather")
+    run(tmp_path, path)
+    got = by_code(tmp_path)
+    assert got[td.TOTE] == ("<p>ACME STUDIO's Drift Tote in Sand is a tote bag.</p>\n<ul>\n"
+                            f"<li>Composition: 100% Cotton Canvas</li>\n</ul><br><p>SKU: {td.TOTE}</p>")   # one edit
+    assert got[td.LOAFER].startswith("<p>ACME STUDIO's Mesa Loafer in Black is a pair of loafers.</p>\n<ul>\n"
+                                     "<li>Composition: Upper: 100% Calf Leather</li>\n  <li>")   # first in the list
+
+
+@pytest.mark.parametrize("line,kept", [("Shell: 100% COTTON", True), ("100% Wool", False)])
+def test_an_edited_composition_is_kept_when_it_agrees_with_the_po_and_held_back_when_not(tmp_path, line, kept):
+    def edit(ws):
+        c = desc_cell(ws, td.JACKET)
+        c.value = re.sub(r"Composition: [^<]*", f"Composition: {line}", c.value)
+    path, _ = reviewed(tmp_path, edit)
+    checks = run(tmp_path, path)
+    if kept:
+        assert f"<li>Composition: {line}</li>" in by_code(tmp_path)[td.JACKET]   # as typed
+    else:
+        assert td.JACKET not in by_code(tmp_path)
+        assert (f"{td.JACKET} 'Orbit Field Jacket in Slate': its Composition line says '100% Wool', the PO's Body HTML "
+                "'Shell: 100% Cotton': make them agree") in check(checks)["Detail"]
+
+
+def test_a_placeholder_on_the_po_is_never_written_and_a_bad_composition_there_is_named(tmp_path):
+    path, _ = reviewed(tmp_path)
+    silent(path, td.JACKET)
+    run(tmp_path, path)
+    jacket = by_code(tmp_path)[td.JACKET]   # the PO gives none: the description's own lines stand, for the gates
+    assert "<li>Composition: Shell: 100% Cotton &amp; Linen - Lining: 100% Cupro</li>" in jacket
+    assert "<li>Made in Italy</li>" in jacket and "Composition: -" not in jacket and "Made in -" not in jacket
+    po_edit(path, td.JACKET, "Body HTML", lambda v: v.replace("Composition: -", "Composition: 60% Cotton 30% Linen"))
+    checks = run(tmp_path, path)
+    assert td.JACKET not in by_code(tmp_path)
+    assert ("the PO's Body HTML composition '60% Cotton 30% Linen' adds up to 90%, so the source may have cut it off: "
+            "fix it there") in check(checks)["Detail"]
+
+
+def test_made_in_comes_from_the_pos_custom_made_in_before_its_body(tmp_path):
+    path, _ = reviewed(tmp_path)
+    po_edit(path, td.JACKET, poxlsx.MADE_IN, lambda v: "PT")   # the template body still says Made in Italy
+    run(tmp_path, path)
+    jacket = by_code(tmp_path)[td.JACKET]
+    assert "\n<li>Made in Portugal</li>\n</ul>" in jacket and "Italy" not in jacket
+
+
+def test_a_made_in_the_po_gives_goes_last_in_the_list(tmp_path):
+    path, _ = reviewed(tmp_path)
+    typed(path, td.LOAFER, "Upper: 100% Calf Leather")
+    po_edit(path, td.LOAFER, "Body HTML", lambda v: v.replace("Made in -", "Made in Spain"))   # custom.made_in '-'
+    run(tmp_path, path)
+    assert by_code(tmp_path)[td.LOAFER].endswith(f"  <li>Rubber sole</li>\n<li>Made in Spain</li>\n</ul><br><p>SKU: "
+                                                 f"{td.LOAFER}</p>")
+
+
+@pytest.mark.parametrize("line,kept", [("Made in ITALY", True), ("Made in France", False)])
+def test_an_edited_made_in_is_kept_when_it_agrees_with_the_po_and_held_back_when_not(tmp_path, line, kept):
+    def edit(ws):
+        c = desc_cell(ws, td.JACKET)
+        c.value = c.value.replace("<li>Made in Italy</li>", f"<li>{line}</li>")
+    path, _ = reviewed(tmp_path, edit)
+    checks = run(tmp_path, path)
+    if kept:
+        assert f"<li>{line}</li>" in by_code(tmp_path)[td.JACKET]
+    else:
+        assert td.JACKET not in by_code(tmp_path)
+        assert "its Made in line says 'France', the PO's made in 'Italy': make them agree" in check(checks)["Detail"]
+
+
+def test_a_final_title_the_person_typed_in_is_not_swapped_again(tmp_path):
+    longer = "Waxed Orbit Field Jacket in Slate"   # the final Title holds the drafted one
+
+    def edit(ws):
+        c = desc_cell(ws, td.JACKET)
+        c.value = c.value.replace("STUDIO's Orbit Field Jacket in Slate is", f"STUDIO's {longer} is")
+    path, _ = reviewed(tmp_path, edit)
+    po_edit(path, td.JACKET, "Title", lambda v: longer)
+    run(tmp_path, path)
+    assert by_code(tmp_path)[td.JACKET].startswith(f"<p>ACME STUDIO's {longer} is a waxed lightweight jacket.</p>")
+
+
+@pytest.mark.parametrize("intro", [
+    "<p>ACME STUDIO's Waxed Orbit Field Jacket in Slate is a jacket.</p>",   # a title the PO does not have
+    "<p>ACME STUDIO's Orbit Field Jacket in Slate is a jacket. The Orbit Field Jacket in Slate is waxed.</p>",   # twice
+])
+def test_an_intro_without_the_final_title_once_in_its_frame_is_held_back(tmp_path, intro):
+    def edit(ws):
+        c = desc_cell(ws, td.JACKET)
+        c.value = re.sub(r"^<p>.*?</p>", intro, c.value)
+    path, _ = reviewed(tmp_path, edit)
+    checks = run(tmp_path, path)
+    assert td.JACKET not in by_code(tmp_path)
+    assert ("its intro does not hold the final Title once, as \"ACME STUDIO's Orbit Field Jacket in Slate is ...\""
+            in check(checks)["Detail"])
+
+
+def test_the_item_noun_follows_a_type_fixed_on_the_po(tmp_path):
+    path, _ = reviewed(tmp_path)
+    po_edit(path, td.JACKET, "Type", lambda v: "MEN CLOTHING JACKETS BOMBER")
+    typed(path, td.LOAFER, "Upper: 100% Calf Leather")
+    po_edit(path, td.LOAFER, "Type", lambda v: "MEN SHOES SNEAKERS")
+    run(tmp_path, path)
+    got = by_code(tmp_path)
+    assert got[td.JACKET].startswith("<p>ACME STUDIO's Orbit Field Jacket in Slate is a waxed bomber jacket.</p>")
+    assert got[td.LOAFER].startswith("<p>ACME STUDIO's Mesa Loafer in Black is a pair of sneakers.</p>")
+
+
+def test_the_item_swap_keeps_the_adjective_and_takes_the_article_by_sound():
+    body = "<p>ACME STUDIO's Loop Drop in Gold is a ring. It is cast.</p>\n<p>SKU: ZQ0007AB7P0007 900</p>"
+    swap = lambda b, old, new: descimport.swap_item(b, "ACME STUDIO", "Loop Drop in Gold", old, new)
+    assert swap(body, "ring", "earring") == body.replace("is a ring.", "is an earring.")
+    assert swap(body.replace("a ring", "a cast ring"), "ring", "earring") == body.replace("a ring", "a cast earring")
+    assert swap(body, "ring", "pair of earrings") == body.replace("a ring", "a pair of earrings")
+    assert swap(body.replace("a ring", "a gold piece"), "ring", "earring") == body.replace("a ring", "a gold piece")
+
+
+@pytest.mark.parametrize("phrase,kept", [("a waxed field jacket", True), ("a waxed shirt", False)])
+def test_an_edited_intro_item_is_kept_when_it_is_the_types_kind_and_held_back_when_not(tmp_path, phrase, kept):
+    def edit(ws):
+        c = desc_cell(ws, td.JACKET)
+        c.value = c.value.replace("is a waxed lightweight jacket.", f"is {phrase}.")
+    path, _ = reviewed(tmp_path, edit)
+    checks = run(tmp_path, path)
+    if kept:
+        assert f"is {phrase}." in by_code(tmp_path)[td.JACKET]
+    else:
+        assert td.JACKET not in by_code(tmp_path)
+        assert ("its intro names another kind of product than the final Type's item noun 'lightweight jacket'"
+                in check(checks)["Detail"])
+
+
+def test_a_po_that_cannot_be_read_or_a_type_with_no_item_noun_holds_a_description_back():
+    code = "ZQ0006AB6P0006 900"
+    body = (f"<p>ACME STUDIO's Loop Cape in Black is a coat.</p>\n<ul>\n<li>Composition: 100% Wool</li>\n</ul><br>"
+            f"<p>SKU: {code}</p>")
+    d = {"Title (as drafted)": "Loop Cape in Black", "Type (as drafted)": "MEN CLOTHING COATS",
+         "Composition (as drafted)": "100% Wool"}
+    row = {"Title": "Loop Cape in Black", "Type": "MEN CLOTHING CAPES", "Vendor": "ACME STUDIO", poxlsx.MADE_IN: "-",
+           "Body HTML": f"<p>Composition: 100% Wool</p> <p>Made in -</p> <p>SKU: {code}</p>"}
+    assert descimport.reconcile(body, d, row, BRAND) == (body, [
+        "the final Type 'MEN CLOTHING CAPES' gives the tool no item noun to check the intro's 'coat' against"])
+    row.update(Type="MEN CLOTHING COATS", **{"Body HTML": "<p>All wool.</p>"})
+    assert descimport.reconcile(body, d, row, BRAND)[1] == [
+        "the PO's Body HTML no longer follows the brand's template, so its composition cannot be read"]
+
+
+def test_the_pos_values_are_read_through_the_brands_template():
+    t = BRAND["body_html"]
+    assert descimport.template_values("<p>Composition: 100% Wool &amp; Silk</p><p>Made in IT</p>\n<p>SKU: X 1</p>", t) \
+        == {"composition": "100% Wool &amp; Silk", "made_in": "IT"}
+    assert descimport.template_values("<p>100% Wool</p>", t) is None
+    assert descimport.template_values("<p>Wool</p> X 1", "<p>{composition}</p> {code}") == {"composition": "Wool"}
+
+
+def test_a_rerun_that_writes_no_import_leaves_no_earlier_one(tmp_path):
+    path, _ = reviewed(tmp_path)
+    run(tmp_path, path)
+    assert imported(tmp_path) is not None
+    wb = openpyxl.load_workbook(path)
+    del wb[poxlsx.DESCRIPTIONS]
+    wb.save(path)
+    checks = run(tmp_path, path)   # the same prefix, a run that succeeds and writes no import
+    assert not [c for c in checks if c["Result"] == "FAIL"] and imported(tmp_path) is None
 
 
 # ---- the page and the CLI -----------------------------------------------------------------------------
