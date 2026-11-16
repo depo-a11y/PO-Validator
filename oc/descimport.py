@@ -18,8 +18,9 @@ reviewed PO's final values for every field it restates (reconcile), so a fix mad
 - the Made in line, from the PO's custom.made_in, which complete and PU-new treat as authoritative (the template
   body's Made in line is left as entered), else from the template body's Made in line; only a country the tool knows,
   and the two must not name different countries;
-- the colourway bullet, from the final title's colour words by the draft's own rule (colourway); any other text that
-  still names the drafted title's colour holds the product (old_colour).
+- the colourway bullet, from the final title's colour words by the draft's own rule (colourway), put in where the
+  drafted title gave none (a colour code) and the final one gives colour words; any other text that still names the
+  drafted title's colour holds the product (old_colour).
 The Title and the item noun: a description still holding the drafted one takes the PO's; an edited one must agree.
 Composition and Made in are a three-way merge whose base is the PO's own value at draft (merge): the PO and the
 description draw on different sources at draft (the description the OC line first, the PO's template the cart, then
@@ -261,7 +262,10 @@ def stale_bullets(body, drafted, final, item=""):
 def colourway(body, drafted, final):
     """(body, problems): the colourway bullet brought to the final title by the draft's own rule (describe.draft: the
     title's colour words, none for a code with a digit or a banned word). A bullet still as drafted takes the final
-    colour words, or goes when the final title gives none; an edited one that disagrees with the final title holds."""
+    colour words, or goes when the final title gives none; an edited one that disagrees with the final title holds.
+    Where the drafted title gave none (its colour a code, or missing) and the final one gives colour words, the bullet
+    goes in at the draft's place: right after the Composition line, else first in the list. A bullet the draft gave
+    and the person removed stays out."""
     rule = lambda c: c if c and not re.search(r"\d", c) and not describe.banned(f"{c} colourway") else ""
     old = rule(title_colour(drafted)[1] if describe.squash(drafted) else "")
     new = rule(title_colour(final)[1])
@@ -275,7 +279,15 @@ def colourway(body, drafted, final):
         else:
             out.append(f"its colourway bullet says '{said}', the final title's colour words "
                        f"'{new or 'none'}': make them agree")
+    if not old and new and not COLOURWAY.search(body):
+        body = _after_composition(body, f"  <li>{_e(new)} colourway</li>")
     return body, out
+
+
+def _after_composition(body, li):
+    """`li` right after the Composition line, else first in the list (made, before the SKU line, when there is none)."""
+    comp = COMPOSITION.search(body)
+    return body[:comp.end()] + "\n" + li + body[comp.end():] if comp else _insert(body, li, True)
 
 
 def old_colour(body, drafted, final):

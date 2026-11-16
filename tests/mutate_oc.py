@@ -2321,6 +2321,15 @@ MUTANTS += [   # review case 2026-11-16-buyer-10 (flagged), round 9: colourway, 
      'B: a Made in line naming no known country written'),
 ]
 
+MUTANTS += [   # round 9b: the colourway bullet for a title fixed in review (GM)
+    (X, '        body = _after_composition(body, f"  <li>{_e(new)} colourway</li>")',
+     '        body = body',
+     'B: the colourway bullet not put in for a fixed raw-code title'),
+    (X, '    if not old and new and not COLOURWAY.search(body):',
+     '    if new and not COLOURWAY.search(body):',
+     'B: a colourway bullet the person removed put back'),
+]
+
 
 def digest(p):
     return hashlib.md5(p.read_bytes()).hexdigest()

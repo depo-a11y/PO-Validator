@@ -341,7 +341,8 @@ def test_a_composition_typed_into_the_po_goes_into_a_description_that_had_none(t
     run(tmp_path, path)
     got = by_code(tmp_path)
     assert got[td.TOTE] == ("<p>ACME STUDIO's Drift Tote in Sand is a tote bag.</p>\n<ul>\n"
-                            f"<li>Composition: 100% Cotton Canvas</li>\n</ul><br><p>SKU: {td.TOTE}</p>")   # one edit
+                            "<li>Composition: 100% Cotton Canvas</li>\n  <li>Sand colourway</li>\n"
+                            f"</ul><br><p>SKU: {td.TOTE}</p>")   # one edit; the fixed title's colour as the draft puts it
     assert got[td.LOAFER].startswith("<p>ACME STUDIO's Mesa Loafer in Black is a pair of loafers.</p>\n<ul>\n"
                                      "<li>Composition: Upper: 100% Calf Leather</li>\n  <li>")   # first in the list
 
@@ -626,6 +627,34 @@ def test_the_colourway_bullet_follows_the_drafts_own_rule(final, want):
     out, bad = descimport.colourway(body, "Loop Cap in Black", final)
     assert bad == [] and out == (body.replace("  <li>Black colourway</li>", want) if want else
                                  body.replace("\n  <li>Black colourway</li>", ""))
+
+
+def test_a_raw_code_title_fixed_in_review_gets_its_colourway_bullet(tmp_path):
+    path, _ = reviewed(tmp_path)   # 'Loafer in 900' (a colour code: the draft gave no bullet) is 'Mesa Loafer in Black'
+    typed(path, td.LOAFER, "Upper: 100% Calf Leather")
+    run(tmp_path, path)
+    assert by_code(tmp_path)[td.LOAFER].startswith(
+        "<p>ACME STUDIO's Mesa Loafer in Black is a pair of loafers.</p>\n<ul>\n<li>Composition: Upper: 100% Calf "
+        "Leather</li>\n  <li>Black colourway</li>\n  <li>Leather upper</li>")
+
+
+@pytest.mark.parametrize("final", ["Orbit Field Jacket in Slate", "Orbit Field Jacket in Navy"])
+def test_a_colourway_bullet_the_person_removed_is_not_put_back(tmp_path, final):
+    def edit(ws):
+        c = desc_cell(ws, td.JACKET)
+        c.value = c.value.replace("\n  <li>Slate colourway</li>", "")
+    path, _ = reviewed(tmp_path, edit)
+    po_edit(path, td.JACKET, "Title", lambda v: final)
+    run(tmp_path, path)
+    assert "colourway" not in by_code(tmp_path)[td.JACKET]
+
+
+def test_no_colourway_bullet_goes_in_for_colour_words_the_draft_would_drop():
+    body = "<ul>\n<li>Composition: 100% Cotton</li>\n  <li>Zip fastening</li>\n</ul><br><p>SKU: X 1</p>"
+    for final in ("Loop Cap in Summer Black", "Loop Cap in 4N0", "Loop Cap"):   # a season word, a code, none
+        assert descimport.colourway(body, "Loop Cap in 900", final) == (body, [])
+    assert descimport.colourway("<p>SKU: X 1</p>", "Loop Cap in 900", "Loop Cap in Black")[0] == \
+        "<ul>\n  <li>Black colourway</li>\n</ul><br><p>SKU: X 1</p>"
 
 
 def test_an_edited_colourway_bullet_that_disagrees_with_the_final_title_is_held_back(tmp_path):
