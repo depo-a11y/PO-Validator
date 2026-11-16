@@ -413,7 +413,7 @@ def _typed_draft(tmp_path, price, cache):
     spreadsheet program stored with each compare-at formula."""
     rows, review, checks, fills = draftm.build(base._docs(), base.BRAND, _catalog(tmp_path), base._hist(), base._tags())
     path = tmp_path / "draft.xlsx"
-    poxlsx.write_po(str(path), poxlsx.PO_HEADER, rows, review, checks, fills)
+    poxlsx.write_po(str(path), poxlsx.PO_HEADER, rows, review, checks, fills, brand=base.BRAND)
     wb = openpyxl.load_workbook(path)
     ws = wb.worksheets[0]
     col = {c.value: c.column for c in ws[1] if c.value}

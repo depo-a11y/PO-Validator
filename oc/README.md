@@ -618,15 +618,31 @@ so a fix made on the PO is one edit, never two:
 | Composition line | the composition in the PO's template Body HTML (the one PU-new imports), read through the brand's `body_html` template, in the house's Title Case |
 | Made in line | the PO's `custom.made_in`, which complete and PU-new treat as authoritative (the template body's Made in line is left as entered); when that is blank or `-`, the template body's Made in line |
 
-For each: a description still holding the drafted value takes the PO's (the sheet keeps the drafted Type,
-Composition and Made in in its "(as drafted)" columns to tell); a description without the line gets the PO's at its
-house place (Composition first in the list, Made in last, the list made before the SKU line when there is none: a
-composition typed into the template body of a product whose OC printed none reaches its description); an edited one
-is kept as typed when it agrees with the PO, and held back, the disagreement named, when it does not. A final Title
-already in the frame is not swapped again (a final Title that holds the drafted one would get its prefix twice).
-Where the PO gives none (a `-` composition or made in), the description's own line stands for the gates; a
-placeholder is never written. A composition on the PO that cannot be written (cut off, garbled, in codes) holds the
-description back until it is fixed there, and so does a PO Body HTML that no longer follows the brand template.
+The Title and the item noun: a description still holding the drafted one takes the PO's; an edited one must agree.
+A final Title already in the frame is not swapped again (a final Title that holds the drafted one would get its
+prefix twice).
+
+Composition and Made in are a **three-way merge whose base is the PO's own value at draft**. At draft the two sides
+draw on different sources: the description takes the OC line first, the PO's template the cart, then the live same
+style+fabric product. So the PO's value only carries into the description when review changed it:
+
+| The PO's value since the draft | The description's line |
+|---|---|
+| unchanged (a `-` then and now included) | stands as it is, drafted or edited, for the gates; a line it lacks gets the PO's, if the PO gives one |
+| changed | a line still holding the drafted value, or a placeholder, takes the PO's; a line it lacks gets it; an edited line is kept when it agrees, and held back, both values named, when it does not |
+| cleared to `-` | held back while the description still has the line |
+
+The PO's value goes in at its house place (Composition first in the list, Made in last, the list made before the SKU
+line when there is none), so a composition typed into the template body of a product whose OC printed none reaches
+its description. A composition the merge replaced holds the product back while a bullet drawn from the drafted one
+("Cupro lining", from `describe.part_bullets`) is still there and the new one does not give it. A placeholder is never
+written. A composition on the PO that cannot be written (cut off, garbled, in codes), when it is the value the merge
+would use, holds the description back until it is fixed there, and so does a PO Body HTML that no longer follows the
+brand template. The Descriptions sheet keeps every value the merge needs in its "(as drafted)" columns (the Title,
+Type, Composition and Made in the description was drafted with, and the PO's own composition and made in at draft);
+a sheet without them writes no import (a WARN says to draft the PO again). The draft's Why already says where a
+description's composition or Made in differs from the PO's ("composition: cart ... says ..., used the OC line
+first"), in the Descriptions sheet and the Review row alike.
 
 A description is left out, named with its reason in the check row "Description import (...)" (a WARN; the upload
 files are still written), when it disagrees with the PO as above, does not open with "{VENDOR}'s", its last line is

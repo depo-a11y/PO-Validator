@@ -608,7 +608,8 @@ def draft(oc_path, catalog_path, brand_cfg, cart_path=None, history_paths=None, 
     header, rows, review, fills = cartorder.as_written(docs, poxlsx.PO_HEADER, rows, review, fills)
     with tempfile.TemporaryDirectory(prefix="oc-draft-") as tmp:
         out = os.path.join(tmp, "PO-draft.xlsx")
-        poxlsx.write_po(out, header, rows, review, checks, fills, currency=cost_currency(brand_cfg), extra=extra)
+        poxlsx.write_po(out, header, rows, review, checks, fills, brand=brand_cfg,
+                        currency=cost_currency(brand_cfg), extra=extra)
         data = Path(out).read_bytes()
     return (None if blocking(checks) else data), pd.DataFrame(review), checks
 

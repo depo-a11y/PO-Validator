@@ -376,7 +376,7 @@ def test_a_formula_in_the_cart_reaches_the_draft_and_complete_as_text(tmp_path, 
     made = _first(drows, RING)[poxlsx.MADE_IN]
     assert made.startswith("=")
     out = tmp_path / "draft.xlsx"
-    poxlsx.write_po(str(out), poxlsx.PO_HEADER, drows, review, checks, fills)
+    poxlsx.write_po(str(out), poxlsx.PO_HEADER, drows, review, checks, fills, brand=BRAND)
     assert _read_back(out)[made] == "s"
     assert _read_back(out, "Review")[made] == "s"
     base = {"Vendor": "MAISON MARGIELA", "Status": "Active", "Option1 Name": "Colour", "Option2 Name": "Size",

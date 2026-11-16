@@ -155,7 +155,7 @@ def cmd_draft(args):
     checks = rchecks + checks
     from .util import cost_currency
     header, rows, review, fills = cartorder.as_written(docs, poxlsx.PO_HEADER, rows, review, fills)
-    poxlsx.write_po(args.out, header, rows, review, checks, fills, currency=cost_currency(b), extra=extra)
+    poxlsx.write_po(args.out, header, rows, review, checks, fills, currency=cost_currency(b), extra=extra, brand=b)
     print(f"-> {args.out} ({len(rows)} rows)")
     if args.ai_explain and service.blocking(checks):
         _explain(service.explain_draft(args.oc, checks, b))

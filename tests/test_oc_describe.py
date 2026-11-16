@@ -568,7 +568,7 @@ def test_the_workbook_writes_the_descriptions_sheet_last_keyed_and_shaded(tmp_pa
     import openpyxl
     rows, review, checks, fills = build(tmp_path)
     path = tmp_path / "draft.xlsx"
-    poxlsx.write_po(str(path), poxlsx.PO_HEADER, rows, review, checks, fills)
+    poxlsx.write_po(str(path), poxlsx.PO_HEADER, rows, review, checks, fills, brand=BRAND)
     wb = openpyxl.load_workbook(path)
     assert wb.sheetnames == ["Sheet1", "Review", "Checks", poxlsx.DESCRIPTIONS]
     ws = wb[poxlsx.DESCRIPTIONS]

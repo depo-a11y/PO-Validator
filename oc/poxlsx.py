@@ -145,9 +145,10 @@ def read_po(path, sheet=None):
 
 
 def write_po(path, header, rows, review=None, checks=None, fills=None, title="Sheet1", raw=False, currency="EUR",
-             extra=None):
+             extra=None, brand=None):
     """rows: list of dicts keyed like read_po. fills: {(row_index, key): colour}. Wholesale Price and Total Order
-    are formatted in `currency`, the brand's cost currency. extra: {sheet name: rows} written after Checks."""
+    are formatted in `currency`, the brand's cost currency. extra: {sheet name: rows} written after Checks. brand:
+    the config a draft with descriptions was built with (its Descriptions sheet reads the PO's values through it)."""
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = title
@@ -178,16 +179,17 @@ def write_po(path, header, rows, review=None, checks=None, fills=None, title="Sh
         write_table(wb, "Checks", checks, colour_key="Result")
     for name, table in (extra or {}).items():
         write_table(wb, name, table)
-    write_descriptions(wb, rows, review)
+    write_descriptions(wb, rows, review, brand)
     wb.save(path)
 
 
 DESCRIPTIONS = "Descriptions"   # the draft's sheet of NEW product descriptions (oc/describe.py, option B)
 DESCRIPTION_COLS = ["Variant SKU", "Manufacture code", "Title (as drafted)", "Description", "Source", "Why",
-                    "Type (as drafted)", "Composition (as drafted)", "Made in (as drafted)"]   # finalize: left or edited
+                    "Type (as drafted)", "Composition (as drafted)", "Made in (as drafted)",
+                    "PO composition (as drafted)", "PO made in (as drafted)"]   # finalize's merge (oc/descimport.py)
 
 
-def write_descriptions(wb, rows, review):
+def write_descriptions(wb, rows, review, brand):
     """The Descriptions sheet, last: one row per Review row whose Column is the description's, keyed by its product's
     first PO row's Variant SKU, the Description cell shaded as the Review shades it, and the drafted values finalize
     compares with the reviewed PO's (oc/descimport.reconcile). Nothing when there is none."""
@@ -203,11 +205,11 @@ def write_descriptions(wb, rows, review):
     for r in desc:
         po = rows[r["Row"] - 2]
         append_text(ws, [po.get("Variant SKU"), r["Code"], po.get("Title"), r["Value"], r["Source"], r["Why"]]
-                    + as_drafted(r["Value"], po))
+                    + as_drafted(r["Value"], po, brand))
         if r["Colour"] in FILLS:
             ws.cell(ws.max_row, DESCRIPTION_COLS.index("Description") + 1).fill = FILLS[r["Colour"]]
     ws.freeze_panes = "A2"
-    for col, width in zip("ABCDEFGHI", (14, 24, 40, 80, 18, 80, 30, 40, 16)):
+    for col, width in zip("ABCDEFGHIJK", (14, 24, 40, 80, 18, 80, 30, 40, 16, 40, 16)):
         ws.column_dimensions[col].width = width
 
 

@@ -17,19 +17,26 @@ reviewed PO's final values for every field it restates (reconcile), so a fix mad
 - the Composition line, from the PO's template Body HTML, which the person reviews and PU-new imports;
 - the Made in line, from the PO's custom.made_in, which complete and PU-new treat as authoritative (the template
   body's Made in line is left as entered), else from the template body's Made in line.
-For each: a description still holding the drafted value takes the PO's; one that lacks the line gets the PO's at its
-house place (Composition first in the list, Made in last, the list made when there is none); an edited one is kept
-when it agrees with the PO and held back, the disagreement named, when it does not. Where the PO gives none (a
-placeholder, as the OC with no composition leaves it) the description's own line stands for the gates, and a
-placeholder is never written. A product whose description fails a gate (problems) is left out and named in a WARN,
-and never stops the upload files. A config on hold writes nothing.
+The Title and the item noun: a description still holding the drafted one takes the PO's; an edited one must agree.
+Composition and Made in are a three-way merge whose base is the PO's own value at draft (merge): the PO and the
+description draw on different sources at draft (the description the OC line first, the PO's template the cart, then
+the live product), so only a PO value changed in review is a fix to carry.
+- The PO's value as drafted: the description's line stands, drafted or edited (the gates judge it); a line it lacks
+  gets the PO's, at its house place (Composition first in the list, Made in last, the list made when there is none).
+- The PO's value changed: a line still holding the drafted value, or a placeholder, takes the PO's; a line it lacks
+  gets it; an edited line is kept when it agrees and held back, both values named, when it does not. A PO value
+  cleared to a placeholder while the description still has the line is held back. A composition the merge replaces
+  holds the product back while a bullet drawn from the drafted one ("Cupro lining") is still there.
+A placeholder is never written. The Descriptions sheet carries every value the merge needs in its "(as drafted)"
+columns; a sheet without them writes no import. A product whose description fails a gate (problems) is left out and
+named in a WARN, and never stops the upload files. A config on hold writes nothing.
 """
 import html
 import re
 
 from . import describe
 from .brand import hold_row
-from .poxlsx import CODE, MADE_IN, read_descriptions
+from .poxlsx import CODE, DESCRIPTION_COLS, MADE_IN, read_descriptions
 from .util import blank, norm_code
 
 FILE = "PU-description.xlsx"
@@ -44,6 +51,7 @@ SKU_LINE = re.compile(r"<p>\s*SKU:\s*(.*?)</p>\s*$", re.S)
 MADE_IN_DASH = re.compile(r"Made in\s*(?:-|–|—)\s*<", re.I)
 TAGS = re.compile(r"<[^>]+>")
 TEMPLATE_TOKEN = re.compile(r"\{(composition|made_in|code)\}")
+AS_DRAFTED = [c for c in DESCRIPTION_COLS if c.endswith("(as drafted)")]
 
 
 def _text(fragment):
@@ -59,12 +67,15 @@ def frame(vendor, title):
     return _e(f"{str(vendor).upper()}'s {title} is ")
 
 
-def as_drafted(body, row):
-    """The Descriptions sheet's Type, Composition and Made in "(as drafted)" values: the PO row's Type and the drafted
-    description's Composition and Made in as it wrote them (None where it wrote no such line), so finalize can tell a
-    line left as drafted from one the person edited."""
+def as_drafted(body, row, brand):
+    """The Descriptions sheet's "(as drafted)" values after the Title: the PO row's Type, the drafted description's
+    Composition and Made in as it wrote them (None where it wrote no such line), and the PO row's own composition and
+    made in at draft, read as finalize reads them (template_values, po_made_in): the merge's base."""
     lines = [rx.search(str(body or "")) for rx in (COMPOSITION, MADE_IN_LINE)]
-    return [row.get("Type")] + [m.group(1).strip() if m else None for m in lines]
+    values = template_values(row.get("Body HTML"), brand["body_html"])
+    raw = (values or {}).get("composition")
+    return ([row.get("Type")] + [m.group(1).strip() if m else None for m in lines]
+            + [None if raw is None else _text(raw), _text(po_made_in(row, values, brand)) or None])
 
 
 def swap_title(body, drafted, final, vendor):
@@ -184,6 +195,34 @@ def restate(body, rx, drafted, final, same, label, first):
     return body, _text(now)
 
 
+def _norm(text, brand):
+    """A PO value compared with its base: '' for none or a placeholder, else its words, case aside."""
+    t = _text(text)
+    return "" if _placeholder(t, brand) else t.casefold()
+
+
+def merge(body, rx, drafted, base, now, final, same, label, first, brand):
+    """(body, '' | 'cleared' | 'disagrees', the description's line) for one line the description restates from the
+    PO, a three-way merge on the PO's value: `base` at draft, `now` at finalize (text), `final` the line the PO gives
+    now (escaped; None when it gives none to write). The PO's value as drafted: the description's line stands, and a
+    line it lacks gets the PO's. Changed: restate. Cleared while the description still has the line: 'cleared'."""
+    line = rx.search(body)
+    if _norm(now, brand) == _norm(base, brand):
+        return (body if line else restate(body, rx, drafted, final, same, label, first)[0]), "", ""
+    if final is None:
+        return body, "cleared" if line and not _norm(now, brand) else "", _text(line.group(1)) if line else ""
+    body, bad = restate(body, rx, drafted, final, same, label, first)
+    return body, "disagrees" if bad else "", bad
+
+
+def stale_bullets(body, drafted, final):
+    """The bullets the drafted composition gave (describe.part_bullets: 'Cupro lining') that the description still
+    carries and the PO's composition does not give."""
+    keep = {b for b, _ in describe.part_bullets(_text(final))}
+    return [b for b, _ in describe.part_bullets(_text(drafted))
+            if b not in keep and re.search(rf"<li>\s*{re.escape(_e(b))}\s*</li>", body)]
+
+
 def reconcile(body, d, row, brand):
     """(body, problems): one description brought to the reviewed PO's final Title, item noun, Composition and Made in
     (see the module docstring); the problems name each edit that disagrees with the PO."""
@@ -200,19 +239,31 @@ def reconcile(body, d, row, brand):
     values = template_values(row.get("Body HTML"), brand["body_html"])
     if values is None and "{composition}" in brand["body_html"]:
         out.append("the PO's Body HTML no longer follows the brand's template, so its composition cannot be read")
-    comp, why = po_composition(values, brand)
-    if why:
-        out.append(why)
-    same_text = lambda a, b: _text(a).casefold() == _text(b).casefold()
-    body, bad = restate(body, COMPOSITION, d.get("Composition (as drafted)"), comp, same_text, "Composition: ", True)
-    if bad:
-        out.append(f"its Composition line says '{bad}', the PO's Body HTML '{_text(comp)}': make them agree")
+    elif values is not None:
+        raw, base = _text(values.get("composition")), d.get("PO composition (as drafted)")
+        comp, why = po_composition(values, brand)
+        before = COMPOSITION.search(body)
+        if why and (not before or _norm(raw, brand) != _norm(base, brand)):
+            out.append(why)
+        same_text = lambda a, b: _text(a).casefold() == _text(b).casefold()
+        drafted = d.get("Composition (as drafted)")
+        body, how, said = merge(body, COMPOSITION, drafted, base, raw, comp, same_text, "Composition: ", True, brand)
+        if how == "cleared":
+            out.append(f"the PO's composition was cleared, and the description still says '{said}'")
+        if how == "disagrees":
+            out.append(f"its Composition line says '{said}', the PO's Body HTML '{_text(comp)}': make them agree")
+        after = COMPOSITION.search(body)
+        if before and after and not same_text(before.group(1), after.group(1)):   # the merge replaced it
+            out += [f"its bullet '{b}' comes from the drafted composition, which the PO's replaced: remove it or make "
+                    "it agree" for b in stale_bullets(body, drafted, after.group(1))]
     made = po_made_in(row, values, brand)
     place = lambda t: (describe.country(_text(t), brand) or _text(t)).casefold()
-    body, bad = restate(body, MADE_IN_LINE, d.get("Made in (as drafted)"), made, lambda a, b: place(a) == place(b),
-                        "Made in ", False)
-    if bad:
-        out.append(f"its Made in line says '{bad}', the PO's made in '{_text(made)}': make them agree")
+    body, how, said = merge(body, MADE_IN_LINE, d.get("Made in (as drafted)"), d.get("PO made in (as drafted)"),
+                            _text(made), made, lambda a, b: place(a) == place(b), "Made in ", False, brand)
+    if how == "cleared":
+        out.append(f"the PO's made in was cleared, and the description still says 'Made in {said}'")
+    if how == "disagrees":
+        out.append(f"its Made in line says '{said}', the PO's made in '{_text(made)}': make them agree")
     return body, out
 
 
@@ -286,6 +337,11 @@ def build(po_path, new_rows, brand, out_prefix):
     if sheet is None:
         return [dict(Check=CHECK, Result="INFO", Detail="this PO has no Descriptions sheet (a PO not drafted by the "
                                                         "tool), so no description import is written")], []
+    missing = [c for c in AS_DRAFTED if sheet and c not in sheet[0]]
+    if missing:
+        return [dict(Check=CHECK, Result="WARN", Detail=f"no description import is written: this PO's Descriptions "
+                     f"sheet lacks the column(s) {', '.join(missing)}, which finalize needs to tell what review "
+                     "changed from what was drafted. Draft the PO again with this tool")], []
     by_sku, by_code = {}, {}
     for d in sheet:
         by_sku.setdefault(describe.squash(d.get("Variant SKU")), d)
