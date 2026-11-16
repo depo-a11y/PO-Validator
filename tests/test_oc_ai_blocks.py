@@ -512,10 +512,10 @@ Total order q.ty 2 Total net value 200,00 Example Atelier Ltd"""
 
 
 @pytest.mark.parametrize("value,ok", [("WASHED GREEN", True), ("GREEN/WHITE STRIPE", True), ("WASHED GREY", False),
-                                      ("101", False), ("0042", True), ("30%", True)])
+                                      ("303", False), ("0042", True), ("30%", True)])
 def test_a_wrapped_cell_is_spelled_from_whole_words_but_a_short_code_never_is(value, ok):
-    block = ("zx07357 70% 0042 : 3 2 1 6 $65.00 $390.00 wool, washe 30% d green acrylic "
-             "silk, green/ 11% white spandex stripe 1 x 02").split()
+    block = ("zx07357 70% 0042 - 3 5 6 14 $65.00 $910.00 wool, washe 30% d green acrylic "
+             "silk, green/ 11% white spandex stripe 3 y 03").split()   # "3" ... "03" would piece 303 together
     assert ai.has_words(block, value) is ok
 
 
