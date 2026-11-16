@@ -1425,8 +1425,8 @@ MUTANTS = [
 
 MUTANTS += [   # register row oc-tool-colourless-join-key-votes-green-colour (cases 2026-11-13-buyer-5 F2, 2026-11-14-buyer-2 F3,
     # 2026-11-16-buyer-2 F3 and F6): no vote on an empty colour code; a fabric only where the config says where it is
-    ("oc/resolve.py", "        if not colour:\n            return None, 0, 0, None\n",
-     "        if False:\n            return None, 0, 0, None\n",
+    ("oc/resolve.py", "        if not colour:\n            return None, 0, 0, None, 0\n",
+     "        if False:\n            return None, 0, 0, None, 0\n",
      "colour vote: an empty colour code votes, so every colour-less live code shares it (green from another product)"),
     ("oc/resolve.py", '            return (colour, "") if " " in colour else ("", None)', '            return colour, ""',
      "colour vote: a {style} {fabric} {colour} code printed without its colour still votes"),
@@ -1462,6 +1462,30 @@ MUTANTS += [   # register row oc-tool-colourless-join-key-votes-green-colour (ca
      '    fabric = body[9:]   # the resolver\'s own reading', "titles: the evidence keeps a colour code the vote would not read"),
     ("oc/resolve.py", '        if not colour:\n            why = f"', '        if False:\n            why = f"',
      "colour name: a code with no colour code worded as a colour code not in the catalog"),
+]
+
+
+MUTANTS += [   # review 2026-11-16-buyer-2 F4: a vote counts every product it saw, a blank one against the winner
+    ("oc/resolve.py", '            tot, blank = sum(votes.values()), votes.pop("", 0)',
+     '            blank, tot = votes.pop("", 0), sum(votes.values())',
+     "colour vote: blank products leave the denominator ('2 of 2' where 2 of 5 fails)"),
+    ("oc/resolve.py", "                if n >= least and n / tot >= 0.6:",
+     '                if n >= least and (how == "same fabric+colour" or n / tot >= 0.6):',
+     "colour vote: the same fabric has no share bar (1 BLACK and 1 DUST is green)"),
+    ("oc/resolve.py", '(cross, 2, "same colour code")', '(cross, 1, "same colour code")',
+     "colour vote: one product of another fabric or style decides"),
+    ("oc/resolve.py", "                return None, 0, tot, None, blank", "                continue",
+     "colour vote: a same fabric that disagrees is overruled by other fabrics"),
+    ("oc/resolve.py", "            if votes:\n                v, n = votes.most_common(1)[0]",
+     "            if True:\n                v, n = votes.most_common(1)[0]",
+     "colour vote: a tier holding only blanks stops the vote"),
+    ("oc/resolve.py", "        return None, 0, seen, None, seen", "        return None, 0, 0, None, 0",
+     "colour vote: products with no colour at all reported as no products"),
+    ("oc/resolve.py", '    return f"{n} of {tot} product(s)" + (f", {blank} blank" if blank else "")',
+     '    return f"{n} of {tot} product(s)"', "colour vote: the blank products not named in the Why"),
+    ("oc/resolve.py", '        if blank:\n            why = f"colour code {colour}: no name on 60%',
+     '        if False:\n            why = f"colour code {colour}: no name on 60%',
+     "colour name: a vote left short by blank products worded as names that disagree"),
 ]
 
 

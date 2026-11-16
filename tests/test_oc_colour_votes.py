@@ -151,3 +151,67 @@ def test_the_ai_evidence_gets_no_colour_for_a_code_the_vote_reads_none_in(tmp_pa
           cat_extra=[_live("8", "ZXRO000002 ZF")], brand=dict(BRAND, join_key="{style} {fabric} {colour}"))
     (e,) = [e for req in fake.calls for e in sent_evidence(req)]
     assert e["same_fabric_and_colour_code"] == [] and e["same_colour_code_other_fabrics"] == dict(products=0, uses=[])
+
+
+# ---- every product a vote sees is counted (review 2026-11-16-buyer-2 F4) ------------------------------------------
+def _blank(pid, code):
+    return _live(pid, code, title=f"Field Jacket {pid}", colour="")
+
+
+def test_blank_products_count_against_the_winner(tmp_path):
+    review = _draft(tmp_path, "{style} {colour}", _line(1, "ZXSA00001", "", "001", "JACKET", {"M": 1}, 100.0),
+                    [_live("8", "ZXSA00002 001"), _live("9", "ZXSA00003 001")] + [_blank(str(10 + i), f"ZXSA0001{i} 001")
+                                                                                  for i in range(3)])
+    fam, title = _colour(review, "ZXSA00001 001")
+    assert fam["Colour"] == resolve.RED and fam["Value"] == "" and "Black" not in title["Value"]
+
+
+def test_a_winner_with_blanks_beside_it_names_them(tmp_path):
+    review = _draft(tmp_path, "{style} {colour}", _line(1, "ZXSA00001", "", "001", "JACKET", {"M": 1}, 100.0),
+                    [_live(str(8 + i), f"ZXSA0000{2 + i} 001") for i in range(3)] + [_blank("12", "ZXSA00012 001")])
+    fam, _ = _colour(review, "ZXSA00001 001")
+    assert (fam["Value"], fam["Colour"]) == ("BLACK", resolve.GREEN)
+    assert fam["Why"] == "same colour code 001 is BLACK on 3 of 4 product(s), 1 blank"
+
+
+@pytest.mark.parametrize("second", [dict(title="Field Jacket in Dust", colour="DUST"), dict(title="Field Jacket 9", colour="")])
+def test_the_same_fabric_needs_sixty_percent_of_its_products_too(tmp_path, second):
+    review = _draft(tmp_path, "{style} {fabric} {colour}", _line(1, "ZXRO000001", "ZF", "09", "JACKET", {"M": 1}, 100.0),
+                    [_live("8", "ZXRO000002 ZF 09"), _live("9", "ZXRO000003 ZF 09", **second)])
+    fam, _ = _colour(review, "ZXRO000001 ZF 09")
+    assert fam["Colour"] == resolve.RED and fam["Value"] == ""
+
+
+def test_the_same_fabric_with_a_blank_beside_two_agreeing_names_it(tmp_path):
+    review = _draft(tmp_path, "{style} {fabric} {colour}", _line(1, "ZXRO000001", "ZF", "09", "JACKET", {"M": 1}, 100.0),
+                    [_live("8", "ZXRO000002 ZF 09"), _live("9", "ZXRO000003 ZF 09"), _blank("10", "ZXRO000004 ZF 09")])
+    fam, _ = _colour(review, "ZXRO000001 ZF 09")
+    assert fam["Why"] == "same fabric+colour ZF 09 is BLACK on 2 of 3 product(s), 1 blank" and fam["Colour"] == resolve.GREEN
+
+
+def test_a_same_fabric_that_disagrees_is_not_overruled_by_other_fabrics(tmp_path):
+    review = _draft(tmp_path, "{style}{fabric} {colour}", _line(1, "ZX0000001", "P0001", "963", "JACKET", {"M": 1}, 100.0),
+                    [_live("8", "ZX0000002P0001 963"), _live("9", "ZX0000003P0001 963", title="Field Jacket in Navy",
+                                                             colour="NAVY"),
+                     _live("10", "ZX0000004P0002 963"), _live("11", "ZX0000005P0002 963")])
+    fam, _ = _colour(review, "ZX0000001P0001 963")
+    assert fam["Colour"] == resolve.RED and fam["Value"] == ""
+
+
+def test_a_same_fabric_holding_only_blanks_leaves_the_vote_to_other_fabrics(tmp_path):
+    """Kept on purpose, as before the denominator change: a blank says nothing, so it neither wins nor blocks."""
+    review = _draft(tmp_path, "{style}{fabric} {colour}", _line(1, "ZX0000001", "P0001", "963", "JACKET", {"M": 1}, 100.0),
+                    [_blank("8", "ZX0000002P0001 963"), _live("10", "ZX0000004P0002 963"), _live("11", "ZX0000005P0002 963")])
+    fam, _ = _colour(review, "ZX0000001P0001 963")
+    assert fam["Why"] == "same colour code 963 is BLACK on 2 of 2 product(s)" and fam["Colour"] == resolve.GREEN
+
+
+@pytest.mark.parametrize("live,why", [
+    (2, "colour code 001: no name on 60% of its 5 catalog products (3 untitled); the OC has no colour description"),
+    (0, "colour code 001: no name on 60% of its 3 catalog products (3 untitled); the OC has no colour description")])
+def test_a_colour_name_left_unvoted_by_blanks_says_so(tmp_path, live, why):
+    extra = [_live(str(8 + i), f"ZXSA0000{2 + i} 001") for i in range(live)] + [_blank(str(10 + i), f"ZXSA0001{i} 001")
+                                                                                for i in range(3)]
+    cat = catm.load(write_catalog(tmp_path, extra))
+    R = resolve.Resolver(dict(BRAND, join_key="{style} {colour}"), cat, past_po(tmp_path), base._tags())
+    assert R.colour_name("ZXSA00001 001") == ("001", "guess", why)

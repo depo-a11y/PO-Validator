@@ -117,7 +117,10 @@ now off by Colwyn's rule of 2026-11-12.
   reads it after the style only when the reader's style has one length (`otb`: 9, Margiela and MM6), and not for
   a line whose style is another length. That join_key read by any other reader (Diesel, Lemaire and Stone Island
   use `sheet`) has no fabric, nor has any other join_key: those vote only as "same colour code" (2+ products, 60%
-  agree). The AI title evidence (`oc/agent/titles.py`) reads codes the same way.
+  agree). The AI title evidence (`oc/agent/titles.py`) reads codes the same way. A winner needs 60% of every
+  product its tier saw, the same fabric's included, and a product with no title colour or colour family counts
+  against it ("2 of 5, 3 blank" is no vote; the Why names the blank ones). A same fabric that disagrees is no
+  vote, never overruled by other fabrics; one holding only blanks leaves the vote to them.
 - Catalog: a Matrixify Products export (CSV, UTF-8) for the brand's vendors, all statuses, with variants,
   `Variant Cost`, `Variant Inventory Qty`, `Variant Country of Origin` and metafields in `my_fields`, `custom` and
   `global`. Required columns are `catalog.REQUIRED`, including `custom.product_season` (the rollback restores it)

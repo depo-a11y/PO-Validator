@@ -139,32 +139,38 @@ class Resolver:
         """Votes for a colour attribute from products sharing the colour code.
 
         Same fabric+colour first, where the config says where the fabric is (vote_key). Across fabrics only when
-        the catalog's own uses of that colour code agree (at least 2 products, >= 60%): Margiela's numeric RTW colour
-        codes mean different colours on different fabrics, its T-codes do not. A code with no colour code (a
-        colour-less join_key, or none printed) gets no vote: every colour-less live code would "share" it.
+        the catalog's own uses of that colour code agree (at least 2 products): Margiela's numeric RTW colour codes
+        mean different colours on different fabrics, its T-codes do not. A code with no colour code (a colour-less
+        join_key, or none printed) gets no vote: every colour-less live code would "share" it.
+
+        (value, n, tot, how, blank). Each tier counts every product it saw, a blank one (no title colour, no colour
+        family) against the winner: the winner needs >= 60% of them, in the same fabric too, so "2 of 5, 3 blank"
+        is no vote. A tier holding only blanks says nothing, and the next one is asked. A same-fabric tier whose
+        products disagree is no vote, never overruled by other fabrics.
         """
         _, body, colour = split_code(code)
         line = self.oc.get(code)
         colour, fabric = self.vote_key(body, colour, line["style"] if line else None)
         if not colour:
-            return None, 0, 0, None
-        same, cross = collections.Counter(), collections.Counter()
+            return None, 0, 0, None, 0
+        same, cross = collections.Counter(), collections.Counter()   # value -> products, "" -> blank ones
         for c, ps in self.cat.by_code.items():
             cb, _, cc = c.partition(" ")
             if cc != colour:
                 continue
             for p in ps:
-                v = p[field]
-                if v:
-                    (same if self.same_fabric(fabric, cb, cc) else cross)[v.upper() if field == "colour_family" else v] += 1
-        if same:
-            v, n = same.most_common(1)[0]
-            return v, n, sum(same.values()), "same fabric+colour"
-        if cross:
-            v, n = cross.most_common(1)[0]
-            if n >= 2 and n / sum(cross.values()) >= 0.6:
-                return v, n, sum(cross.values()), "same colour code"
-        return None, 0, sum(cross.values()), None
+                v = p[field] or ""
+                (same if self.same_fabric(fabric, cb, cc) else cross)[v.upper() if field == "colour_family" else v] += 1
+        seen = 0
+        for votes, least, how in ((same, 1, "same fabric+colour"), (cross, 2, "same colour code")):
+            tot, blank = sum(votes.values()), votes.pop("", 0)
+            seen += tot
+            if votes:
+                v, n = votes.most_common(1)[0]
+                if n >= least and n / tot >= 0.6:
+                    return v, n, tot, how, blank
+                return None, 0, tot, None, blank
+        return None, 0, seen, None, seen
 
     def same_fabric(self, fabric, body, colour):
         """Whether a code (its body and colour code) has this fabric, as vote_key reads it; never for a fabric of None."""
@@ -179,16 +185,18 @@ class Resolver:
             if odd:
                 return name, "guess", self.cart_why(row, f"Color Description '{row['colour']}' carries "
                                                          f"unexpected character(s) {' '.join(odd)}; retype it")
-            v, n, tot, how = self._colour_votes(code, "title_colour")
+            v, n, tot, how, blank = self._colour_votes(code, "title_colour")
             if v and how == "same fabric+colour" and v.casefold() == name.casefold():
-                return v, "catalog", (f"{how} {colour} titled '{v}' on {n} of {tot} product(s); "
+                return v, "catalog", (f"{how} {colour} titled '{v}' on {share(n, tot, blank)}; "
                                       + self.cart_why(row, "Color Description agrees"))
             return name, "cart", self.cart_why(row, f"Color Description '{row['colour']}'")
-        v, n, tot, how = self._colour_votes(code, "title_colour")
+        v, n, tot, how, blank = self._colour_votes(code, "title_colour")
         if v:
-            return v, "catalog", f"{how} {colour} titled '{v}' on {n} of {tot} product(s)"
+            return v, "catalog", f"{how} {colour} titled '{v}' on {share(n, tot, blank)}"
         why = f"colour code {colour} not in the catalog" if not tot else \
             f"colour code {colour} names disagree across {tot} catalog products"
+        if blank:
+            why = f"colour code {colour}: no name on 60% of its {tot} catalog products ({blank} untitled)"
         if not colour:
             why = f"{norm_code(code)} carries no colour code (join_key {self.b.get('join_key') or DEFAULT_JOIN_KEY})"
         return colour, "guess", why + "; the OC has no colour description"
@@ -198,19 +206,19 @@ class Resolver:
         fabric's colour). With a cart row, its colour description through the brand
         keywords comes next, ahead of other fabrics' use of the colour code."""
         _, _, colour = split_code(code)
-        v, n, tot, how = self._colour_votes(code, "colour_family")
+        v, n, tot, how, blank = self._colour_votes(code, "colour_family")
         row = self.cart_row(code)
         if v and (how == "same fabric+colour" or row is None):
-            return v, "catalog", f"{how} {colour} is {v} on {n} of {tot} product(s)"
+            return v, "catalog", f"{how} {colour} is {v} on {share(n, tot, blank)}"
         fam = self.keyword_family(colour_name)
         if row is not None and fam and v == fam:
-            return v, "catalog", f"{how} {colour} is {v} on {n} of {tot} product(s); " + \
+            return v, "catalog", f"{how} {colour} is {v} on {share(n, tot, blank)}; " + \
                 self.cart_why(row, f"colour '{colour_name}' agrees")
         if row is not None and fam:
             other = f"; other fabrics' {colour} is {v} in the catalog" if v and v != fam else ""
             return fam, "cart", self.cart_why(row, f"colour '{colour_name}' matches the {fam} keyword list{other}")
         if v:
-            return v, "catalog", f"{how} {colour} is {v} on {n} of {tot} product(s)"
+            return v, "catalog", f"{how} {colour} is {v} on {share(n, tot, blank)}"
         if fam:
             return fam, "rule", f"'{colour_name}' matches the {fam} keyword list"
         return "", "guess", f"no colour family for '{colour_name}'"
@@ -440,6 +448,11 @@ class Resolver:
 
     def handle_taken(self, title):
         return slug(title) in self.cat.handles
+
+
+def share(n, tot, blank):
+    """'2 of 3 product(s)', with the blank ones named: '3 of 4 product(s), 1 blank'."""
+    return f"{n} of {tot} product(s)" + (f", {blank} blank" if blank else "")
 
 
 def tidy_colour(desc):
