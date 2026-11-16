@@ -56,7 +56,8 @@ now off by Colwyn's rule of 2026-11-12.
   prefix, which is also each workbook's Title and the first row of finalize-checks. A catalog that already carries
   the season, its tag or the OC cost is a WARN (its ROLLBACK would put nothing back).
   It is all or nothing: if any check fails (the gate, a title still holding a raw code such as "in T0004", a
-  blank colour family) no upload or delivery file is written, and exit code is 1.
+  blank colour family, a title that lost its colour words such as "Pants in ") no upload or delivery file is
+  written, and exit code is 1.
 
 **Inputs**
 

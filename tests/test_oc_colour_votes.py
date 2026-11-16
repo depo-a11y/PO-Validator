@@ -9,10 +9,13 @@ Diesel, Lemaire and Stone Island use that join_key with other style lengths and 
 is no fabric, and their votes count only as "same colour code". The AI title evidence reads codes the same way.
 Invented codes throughout.
 """
+import os
+
 import pytest
 
-from oc import catalog as catm, resolve
+from oc import catalog as catm, finalize, resolve, service
 from oc.adapters import otb
+from test_oc_tool import BRAND as TOOL_BRAND, _finalize_po, catalog_path  # noqa: F401
 from test_oc_agent import Fake, base, build, _line, BRAND, key, one, past_po, sent_evidence, write_catalog  # noqa: F401
 
 
@@ -215,3 +218,18 @@ def test_a_colour_name_left_unvoted_by_blanks_says_so(tmp_path, live, why):
     cat = catm.load(write_catalog(tmp_path, extra))
     R = resolve.Resolver(dict(BRAND, join_key="{style} {colour}"), cat, past_po(tmp_path), base._tags())
     assert R.colour_name("ZXSA00001 001") == ("001", "guess", why)
+
+
+# ---- a title with no colour words never imports (review 2026-11-16-buyer-2 F7) ---------------------------------
+@pytest.mark.parametrize("title,fails", [("Replica Sneaker in ", True), ("Womens Replica Sneaker IN", True),
+                                         ("in", True), ("Slip In in Black", False), ("Replica Sneaker in Satin", False),
+                                         ("Replica Sneaker in Black", False)])
+def test_finalize_fails_a_new_title_that_lost_its_colour_words(catalog_path, tmp_path, title, fails):
+    """A person may fill Option1 by hand and leave the red "Pants in " title; Option1 alone let it through."""
+    prefix = str(tmp_path / "x-")
+    out = finalize.run(_finalize_po(tmp_path, title, "BLACK"), TOOL_BRAND, catm.load(catalog_path), prefix)
+    (check,) = [c for c in out if c["Check"] == finalize.NO_COLOUR_CHECK]
+    assert (check["Result"] == "FAIL") is fails, check
+    if fails:
+        assert f"'{title.strip()}'" in check["Detail"] and service.blocking([check]) == [check]
+        assert not any(os.path.exists(prefix + n) for n in finalize.OUTPUTS)

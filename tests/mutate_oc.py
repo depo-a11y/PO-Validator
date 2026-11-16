@@ -1489,6 +1489,20 @@ MUTANTS += [   # review 2026-11-16-buyer-2 F4: a vote counts every product it sa
 ]
 
 
+MUTANTS += [   # review 2026-11-16-buyer-2 F7: a NEW title that lost its colour words never imports
+    ("oc/finalize.py", '    bare = sorted({t for t in df["Title"] if re.search(r"(?:^|\\s)in$", t, re.I)})', "    bare = []",
+     "finalize: a NEW title ending in 'in' (no colour words) imports"),
+    ("oc/finalize.py", 're.search(r"(?:^|\\s)in$", t, re.I)', 're.search(r"(?:^|\\s)in$", t)',
+     "finalize: a title ending in 'IN' passes"),
+    ("oc/finalize.py", 're.search(r"(?:^|\\s)in$", t, re.I)', 're.search(r"in$", t, re.I)',
+     "finalize: a colour ending in 'in' (Satin) read as no colour words"),
+    ("oc/finalize.py", 're.search(r"(?:^|\\s)in$", t, re.I)', 're.search(r"\\sin$", t, re.I)',
+     "finalize: a title that is only 'in' passes"),
+    ("oc/service.py", '    "Every NEW row has a retail price",\n)', '    "Every NEW row has a retail price",\n    "Every NEW Title names its colour",\n)',
+     "service: a title with no colour words counted as fixable in the sheet"),
+]
+
+
 MUTANTS += [   # the brand box starts with no brand chosen; Build and Make upload files wait for one
     ("pages/1_Order_confirmation_to_PO.py", 'S.get("brand_choice") in labels else None,', 'S.get("brand_choice") in labels else 0,',
      "page: the alphabetically first brand config pre-selected"),

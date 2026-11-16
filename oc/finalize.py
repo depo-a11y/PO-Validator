@@ -82,6 +82,9 @@ NEW_SIZE_COLS = ["ID", "Command", "Variant Command", "Option1 Name", "Option1 Va
 
 OUTPUTS = ["PU-new.xlsx", "PU-merge.xlsx", "PU-merge-new-sizes.xlsx", "PU-merge-ROLLBACK.xlsx", "Delivery.xlsx"]
 RUN_CHECK = "Run id (in every file name of this run and in each workbook's Title)"
+# A NEW title is "<name> in <colour words>"; one ending in "in" lost its colour words (a code with no colour code
+# drafts "Pants in "). A person retypes it in the sheet, but it never imports: the check is not FIXABLE_IN_SHEET.
+NO_COLOUR_CHECK = "Every NEW Title names its colour"
 
 
 def run_id(out_prefix):
@@ -209,6 +212,10 @@ def _pu_new(new, brand, catalog, core, out_prefix):
     no_opt = sorted({t for t, o in zip(df["Title"], df["Option1 Value"]) if not o})
     out.append(dict(Check="Every NEW row has an Option1 (colour family)", Result="FAIL" if no_opt else "PASS",
                     Detail=f"{len(no_opt)} products blank: " + "; ".join(no_opt) if no_opt else "all set"))
+    bare = sorted({t for t in df["Title"] if re.search(r"(?:^|\s)in$", t, re.I)})
+    out.append(dict(Check=NO_COLOUR_CHECK, Result="FAIL" if bare else "PASS",
+                    Detail=f"{len(bare)} title(s) end in 'in' with no colour words: " + "; ".join(f"'{t}'" for t in bare)
+                    if bare else "every title ends in its colour words"))
     unpriced = [r for r in new if _r2(r["Variant Price"]) is None]
     out.append(dict(Check=PRICE_CHECK, Result="FAIL" if unpriced else "PASS",
                     Detail=(f"fill the retail price: {len(unpriced)} NEW row(s) have none, PO rows "
