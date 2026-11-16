@@ -307,10 +307,11 @@ def test_a_negation_is_a_word_the_quote_must_hold():
     assert "no lining" in job.SYSTEM and all(n in job.SYSTEM for n in job.NEGATORS[:-1])
 
 
-def test_a_letter_after_an_apostrophe_stays_small():
-    assert describe.house_case("100% COTON D'ACME") == "100% Coton D'acme"
-    assert describe.house_case("100% CUIR D\u2019ACME") == "100% Cuir D\u2019acme"
-    assert describe.house_case("SHELL: 100% COTTON - D'ACME TRIM: 100% WOOL") == "Shell: 100% Cotton - D'acme Trim: 100% Wool"
+def test_a_letter_after_an_apostrophe_keeps_its_capital_as_the_house_writes_it():
+    assert describe.house_case("100% Coton D'Acme") == "100% Coton D'Acme"
+    assert describe.house_case("100% COTON D'ACME") == "100% Coton D'Acme"
+    assert describe.house_case("100% CUIR D\u2019ACME") == "100% Cuir D\u2019Acme"
+    assert describe.house_case("SHELL: 100% COTTON - D'ACME TRIM: 100% WOOL") == "Shell: 100% Cotton - D'Acme Trim: 100% Wool"
 
 
 def test_the_default_template_body_still_gets_a_description():
