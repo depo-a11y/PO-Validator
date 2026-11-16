@@ -263,7 +263,7 @@ def test_one_run_id_on_every_file_of_the_zip_and_first_in_the_checks(tmp_path):
 
 
 # ---- brand config without a file -----------------------------------------------
-REQ = dict(vendor="X", adapter="otb", oc_label="MM", season="S/S 27", sku_prefix="XX", cost_multiplier=1.5,
+REQ = dict(vendor="X", adapter="otb", oc_label="MM", sku_prefix={"S/S": "XS"}, cost_multiplier=1.5,
            cost_currency="EUR", margin_floor=2.5)
 
 
@@ -314,7 +314,7 @@ def test_local_configs_lists_the_brand_dir_and_skips_the_example(tmp_path, monke
 def test_a_config_from_text_never_opens_its_history_paths(tmp_path, oc_stub, monkeypatch):
     server_file = _past_po(tmp_path / "server_file.xlsx", "F/W 26")  # stands in for any file on the host
     text = yaml.safe_dump(dict(base.BRAND, history=[{"label": "F/W 26", "path": server_file}]))
-    cfg = brandm.from_text(text, "uploaded file x.yaml", "mm")
+    cfg = brandm.with_season(brandm.from_text(text, "uploaded file x.yaml", "mm"), "S/S 27")   # picked for the run
     touched = []
     real_open, real_exists = openpyxl.load_workbook, os.path.exists
     monkeypatch.setattr(openpyxl, "load_workbook", lambda p, *a, **k: (touched.append(str(p)), real_open(p, *a, **k))[1])

@@ -52,6 +52,7 @@ from . import history as histm
 from . import poxlsx
 from .adapters.otb import NotLayout
 from .util import cost_currency, currency_off, slug
+from .draft import PRINTED_CHECK   # the page shows its WARN beside the draft
 
 REPO = Path(__file__).resolve().parent.parent
 
@@ -117,6 +118,34 @@ def blocking(checks):
 
 def _check(name, result, detail):
     return dict(Check=name, Result=result, Detail=detail)
+
+
+SEASON_CHECK = "Season picked for this run"
+PREFIX_CHECK = "SKU prefix for the season picked"
+
+
+def season_rows(brand_cfg, cat):
+    """FAIL rows when no draft can be made for the run's season: none picked (brand.with_season), one the catalog
+    does not offer (catalog.offered_seasons: the store's own spellings, never a typed guess), or a season whose half
+    the brand config has no SKU prefix for (that half stays parked). [] when it can."""
+    season = brand_cfg.get("season")
+    if not season:
+        return [_check(SEASON_CHECK, "FAIL", "No season is picked for this run. Pick the season of this order: the "
+                                             "draft writes it on every row, re-bought products included, and PU-merge "
+                                             "moves each re-bought product to it.")]
+    offered = cat.offered_seasons()
+    if season not in offered:
+        return [_check(SEASON_CHECK, "FAIL", f"{season} is not a season this catalog offers: "
+                       + (f"{', '.join(offered)} (the seasons its products carry and the two after the newest). "
+                          "Pick one of them." if offered else
+                          "none, as no product in it carries a season in the store's spelling (S/S 27, F/W 26). "
+                          "Make the catalog export again with the preset."))]
+    if brandm.sku_prefix(brand_cfg)[0] is None:
+        half = brandm.SEASON.fullmatch(season).group(1)
+        return [_check(PREFIX_CHECK, "FAIL", f"The brand config has no SKU prefix for {half} seasons (none could be "
+                                             f"derived from the brand's live SKUs), so new SKUs cannot be drafted for "
+                                             f"{season}. Ask Colwyn.")]
+    return []
 
 
 def adapter(brand_cfg):
@@ -335,8 +364,11 @@ def draft_file(brand_cfg, checks, when=None):
 
 
 def run_prefix(po_path, brand_cfg, when=None):
-    """The run's file-name prefix: a PO drafted from a cart carries 'from-cart-<session>-' (read off its header)."""
+    """The run's file-name prefix: a PO drafted from a cart carries 'from-cart-<session>-' (read off its header). Its
+    season is the one picked, else the one the PO's rows carry (finalize checks the two agree)."""
     from .cartorder import unconfirmed_session
+    if not brand_cfg.get("season"):
+        brand_cfg = dict(brand_cfg, season=finalizem.po_season(po_path))
     return file_prefix(brand_cfg, when) + source_part(unconfirmed_session(po_path))
 
 
@@ -512,6 +544,9 @@ def draft(oc_path, catalog_path, brand_cfg, cart_path=None, history_paths=None, 
         return None, empty, pre + [_check("Catalog export has the columns the tool needs", "FAIL", str(e))]
     except (UnicodeDecodeError, csv.Error) as e:
         return None, empty, pre + [_check("Catalog export is a Matrixify CSV", "FAIL", f"{type(e).__name__}: {e}")]
+    bad = season_rows(brand_cfg, cat)
+    if bad:
+        return None, empty, pre + bad
     cart = None
     if oc_path is None:
         from . import cartorder

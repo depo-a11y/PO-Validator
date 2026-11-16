@@ -166,7 +166,7 @@ def test_an_ean_printed_for_a_size_lands_on_the_name_the_store_gives_it(tmp_path
 
 
 def _load(tmp_path, **extra):
-    cfg = dict(vendor="ZX BRAND", adapter="otb", oc_label="ZX", season="S/S 99", sku_prefix="ZXSS99", sku_digits=3,
+    cfg = dict(vendor="ZX BRAND", adapter="otb", oc_label="ZX", sku_prefix={"S/S": "ZXSS"}, sku_digits=3,
                cost_currency="EUR", cost_multiplier=1.5, margin_floor=2.0, **extra)
     p = tmp_path / "zx.yaml"
     p.write_text(yaml.safe_dump(cfg))

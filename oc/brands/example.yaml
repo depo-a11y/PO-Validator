@@ -47,8 +47,13 @@ oc_label: EX                   # the label, for a reader that serves several: ot
                                # brand-wide majority (90% of the live products with that size, at least 10)
 # heel_codes: true             # NEW titles write a heel height as the brand's H-code (Tabi Ballerina H30)
 # colour_spelling: {Antracite: Anthracite}   # a cart colour word written the brand's way on NEW titles
-season: S/S 27                 # Marais season label (slash form)
-sku_prefix: EXSS27             # new SKUs continue after the highest existing one
+                               # no season: the colleague picks the season of each order on the page (--season)
+sku_prefix:                    # per season half, the letters before the picked season's two digits:
+  S/S: EXSS                    # EXSS27001, EXSS27002, ... in an S/S 27 run, after the highest existing one
+  F/W: EXFW                    # or per gender where the brand's SKUs differ, e.g. F/W: {MEN: EXMF, WOMEN: EXWF}
+# sku_prefix_from:             # per half, where its prefix came from; new SKUs of a marked half are amber
+#   S/S: "derived from live, check: ..."     # from the brand's live SKUs
+#   F/W: "from the F/W 26 hand PO, not live, check: ..."   # no live SKU of that half to derive from
 sku_digits: 3
 cost_currency: EUR             # the OC's currency (an OC in any other is refused); Variant.cost_price is
                                # written as "<cost_currency> 123", e.g. "EUR 123" or "USD 123"

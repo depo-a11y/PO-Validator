@@ -44,7 +44,7 @@ def cfg(columns=None, drop=(), extra=None, **sheet_keys):
     s.update(sheet_keys)
     data = {k: v for k, v in base.BRAND.items() if k != "oc_label"}
     data.update(vendor="TEST BRAND", adapter="sheet", join_key="{style} {colour}", sheet=s, **(extra or {}))
-    return brandm.from_mapping(data, "test config", "test")
+    return brandm.with_season(brandm.from_mapping(data, "test config", "test"), data["season"])   # picked for the run
 
 
 # ---- writers -------------------------------------------------------------------
@@ -1297,7 +1297,7 @@ def alt_cfg(**extra):
     data.update(dict(adapter="sheet", join_key="{style} {colour}", join_key_alt="{style_alt} {colour}"), **extra)
     data["sheet"] = dict(columns=dict(style=dict(header="Model", **{"from": 4}), style_alt="Model", colour_code="Colour",
                                       size="Size", qty="Qty", price="Price"), currency="EUR", totals="none")
-    return brandm.from_mapping(data, "test config", "test")
+    return brandm.with_season(brandm.from_mapping(data, "test config", "test"), data["season"])   # picked for the run
 
 
 def alt_catalog(tmp_path, products):

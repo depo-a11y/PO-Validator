@@ -4,6 +4,8 @@ The work is done by oc/service.py; this file is only the page around it. Uploads
 kept in st.session_state so Step 2 reuses the brand and catalog from Step 1, and are
 written to a temporary folder only while a step runs.
 """
+import csv
+import hashlib
 import io
 import os
 import re
@@ -37,8 +39,8 @@ NOT_LISTED = """The tool needs a brand config before it can read that brand's or
 from example.yaml. Send him one of the brand's order confirmations and ask for one. It holds:
 
 - the vendor, exactly as on the approved vendor list
-- the season
-- the SKU prefix for new products
+- the SKU prefix of new products for each season half (S/S, F/W), derived from the brand's live SKUs (the season \
+itself is picked on this page for each order)
 - the cost multiplier and the cost currency
 - the margin floor
 - the reader: the built-in one if the brand's OCs are one of the known layouts (Margiela/MM6, AD Milano, \
@@ -74,6 +76,11 @@ TITLES_CAP_MSG = (f"AI title drafting is off: this browser session has used its 
 EXPLAIN_CAP_MSG = (f"No AI explanation: this browser session has used its {EXPLAIN_CAP} AI explanations. Each one is "
                    "paid for; ask Colwyn if you need more.")
 S = st.session_state
+SEASON_HELP = ("Every row of the draft carries this season, re-bought products included: PU-merge moves each re-bought "
+               "product to it, and new SKUs take its two digits. Offered: the seasons this catalog's products carry, "
+               "as the store writes them, and the two after the newest.")
+NO_SEASONS = ("This catalog export has no season in the store's spelling (S/S 27, F/W 26), so no season can be picked. "
+              "Make the export again with the preset.")
 
 
 # ---- helpers -------------------------------------------------------------------
@@ -108,6 +115,30 @@ def load_brand(kind, name, value):
         return brandm.load(str(value))
     up_name, data = value
     return brandm.from_text(data.decode("utf-8"), f"uploaded file {up_name}", up_name.split(".")[0])
+
+
+def upload_id(v):
+    """A file's identity, its name and the md5 of its bytes (an upload or a (name, bytes) kept in the session);
+    None for no file. The season pick is reset when one of these changes."""
+    if v is None:
+        return None
+    name, data = v if isinstance(v, tuple) else (v.name, v.getvalue())
+    return name, hashlib.md5(data).hexdigest()
+
+
+def catalog_seasons():
+    """The seasons the uploaded catalog offers (catalog.offered_seasons), read once per upload."""
+    up = S.get("catalog")
+    if not up:
+        return []
+    key = (up[0], hashlib.md5(up[1]).hexdigest())
+    if S.get("season_opts", (None,))[0] != key:
+        try:
+            opts = catm.offered_seasons(catm.live_seasons(up[1].decode("utf-8-sig")))
+        except (UnicodeDecodeError, csv.Error):
+            opts = []
+        S["season_opts"] = (key, opts)
+    return S["season_opts"][1]
 
 
 def save(folder, name, data):
@@ -230,7 +261,8 @@ with col1:
     # No brand until one is picked: a default would be the alphabetically first config, a brand nobody chose.
     choice = st.selectbox("Brand", labels, index=labels.index(S["brand_choice"]) if S.get("brand_choice") in labels else None,
                           placeholder="Choose a brand",
-                          help="The brand config holds the season, SKU prefix, cost rule and past POs.")
+                          help="The brand config holds the SKU prefixes, cost rule and past POs. The season is "
+                               "picked below, for each order.")
     S["brand_choice"] = choice
     kind, name, value = opts[choice] if choice is not None else (None, None, None)
     if kind == "upload":
@@ -248,7 +280,7 @@ with col1:
         except UnicodeDecodeError:
             st.error("This brand config is not a text (.yaml) file.")
     if cfg:
-        st.caption(f"Brand config: {cfg['_path']}. {cfg['vendor']}, season {cfg['season']}.")
+        st.caption(f"Brand config: {cfg['_path']}. {cfg['vendor']}.")
     if hidden_why:
         st.caption(f"Brands saved in the app are hidden: {hidden_why}. You can still upload a brand .yaml file.")
         if offer_login and st.button("Sign in to use the saved brands"):
@@ -275,6 +307,35 @@ cart_up = st.file_uploader(
     "Linesheet/cart export (optional, improves titles and colours; with no order confirmation yet, the cart is "
     "the order, UNCONFIRMED)", type=["xlsx"], key="w_cart",
     disabled=not can_cart, help=None if can_cart else "This version cannot read a linesheet yet.")
+
+# The season of the order: picked on every run, never read from the brand config (Colwyn, 2026-11-16), and only one
+# the store already spells: the seasons the catalog's products carry and the two after the newest. A pick belongs to
+# one brand, catalog and order: changing any of them clears it, so a pick never carries to another run.
+pick_for = (S.get("brand_choice"),
+            upload_id(S.get("brand_upload")) if kind == "upload" else None,
+            upload_id(S.get("catalog")),
+            upload_id(oc_up),
+            upload_id(cart_up))
+if S.get("season_for") != pick_for:
+    S.pop("w_season", None)   # the box's own state, cleared before it is drawn: it starts empty again
+    S["season_for"] = pick_for
+season_opts = catalog_seasons()
+season = st.selectbox("Season of this order", season_opts, index=None, key="w_season", placeholder="Choose the season",
+                      disabled=not season_opts, help=SEASON_HELP)
+if S.get("catalog") and not season_opts:
+    st.error(NO_SEASONS)
+if cfg and season:
+    cfg = brandm.with_season(cfg, season)   # the run's config: every drafted row and new SKU takes this season
+    shown = brandm.prefix_summary(cfg)
+    prefix_note = brandm.prefix_mark(cfg)[1]
+    if shown is None:
+        st.error(f"{cfg['vendor']} has no SKU prefix for {season[:3]} seasons in its brand config (none could be "
+                 f"derived from its live SKUs), so no draft can be made for {season}. Ask Colwyn.")
+    elif prefix_note:
+        st.warning(f"New SKUs for {season} start {shown}: {prefix_note}")
+    else:
+        st.caption(f"New SKUs for {season} start {shown}, as the brand config sets them.")
+
 prior_up = st.file_uploader(
     "PO drafted from the cart (optional, once the order confirmation is here)", type=["xlsx"], key="w_prior",
     help="The PO this tool drafted from the cart before the order confirmation came. The new draft lists what the "
@@ -316,7 +377,8 @@ if cfg and agent and titles_capped:
 ai_titles = ai_titles and not titles_capped
 
 need = [n for n, ok in (("a brand", cfg), ("the catalog export", S.get("catalog")),
-                        ("the order confirmation (or, before it arrives, the cart)", oc_up or cart_up)) if not ok]
+                        ("the order confirmation (or, before it arrives, the cart)", oc_up or cart_up),
+                        ("the season of this order", season)) if not ok]
 if need:
     st.caption("To build the draft, add " + and_join(need) + ".")
 build = False if blocked else st.button("Build draft PO", type="primary", disabled=bool(need))
@@ -353,6 +415,9 @@ if S.get("draft"):
     rd = next((c for c in d["checks"] if c["Check"] == service.READER_CHECK), None)
     if rd:
         (st.warning if rd["Result"] == "WARN" else st.caption)(f"Order confirmation {rd['Detail']}")
+    printed = next((c for c in d["checks"] if c["Check"] == service.PRINTED_CHECK and c["Result"] == "WARN"), None)
+    if printed:
+        st.warning(f"Season: {printed['Detail']}")
     if d["po"] is None:
         st.error("No draft was made. These problems are in the inputs, not in the sheet, so editing a draft "
                  "would not fix them. Check you picked the right brand and files. If you did, send Colwyn "

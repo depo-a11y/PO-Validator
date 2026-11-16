@@ -150,17 +150,21 @@ def pdf(tmp_path):
 
 
 def _cfg(**kw):
-    d = dict(base.BRAND, vendor="EXAMPLE ATELIER", adapter="ai", season="S/S 27", sku_prefix="EXSS27", oc_label=None,
+    d = dict(base.BRAND, vendor="EXAMPLE ATELIER", adapter="ai", season="S/S 27", sku_prefix={"S/S": "EXSS"}, oc_label=None,
              oc_supplier="Example Atelier Ltd", join_key="{style} {colour_code}",
              colour_codes={"Grey": "GR", "black": "BK"})
     d.update(kw)
-    return brandm.from_mapping(d, "test config", "ex")
+    return brandm.with_season(brandm.from_mapping(d, "test config", "ex"), d["season"])   # the season picked for the run
 
 
 def _catalog(tmp_path):
+    """No live product: one ARCHIVED product of another style, whose season makes S/S 27 a season to pick."""
     p = tmp_path / "catalog.csv"
     with open(p, "w", encoding="utf-8-sig", newline="") as fh:
-        csv.DictWriter(fh, fieldnames=base.CAT_COLS).writeheader()
+        w = csv.DictWriter(fh, fieldnames=base.CAT_COLS)
+        w.writeheader()
+        w.writerow(base._variant("9", "Old Boot in Black", "MEN SHOES BOOTS", "Archived", "Q00QQ0000P0000 000", "BLACK",
+                                 "41", "ZXFW26999", "700.00", "700.00", "300.00", True))
     return str(p)
 
 
@@ -535,7 +539,7 @@ def test_reader_ai_forces_the_ai_reader_for_an_otb_brand(tmp_path, pdf, key, mon
 
 
 def test_an_otb_brand_with_no_oc_supplier_cannot_be_read_by_ai(tmp_path, pdf, key):
-    cfg = brandm.from_mapping(dict(base.BRAND), "test config", "mm")
+    cfg = brandm.with_season(brandm.from_mapping(dict(base.BRAND), "test config", "mm"), "S/S 27")
     fake = FakeClient(message(RESPONSE))
     po, _, checks = service.draft(pdf, _catalog(tmp_path), cfg, reader="ai", ai_factory=fake.factory)
     assert po is None and fake.calls == []
@@ -657,7 +661,7 @@ def test_the_join_key_is_filled_by_substitution_never_by_format():
 
 
 def test_an_ai_config_from_yaml_loads():
-    text = "\n".join(["vendor: X", "adapter: ai", "season: S/S 27", "sku_prefix: XX", "cost_multiplier: 1.5",
+    text = "\n".join(["vendor: X", "adapter: ai", "sku_prefix: {S/S: XS}", "cost_multiplier: 1.5",
                       "cost_currency: EUR", "margin_floor: 2.5", "oc_supplier: [X Ltd, X Limited]",
                       "join_key: '{style} {colour_code}'", "colour_codes: {Grey: GR}"])
     cfg = brandm.from_text(text, "uploaded file x.yaml", "x")

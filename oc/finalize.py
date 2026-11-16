@@ -85,6 +85,9 @@ RUN_CHECK = "Run id (in every file name of this run and in each workbook's Title
 # A NEW title is "<name> in <colour words>"; one ending in "in" lost its colour words (a code with no colour code
 # drafts "Pants in "). A person retypes it in the sheet, but it never imports: the check is not FIXABLE_IN_SHEET.
 NO_COLOUR_CHECK = "Every NEW Title names its colour"
+# PU-new writes each row's season and PU-merge sets one season on every re-bought product, so a PO is one season: the
+# store's spelling, offered by the catalog (catalog.offered_seasons), and the one picked for the run when one is.
+SEASON_CHECK = "One season on every PO row, the one picked, in the store's spelling"
 
 
 def run_id(out_prefix):
@@ -137,6 +140,10 @@ def run(po_path, brand, catalog, out_prefix):
     if other:
         checks.append(dict(Check="Every PO row is NEW or MERGE", Result="FAIL",
                            Detail=f"rows {[r['_row'] for r in other]}"))
+    season, problem = _season(new + merge, brand.get("season"), catalog)
+    if problem:
+        checks.append(dict(Check=SEASON_CHECK, Result="FAIL", Detail=problem))
+    brand = dict(brand, season=season)
 
     from .cartorder import finalize_refusal
     refused = finalize_refusal(po_path, header, new, brand)   # from a cart: PU-new only; a missing column: FAIL
@@ -168,6 +175,35 @@ def run(po_path, brand, catalog, out_prefix):
             checks.append(dict(Check="Written", Result="INFO", Detail=f"{path}: {note}"))
     save_checks(f"{out_prefix}finalize-checks.xlsx", checks, out_prefix)
     return checks
+
+
+def _season(rows, picked, catalog):
+    """(the PO's season, None) or (a season to name files by, why the PO's season cannot be imported)."""
+    have = collections.Counter(_s(r.get(SEASON)) for r in rows)
+    if len(have) > 1 or "" in have:
+        said = ", ".join(f"{s or '(blank)'} ({n} row{'' if n == 1 else 's'})" for s, n in sorted(have.items()))
+        return picked or have.most_common(1)[0][0], (
+            f"the PO's season column holds {said}: every row carries the season of this order, and PU-merge sets it "
+            "on each re-bought product. Make it one season")
+    season = next(iter(have), picked or "")
+    if picked and season != picked:
+        return picked, (f"the season picked is {picked} but every PO row says {season}: pick {season}, or upload "
+                        f"the PO drafted for {picked}")
+    offered = catalog.offered_seasons()
+    if rows and season not in offered:
+        return season, (f"the PO's season {season} is not a season this catalog offers: "
+                        f"{', '.join(offered) or 'none'}. Correct the season column")
+    return season, None
+
+
+def po_season(po_path):
+    """The season most rows of a PO carry, '' when none can be read (names a step-2 run; finalize checks it)."""
+    try:
+        _, rows = read_po(po_path)
+    except Exception:
+        return ""
+    have = collections.Counter(_s(r.get(SEASON)) for r in rows if _cmd(r) in ("NEW", "MERGE"))
+    return have.most_common(1)[0][0] if have else ""
 
 
 # ---- PU-new --------------------------------------------------------------------

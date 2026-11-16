@@ -19,6 +19,8 @@ from .resolve import Resolver, COLOUR, AI_OC, AI_NEW_SIZE, OFF_RUN, NO_RRP, spli
 PRICE_CHECK = "Every NEW row has a retail price"
 from .util import norm_size, sort_sizes, size_key, size_system, fmt_money, cost_currency, slug, store_sizes, \
     size_clashes, one_name_per_size
+from .brand import GENDERS, prefix_mark, season_order
+import re   # noqa: E402 (printed_season)
 
 PRICE_COL = col_letter(PO_HEADER, "Variant Price")
 SIZE_NAMES_CHECK = "Each size has one name per product"
@@ -217,7 +219,7 @@ def build(docs, brand, catalog, history, tag_lookup, cart=None, prior_prices=Non
                     cell(row, "Variant Price", price, "catalog",
                          "live full price" + (f" (live is on sale at A${v['price']:g})" if (v["compare_at"] or 0) > (v["price"] or 0) else ""))
                 else:
-                    sku, s, why = R.next_sku()
+                    sku, s, why = R.next_sku(sku_gender(ptype))
                     cell(row, "Variant SKU", sku, s, why + " (new size on a live product)")
                     prices = collections.Counter(max(x["price"] or 0, x["compare_at"] or 0) for x in product["variants"])
                     price = prices.most_common(1)[0][0]
@@ -228,7 +230,7 @@ def build(docs, brand, catalog, history, tag_lookup, cart=None, prior_prices=Non
                      _src(l) + ("" if product["code"] == code else
                                                          f"; the OC prints {code}, this live code once "
                                                          f"{brand['match_ignore']!r} is left out"))
-                cell(row, SEASON, brand["season"], "rule", "carryover is re-seasoned to the buy season")
+                cell(row, SEASON, brand["season"], "rule", MERGE_SEASON)
                 cell(row, MADE_IN, made, made_src, made_why)
                 cell(row, NEW_SALE, product["new_sale"] or brand["new_sale"], "catalog", "live new_sale")
                 rows.append(row)
@@ -285,7 +287,7 @@ def build(docs, brand, catalog, history, tag_lookup, cart=None, prior_prices=Non
             cell(row, "Option2 Name", brand["option2_name"], "rule", "house option order")
             cell(row, "Option2 Value", size, *(("rule", l["size_notes"][size]) if size in l["size_notes"] else
                                                ("OC", "ordered size") if size in l["sizes_norm"] else (run_src, run_why)))
-            sku, s_, why = R.next_sku()
+            sku, s_, why = R.next_sku(sku_gender(ptype))
             cell(row, "Variant SKU", sku, s_, why)
             cell(row, "Variant Price", price, p_src, p_why)
             compare = f"={PRICE_COL}{len(rows) + 2}"   # this row's Variant Price, so a typed price is copied
@@ -296,7 +298,7 @@ def build(docs, brand, catalog, history, tag_lookup, cart=None, prior_prices=Non
                 cell(row, "Variant Compare At Price", compare, "rule", "compare-at = price at creation (a formula)")
             _money_cells(cell, row, R, brand, eur, l["sizes_norm"].get(size, 0))
             cell(row, CODE, code, "OC", f"{_src(l)} ({l['product_class']})")
-            cell(row, SEASON, brand["season"], "rule", "brand config")
+            cell(row, SEASON, brand["season"], "rule", PICKED)
             cell(row, MADE_IN, made, made_src, made_why)
             cell(row, NEW_SALE, brand["new_sale"], "rule", "new stock is created NEW")
             cell(row, TITLE_TAG, R.title_tag(title), ti_src, "house title_tag template over the drafted title")
@@ -326,12 +328,105 @@ def build(docs, brand, catalog, history, tag_lookup, cart=None, prior_prices=Non
         checks.append(dict(Check="New sizes on live products stay in their size run", Result="WARN",
                            Detail="; ".join(off_run)))
     checks = _draft_checks(docs, lines, rows, R, brand, catalog, tag_lookup, dup) + checks
+    checks += run_checks(rows, R, brand, catalog)
+    checks += printed_season_rows(docs, brand)
     if cartorder.from_cart(lines):
         checks = cartorder.cart_wording(checks)
     review = [review_row(i + 2, rows[i].get(CODE), rows[i].get("Option2 Value"), k, v, s, w)
               for i, k, v, s, w in cells]
     fills = {(i, k): COLOUR.get(s, "red") for i, k, v, s, w in cells}
     return rows, review, checks, fills
+
+
+PICKED = "the season picked for this run"
+# Almost every re-bought product on the hand-made POs, and every carryover upload, carries the buy season (checked
+# 2026-11-16). PU-merge then moves each re-bought product to it.
+MERGE_SEASON = PICKED + ": a re-bought product takes the buy season, as on the hand-made POs"
+SEASON_CHECK = "Season of this order (picked for the run)"
+PREFIX_CHECK = "SKU prefix of new SKUs"
+
+
+PRINTED_CHECK = "Season printed on the order confirmation"
+# A season as the readers return it (p3m "FW99", thugclub "SS99", a pre-collection "PRE-SS99", admilano "2099 SS")
+# or as an OTB document number prints it ("SS - 2099/01-62-0001").
+PRINTED = (re.compile(r"(?<![A-Z])(SS|FW|AW|S/S|F/W|A/W)\s*-?\s*(?:20)?(\d{2})(?!\d)"),
+           re.compile(r"(?<!\d)20(\d{2})\s*(SS|FW|AW)(?![A-Z])"))
+
+
+def printed_season(text):
+    """The store's spelling of a season an order confirmation prints ('SS - 2099/01-62-0001' -> 'S/S 99'), else None."""
+    t = str(text or "").upper()
+    m = PRINTED[0].search(t)
+    half, yy = (m.group(1), m.group(2)) if m else (None, None)
+    if m is None:
+        m = PRINTED[1].search(t)
+        if m is None:
+            return None
+        yy, half = m.group(1), m.group(2)
+    return f"{'S/S' if half in ('SS', 'S/S') else 'F/W'} {yy}"
+
+
+def printed_season_rows(docs, brand):
+    """PASS when every season the confirmations print (the reader's `season`, else an OTB document number) is the one
+    picked; WARN naming them when one is not; nothing when none prints a season the tool can read."""
+    seen = collections.defaultdict(list)
+    for d in docs:
+        s = printed_season(d.get("season")) or printed_season(d.get("doc"))
+        if s:
+            seen[s].append(str(d["doc"]))
+    if not seen:
+        return []
+    season = brand["season"]
+    other = {s: ds for s, ds in seen.items() if s != season}
+    if not other:
+        return [dict(Check=PRINTED_CHECK, Result="PASS",
+                     Detail=f"{season}, as picked, on {_n(len(seen[season]), 'confirmation')}")]
+    said = "; ".join(f"{', '.join(ds[:3])}{' and more' if len(ds) > 3 else ''} print{'s' if len(ds) == 1 else ''} {s}"
+                     for s, ds in sorted(other.items()))
+    return [dict(Check=PRINTED_CHECK, Result="WARN",
+                 Detail=f"the season picked is {season}, but {said}. Check the pick before importing: every row "
+                        f"carries it, and PU-merge moves each re-bought product to it")]
+
+
+def sku_gender(ptype):
+    """The gender whose SKU prefix a product takes: its Type's first word (MEN, WOMEN, UNISEX), else None."""
+    word = str(ptype or "").split(" ")[0].upper()
+    return word if word in GENDERS else None
+
+
+def _n(n, one, many=None):
+    return f"{n} {one if n == 1 else many or one + 's'}"
+
+
+def run_checks(rows, R, brand, catalog):
+    """The season every row carries and what it does to re-bought products, and the SKU prefixes new SKUs took.
+    The season is INFO, or WARN when a re-bought product is live in a later season than the one picked (an older
+    pick would move it back). The prefix is WARN, naming its sku_prefix_from sentence, when the config marks the season's
+    half "derived from live, check" or "not live, check"; INFO for a prefix the config sets by hand."""
+    season = brand["season"]
+    new = sum(1 for r in rows if r["Command"] == "NEW")
+    merge = [r for r in rows if r["Command"] == "MERGE"]
+    ids = list(dict.fromkeys(r["ID"] for r in merge))
+    live = collections.Counter(catalog.products[i]["season"] or "(none)" for i in ids if i in catalog.products)
+    moving = {s: n for s, n in live.items() if s != season}
+    later = {s: n for s, n in moving.items() if (season_order(s) or (-1, -1)) > season_order(season)}
+    detail = (f"{season}, picked for this run, on {_n(new, 'NEW row')} and {_n(len(merge), 'MERGE row')} "
+              f"({_n(len(ids), 're-bought product')})")
+    if moving:
+        detail += (f"; re-bought products live in another season move to {season} when PU-merge is imported: "
+                   + ", ".join(f"{s} ({n})" for s, n in sorted(moving.items())))
+    if later:
+        n = sum(later.values())
+        detail += (f". {_n(n, 're-bought product is', 're-bought products are')} live in a later season than "
+                   f"{season} ({', '.join(f'{s} ({k})' for s, k in sorted(later.items()))}): check the season picked")
+    out = [dict(Check=SEASON_CHECK, Result="WARN" if later else "INFO", Detail=detail)]
+    if R.prefixes:
+        used = ", ".join(f"{p} ({g + ', ' if g else ''}{_n(n, 'SKU')})" for (p, g), n in R.prefixes.items())
+        _, note = prefix_mark(brand)
+        out.append(dict(Check=PREFIX_CHECK, Result="INFO" if note is None else "WARN",
+                        Detail=f"{used} for {season}, set in the brand config" if note is None else
+                        f"{used} for {season}: {note}"))
+    return out
 
 
 def cart_checks(lines, cart, brand=None):

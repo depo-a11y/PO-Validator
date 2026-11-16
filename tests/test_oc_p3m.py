@@ -33,7 +33,7 @@ def lines(docs):
 
 
 def brand(**kw):
-    cfg = dict(vendor="TEST VENDOR", adapter="p3m", season="F/W 99", sku_prefix="ZX99", cost_multiplier=1.5,
+    cfg = dict(vendor="TEST VENDOR", adapter="p3m", sku_prefix={"F/W": "ZXF"}, cost_multiplier=1.5,
                cost_currency="USD", margin_floor=2.0, oc_supplier="TEST Trading Co", join_key="{style}")
     cfg.update(kw)
     return brandm.from_mapping(cfg, "test config", "test")

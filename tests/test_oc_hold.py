@@ -99,7 +99,7 @@ def test_complete_writes_nothing_for_a_config_on_hold(tmp_path):
 
 def _held_yaml(tmp_path):
     cfg = tmp_path / "held.yaml"
-    cfg.write_text("vendor: X\nadapter: otb\noc_label: ZZ\nseason: S/S 27\nsku_prefix: XX\ncost_multiplier: 1.5\n"
+    cfg.write_text("vendor: X\nadapter: otb\noc_label: ZZ\nsku_prefix: {S/S: XS}\ncost_multiplier: 1.5\n"
                    f"cost_currency: EUR\nmargin_floor: 2.5\nhold: \"{REASON}\"\n")
     return str(cfg)
 
@@ -112,7 +112,7 @@ def test_the_cli_finalize_and_complete_refuse_a_config_on_hold(tmp_path, capsys)
     assert cli.main(["finalize", "--po", str(tmp_path / "no-po.xlsx"), "--catalog", cat, "--brand", "x",
                      "--brand-config", cfg, "--out-prefix", str(out / "run-")]) == 1
     with pytest.raises(SystemExit) as e:
-        cli.main(["complete", "--po", str(tmp_path / "no-po.xlsx"), "--oc", "oc.pdf", "--catalog", cat, "--brand", "x",
+        cli.main(["complete", "--season", "S/S 27", "--po", str(tmp_path / "no-po.xlsx"), "--oc", "oc.pdf", "--catalog", cat, "--brand", "x",
                   "--brand-config", cfg, "--out", str(out / "PO.xlsx")])
     assert e.value.code == 1 and list(out.iterdir()) == []
     printed = capsys.readouterr().out

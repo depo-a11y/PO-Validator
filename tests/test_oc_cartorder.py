@@ -99,7 +99,7 @@ def catalog_csv(tmp_path, extra=()):
                       "Top Row": "true" if i == 0 else ""})
             if i == 0:
                 r.update({"Handle": handle, "Title": title, "Vendor": BRAND["vendor"], "Type": ptype,
-                          "Tags": ptype.split(" ")[0], "Status": status, catm.MCODE: code,
+                          "Tags": ptype.split(" ")[0], "Status": status, catm.MCODE: code, catm.SEASON: "F/W 26",
                           "Created At": "2025-01-01 10:00:00 +1100"})
             rows.append(r)
     p = tmp_path / "catalog.csv"
@@ -633,14 +633,14 @@ def test_the_cli_drafts_from_a_cart_alone_and_prints_each_check_once(tmp_path, c
     cfg = tmp_path / "zz.local.yaml"
     cfg.write_text(yaml.safe_dump(BRAND))
     out = tmp_path / "po.xlsx"
-    rc = cli.main(["draft", "--cart", write(tmp_path / "c.xlsx"), "--catalog", catalog_csv(tmp_path), "--brand", "zz",
+    rc = cli.main(["draft", "--season", "S/S 27", "--cart", write(tmp_path / "c.xlsx"), "--catalog", catalog_csv(tmp_path), "--brand", "zz",
                    "--brand-config", str(cfg), "--out", str(out)])
     assert rc == 1 and out.exists()            # the blank retail prices FAIL, by design
     printed = capsys.readouterr().out
     assert printed.count("UNCONFIRMED: from cart TESTCART") == 1
     assert cartorder.unconfirmed_session(str(out)) == "cart TESTCART"
     with pytest.raises(SystemExit, match="give --oc, or --cart"):
-        cli.main(["draft", "--catalog", catalog_csv(tmp_path), "--brand", "zz", "--brand-config", str(cfg),
+        cli.main(["draft", "--season", "S/S 27", "--catalog", catalog_csv(tmp_path), "--brand", "zz", "--brand-config", str(cfg),
                   "--out", str(out)])
 
 

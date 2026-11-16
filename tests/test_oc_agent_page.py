@@ -129,11 +129,12 @@ def page(tmp_path, monkeypatch, key):
     monkeypatch.setattr(service, "explain_draft", explain("explain_draft"))
     monkeypatch.setattr(service, "explain_finalize", explain("explain_finalize"))
     at = _brand(tmp_path, monkeypatch)
-    at.file_uploader(key="w_catalog").set_value(("catalog.csv", b"ID\n", "text/csv"))
+    at.file_uploader(key="w_catalog").set_value(tp.CATALOG)
     at.file_uploader(key="w_oc").set_value(("oc.pdf", b"%PDF-1.4", "application/pdf"))
     at.file_uploader(key="w_po").set_value(("po.xlsx", b"PK", "application/octet-stream"))
     at.run()
     assert not at.exception
+    tp.pick_season(at)
     return at, seen
 
 
@@ -194,10 +195,11 @@ def test_a_refused_draft_offers_an_explanation_only_with_a_pdf(tmp_path, monkeyp
     monkeypatch.setattr(service, "explain_draft", lambda *a, **kw: asked.append(a) or RECORD)
     yaml_ = "adapter: otb\noc_label: MM\noc_supplier: X Ltd\n" if brand == "otb" else _sheet_brand()
     at = tp._page_with_brand(tmp_path, monkeypatch, yaml_)
-    at.file_uploader(key="w_catalog").set_value(("catalog.csv", b"ID\n", "text/csv"))
+    at.file_uploader(key="w_catalog").set_value(tp.CATALOG)
     for k, v in uploads.items():
         at.file_uploader(key=k).set_value(v)
     at.run()
+    tp.pick_season(at)
     press(at, "Build draft PO")
     assert bool([b for b in at.button if b.label == DRAFT_ASK]) is offered
     if offered:
@@ -215,10 +217,11 @@ def test_a_config_on_hold_is_offered_no_explanation(tmp_path, monkeypatch, key):
     monkeypatch.setattr(service, "explain_finalize", _boom)
     at = tp._page_with_brand(tmp_path, monkeypatch, "adapter: otb\noc_label: MM\noc_supplier: X Ltd\n"
                                                     "hold: codes do not join\n")
-    at.file_uploader(key="w_catalog").set_value(("catalog.csv", b"ID\n", "text/csv"))
+    at.file_uploader(key="w_catalog").set_value(tp.CATALOG)
     at.file_uploader(key="w_oc").set_value(("oc.pdf", b"%PDF-1.4", "application/pdf"))
     at.file_uploader(key="w_po").set_value(("po.xlsx", b"PK", "application/octet-stream"))
     at.run()
+    tp.pick_season(at)
     press(at, "Build draft PO")
     press(at, "Make upload files")
     assert not [b for b in at.button if b.label in (DRAFT_ASK, FINAL_ASK)]

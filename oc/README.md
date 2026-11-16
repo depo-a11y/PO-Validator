@@ -133,6 +133,28 @@ now off by Colwyn's rule of 2026-11-12.
   `~/Code/marais/_work/oc-brands/`; point the tool there with `export OC_BRAND_DIR=~/Code/marais/_work/oc-brands`
   or pass `--brand-config <file>`. Without either, it falls back to the gitignored `oc/brands/`. Never commit a
   brand config, a catalog export or a PO while this repo is public.
+- Season (Colwyn, 2026-11-16, "Colleague picks per run"): a brand config holds none, and a `season:` an old one
+  carries is dropped at load. Each run's season is picked from the seasons the catalog's products carry, in the
+  store's spelling (S/S 27, F/W 26), and the two after the newest (`catalog.offered_seasons`): on the page a box with
+  no default that Build waits for, cleared whenever the brand, the catalog or the order (OC or cart) changes, so a
+  pick never carries to another run; on the command line `--season "S/S 27"` (draft and complete need it). Every
+  drafted row carries it, re-bought rows included, as almost every re-bought product on the hand-made POs does
+  (checked 2026-11-16), and PU-merge moves each re-bought product to it. The draft's
+  "Season of this order (picked for the run)" check names the re-bought products that change season, and WARNs when
+  one is live in a later season than the one picked. Where the order confirmation prints its season (an OTB
+  document number "SS - 2099/...", or the season the p3m, thugclub or admilano reader returns; fog's "WINTER 2099"
+  and the other readers give none the tool reads), "Season printed on the order confirmation" is PASS when it is the
+  one picked and WARN when not (the page shows the WARN beside the draft). finalize takes the PO's own season: one on every row, offered by the catalog, and the one picked when one
+  is.
+- SKU prefix: `sku_prefix` per season half (`S/S:`, `F/W:`), each the letters before the picked season's two
+  digits, or a MEN/WOMEN/UNISEX map of them where the brand's men's and women's SKUs differ (a new product takes its
+  Type's gender's prefix, a new size the live product's, else the default_gender's). Each prefix counts on from the
+  catalog's highest number. A half with no prefix refuses that half's runs. `sku_prefix_from` says, per half, where
+  that half's prefixes came from: a sentence starting "derived from live, check" (from the brand's live SKUs), or one
+  saying "not live, check" (kept from a hand-made PO, with no live SKU of that half to derive from). A new SKU of a
+  marked half is amber under that mark, with the sentence in its Why; the draft's "SKU prefix of new SKUs" check
+  WARNs naming the prefixes and the sentence, and the page shows them amber once a season is picked. A half with no
+  sentence is a prefix set by hand ("rule"). The configs are migrated outside the repo (`_work/oc-tools/`).
 
 `python tests/mutate_oc.py` re-runs the mutation harness for the guards.
 
@@ -266,7 +288,8 @@ nothing is written into the repo and nothing talks to Shopify.
 - On this computer: `$OC_BRAND_DIR`, then the gitignored `oc/brands/`, the same lookup as the CLI.
 - Uploaded: a brand .yaml file.
 
-The page names the config it uses (source, vendor, season), never its contents.
+The page names the config it uses (source, vendor), never its contents. The season is picked on the page for
+each order, under the brand and catalog (see "Season" above); Make upload files takes the checked PO's own season.
 
 **Sizes** keep one name per product. A printed size keeps its name when the store knows it, else takes the store's
 name for the same size (IT 42 = 42; OSFM, O/S, F and OS; S-M = S - M) from the live product or its live same-style

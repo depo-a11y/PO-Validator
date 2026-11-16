@@ -1,7 +1,6 @@
 """A NEW product's retail price comes only from a brand RRP in AUD (Colwyn, 2026-11-12: "we can keep price blank
 unless theres an rrp"). Synthetic data only; every multiplier is a round test value."""
 import copy
-import csv
 import io
 import zipfile
 
@@ -15,6 +14,7 @@ from oc import cart as cartm, catalog as catm, complete, draft as draftm, finali
 from oc.adapters import ai, fog
 from oc.resolve import COLOUR, NEEDED, NO_RRP
 from test_oc_ai import RESPONSE, FakeClient, _cfg, _mut, make_pdf, message, PDF_LINES
+from test_oc_ai import _catalog as _empty_catalog   # no live product; one ARCHIVED one, whose season can be picked
 from test_oc_ai_blocks import make_pages_pdf
 from test_oc_cart import CART_HEADER, CART_ROWS, write_cart
 
@@ -196,13 +196,6 @@ def _ai_draft(tmp_path, monkeypatch, printed, claimed):
     po, review, checks = service.draft(pdf, _empty_catalog(tmp_path), cfg,
                                        ai_factory=FakeClient(message(_mut(f))).factory)
     return review[(review["Code"] == "EXJK01 GR") & (review["Column"] == "Variant Price")]
-
-
-def _empty_catalog(tmp_path):
-    p = tmp_path / "catalog.csv"
-    with open(p, "w", encoding="utf-8-sig", newline="") as fh:
-        csv.DictWriter(fh, fieldnames=base.CAT_COLS).writeheader()
-    return str(p)
 
 
 def test_a_grounded_aud_rrp_from_an_ai_read_is_the_price_but_amber(tmp_path, monkeypatch):

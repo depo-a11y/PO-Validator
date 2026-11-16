@@ -246,7 +246,7 @@ def test_a_config_on_hold_is_never_explained_from_its_files(tmp_path, monkeypatc
         assert explain.as_text(e) == "No AI explanation: this brand's config is on hold, so nothing was read or sent."
     cat, cfg = th._catalog(tmp_path), th._held_yaml(tmp_path)
     with pytest.raises(SystemExit):
-        cli.main(["draft", "--oc", str(tmp_path / "oc.pdf"), "--catalog", cat, "--brand", "x", "--brand-config", cfg,
+        cli.main(["draft", "--season", "S/S 27", "--oc", str(tmp_path / "oc.pdf"), "--catalog", cat, "--brand", "x", "--brand-config", cfg,
                   "--out", str(tmp_path / "d.xlsx"), "--ai-explain"])
     assert cli.main(["finalize", "--po", str(tmp_path / "po.xlsx"), "--catalog", cat, "--brand", "x", "--brand-config",
                      cfg, "--out-prefix", str(tmp_path / "run-"), "--ai-explain"]) == 1

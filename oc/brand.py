@@ -64,6 +64,19 @@ OC's. Two live codes that become equal stop the draft, naming both. Letters and 
 
 `join_key_alt` (off unless set) is a second template, tried only for a line whose join_key code finds no live
 product; it may also use {style_alt} (a sheet's style_alt column).
+
+A config holds no season (Colwyn, 2026-11-16: "Colleague picks per run"). The colleague picks the season of each run
+on the page (or `--season`), and `with_season` sets it on a copy of the config. A `season:` an old config still
+carries is read and dropped, never used: a guessed season would re-season every re-bought live product on import.
+
+`sku_prefix` is per season half: `S/S:` and `F/W:`, each the letters a new SKU starts with before the two digits of
+the season picked (S/S: ZXSS makes ZXSS27001 in an S/S 27 run), or a MEN/WOMEN/UNISEX map of them for a brand
+whose men's and women's SKUs differ. A product whose gender has no prefix of its own takes the default_gender's. Each
+prefix ends in its half's season letters (S for S/S; F or W for F/W). A half with no prefix refuses that half's runs.
+`sku_prefix_from` says, per season half, where that half's prefixes came from, as a sentence that starts "derived from
+live, check" (from the brand's live SKUs) or says "not live, check" (kept from a hand-made PO, with no live SKUs of
+that half to derive from). Every new SKU of that half is then amber under that mark, with the sentence in its Why and
+in the draft's checks. A half with no sentence is a prefix the config sets by hand ("rule").
 """
 import copy
 import os
@@ -86,12 +99,13 @@ DEFAULTS = dict(
     colour_families={}, default_gender="MEN", country_names={},
 )
 
-REQUIRED = ["vendor", "adapter", "season", "sku_prefix", "cost_multiplier",
+REQUIRED = ["vendor", "adapter", "sku_prefix", "cost_multiplier",
             "cost_currency", "margin_floor"]
 
 OPTIONAL = ["oc_supplier", "oc_label", "oc_style_prefix", "join_key", "join_key_alt", "match_ignore", "size_map",
             "colour_codes", "colour_spelling", "heel_codes", "subcategory_types", "title_prefixes", "sheet",
             "source_kind", "hold", "price_round"]   # price_round: retired 2026-11-12, still in old configs, dropped
+OPTIONAL += ["sku_prefix_from", "season"]   # season: picked per run since 2026-11-16; an old config's is dropped
 
 KEYS = set(DEFAULTS) | set(REQUIRED) | set(OPTIONAL)
 
@@ -155,6 +169,112 @@ class ColourCodeError(Exception):
         super().__init__(
             f"{len(colours)} OC colour(s) have no code in the brand config's colour_codes: {', '.join(colours)}. "
             "Add each to colour_codes as 'OC colour: store code' (e.g. GREY: GR) and build again.")
+
+
+# ---- the season of a run, and the SKU prefix it gives ------------------------------------------------------------
+SEASON = re.compile(r"(S/S|F/W) (\d{2})")   # the store's own spelling of custom.product_season: S/S 27, F/W 26
+LOOSE_SEASON = re.compile(r"\b(S/S|F/W|A/W)\s*(\d{2})\b")
+GENDERS = ("MEN", "WOMEN", "UNISEX")
+HALF_LETTERS = {"S/S": ("S",), "F/W": ("F", "W")}   # the season letters a half's SKU prefix ends in
+DERIVED = "derived from live, check"   # the source of a new SKU whose prefix the config says was derived from live
+NOT_LIVE = "not live, check"   # the source of a new SKU whose prefix no live SKU of its half shows (kept from a hand PO)
+PREFIX_SHAPE = ("sku_prefix is a prefix per season half, each the letters of a new SKU before the season's two "
+                "digits, on lines of their own: 'S/S: ZXSS' and 'F/W: ZXFW' (the draft adds the digits of the season "
+                "picked for the run), or a MEN/WOMEN/UNISEX map of them where the brand's men's and women's SKUs "
+                "differ")
+
+
+def with_season(cfg, season):
+    """A copy of the config for one run, with the season the colleague picked, in the store's spelling."""
+    s = str(season if season is not None else "").strip()
+    if not SEASON.fullmatch(s):
+        raise BrandError(f"the season of a run is written as the store writes it, S/S 27 or F/W 26, got {season!r}")
+    return dict(cfg, season=s)
+
+
+def season_order(season):
+    """(year, 0 for S/S or 1 for F/W and A/W) to sort seasons by, from any spelling the store holds; None for none."""
+    m = LOOSE_SEASON.search(str(season or "").upper())
+    return (int(m.group(2)), 0 if m.group(1) == "S/S" else 1) if m else None
+
+
+def prefix_gender(cfg, gender=None):
+    """The gender whose prefix a product of `gender` takes in the run's season: its own, else the default_gender's;
+    None when the season's half has one prefix for every gender, or none."""
+    pre = (cfg.get("sku_prefix") or {}).get(SEASON.fullmatch(cfg["season"]).group(1))
+    if not isinstance(pre, Mapping):
+        return None
+    return gender if gender in pre else cfg["default_gender"]
+
+
+def sku_prefix(cfg, gender=None):
+    """(prefix, why) for a new SKU of a product of `gender` in the run's season: the config's prefix for the season's
+    half (the default_gender's when the gender has none of its own) and the season's two digits. (None, why) when
+    the config has no prefix for that half."""
+    half, yy = SEASON.fullmatch(cfg["season"]).groups()
+    pre = (cfg.get("sku_prefix") or {}).get(half)
+    if pre is None:
+        return None, f"the brand config has no SKU prefix for {half} seasons"
+    g = prefix_gender(cfg, gender)
+    if g is None:
+        return pre + yy, f"the {half} prefix"
+    why = "" if g == gender else f"; no {gender or 'gender'} prefix, so the {g} one (default_gender)"
+    return pre[g] + yy, f"the {g} {half} prefix" + why
+
+
+def prefix_mark(cfg):
+    """(source, sentence) of the run's new SKUs, by sku_prefix_from for the season's half: (DERIVED, ...) or
+    (NOT_LIVE, ...), else ("rule", None) for a prefix the config sets by hand."""
+    note = (cfg.get("sku_prefix_from") or {}).get(SEASON.fullmatch(cfg["season"]).group(1))
+    if note is None:
+        return "rule", None
+    return (DERIVED if note.startswith(DERIVED) else NOT_LIVE), note
+
+
+def prefix_summary(cfg):
+    """'ZXMS27 (MEN), ZXWS27 (WOMEN)' or 'ZXSS27': the prefixes new SKUs of the run take; None for no prefix."""
+    pre = (cfg.get("sku_prefix") or {}).get(SEASON.fullmatch(cfg["season"]).group(1))
+    if pre is None or not isinstance(pre, Mapping):
+        return sku_prefix(cfg)[0]
+    return ", ".join(f"{sku_prefix(cfg, g)[0]} ({g})" for g in GENDERS if g in pre)
+
+
+def _sku_prefix(cfg, source):
+    """sku_prefix checked at load (PREFIX_SHAPE). A one-string prefix ('ZXSS27') is refused: it holds one season, so
+    it could not follow the season picked for a run. A prefix is 1 to 12 capital letters and digits (an upload cannot
+    build a huge SKU) ending in its half's season letters, so an S/S run never writes F/W letters."""
+    pre = cfg["sku_prefix"]
+    if not isinstance(pre, Mapping) or not pre or any(k not in HALF_LETTERS for k in pre):
+        raise BrandError(f"{source}: {PREFIX_SHAPE}; got {pre!r}")
+    out = {}
+    for half, v in pre.items():
+        if isinstance(v, Mapping):
+            if not v or any(g not in GENDERS for g in v):
+                raise BrandError(f"{source}: sku_prefix {half} by gender names MEN, WOMEN or UNISEX, got {v!r}")
+            if cfg["default_gender"] not in v:
+                raise BrandError(f"{source}: sku_prefix {half} by gender must name the default_gender "
+                                 f"({cfg['default_gender']}), whose prefix a product of another gender takes; "
+                                 f"got {v!r}")
+            v = dict(v)
+        for p in (v.values() if isinstance(v, dict) else [v]):
+            if not isinstance(p, str) or not re.fullmatch(r"[A-Z0-9]{1,12}", p):
+                raise BrandError(f"{source}: sku_prefix {half} is 1 to 12 capital letters and digits, got {p!r}")
+            if not p.endswith(HALF_LETTERS[half]):
+                raise BrandError(f"{source}: sku_prefix {half} {p!r} must end in its season letters "
+                                 f"({' or '.join(HALF_LETTERS[half])}), so a {half} run never writes another half's")
+        out[half] = v
+    cfg["sku_prefix"] = out
+    notes = cfg.get("sku_prefix_from")
+    if notes is None:
+        return
+    if not isinstance(notes, Mapping) or not notes or any(h not in out for h in notes):
+        raise BrandError(f"{source}: sku_prefix_from says, per season half that has a prefix (S/S:, F/W:), where that "
+                         f"half's prefixes came from; got {notes!r}")
+    for half, note in notes.items():
+        if not isinstance(note, str) or not (note.startswith(DERIVED) or NOT_LIVE in note):
+            raise BrandError(f"{source}: sku_prefix_from {half} is a sentence that starts \"{DERIVED}\" or says "
+                             f"\"{NOT_LIVE}\", got {note!r}")
+    cfg["sku_prefix_from"] = dict(notes)
 
 
 def norm_colour(colour):
@@ -381,12 +501,14 @@ def _finish(data, source, name, paths=False):
                          "oc/brands/example.yaml and oc/README.md describe, so nothing loads until it is fixed")
     cfg = copy.deepcopy(DEFAULTS)
     cfg.update(data)
+    cfg.pop("season", None)   # picked per run (with_season); a season an old config carries is never used
     missing = [k for k in REQUIRED if cfg.get(k) in (None, "")]
     if missing:
         raise BrandError(f"{source}: missing {missing}")
     _reader_keys(cfg, data, source)
     _text_templates(cfg, source)
     _numbers(cfg, source)
+    _sku_prefix(cfg, source)
     for h in cfg["history"]:
         if not isinstance(h, Mapping) or not h.get("path") or not h.get("label"):
             raise BrandError(f"{source}: each history entry needs a label and a path, got {h!r}")

@@ -16,8 +16,10 @@ clears the field on import).
 """
 import csv
 import collections
+import io
 import re
 
+from .brand import SEASON as SPELLING
 from .util import code_match, norm_code, norm_size, money, title_colour
 
 MCODE = "Metafield: my_fields.manufacture_code [single_line_text_field]"
@@ -48,6 +50,27 @@ class CatalogError(Exception):
     pass
 
 
+def offered_seasons(values):
+    """The seasons a run may be picked for, newest first: every custom.product_season value in the store's own
+    spelling (S/S 26, F/W 26; not PSSS99 or SS27) among `values`, and the two seasons after the newest of them, so an
+    order for a season no product of the brand carries yet can be picked. Never a typed season. [] for none."""
+    have = {str(v).strip() for v in values if v is not None and SPELLING.fullmatch(str(v).strip())}
+    if not have:
+        return []
+
+    def key(s):
+        half, yy = SPELLING.fullmatch(s).groups()
+        return int(yy), half == "F/W"
+    yy, fw = key(max(have, key=key))
+    after = [f"S/S {yy + 1:02d}", f"F/W {yy + 1:02d}"] if fw else [f"F/W {yy:02d}", f"S/S {yy + 1:02d}"]
+    return sorted(have | {s for s in after if SPELLING.fullmatch(s)}, key=key, reverse=True)
+
+
+def live_seasons(text):
+    """The custom.product_season values of a catalog export's text (the page offers seasons before any draft)."""
+    return {r[SEASON] for r in csv.DictReader(io.StringIO(text)) if r.get(SEASON)}
+
+
 class Catalog:
     def __init__(self, products, path=None):
         self.products = products          # id -> product dict (with "variants")
@@ -58,6 +81,10 @@ class Catalog:
                 self.by_code[p["code"]].append(p)
         self.skus = {v["sku"] for p in products.values() for v in p["variants"] if v["sku"]}
         self.handles = {p["handle"] for p in products.values()}
+        self.seasons = {p.get("season") for p in products.values()}
+
+    def offered_seasons(self):
+        return offered_seasons(self.seasons)
 
     # ---- matching -----------------------------------------------------------
     def match(self, code, ignore=""):

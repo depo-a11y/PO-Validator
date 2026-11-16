@@ -1054,12 +1054,12 @@ def test_the_cli_flag_says_when_there_is_no_key(tmp_path, no_key, monkeypatch, c
     import yaml
     cfgp.write_text(yaml.safe_dump({k: v for k, v in BRAND.items() if not k.startswith("_")}))
     out = tmp_path / "d.xlsx"
-    cli.main(["draft", "--oc", "oc.pdf", "--catalog", write_catalog(tmp_path), "--brand", "x", "--brand-config",
+    cli.main(["draft", "--season", "S/S 27", "--oc", "oc.pdf", "--catalog", write_catalog(tmp_path), "--brand", "x", "--brand-config",
               str(cfgp), "--out", str(out), "--ai-titles"])
     text = capsys.readouterr().out
     assert "AI title drafting is off: no ANTHROPIC_API_KEY" in text and titles.CHECK not in text
     plain = tmp_path / "p.xlsx"
-    cli.main(["draft", "--oc", "oc.pdf", "--catalog", write_catalog(tmp_path), "--brand", "x", "--brand-config",
+    cli.main(["draft", "--season", "S/S 27", "--oc", "oc.pdf", "--catalog", write_catalog(tmp_path), "--brand", "x", "--brand-config",
               str(cfgp), "--out", str(plain)])
     assert workbook(out.read_bytes()) == workbook(plain.read_bytes())
 
@@ -1071,6 +1071,6 @@ def test_the_cli_flag_drafts_with_a_key(tmp_path, key, monkeypatch, capsys):
     cfgp = tmp_path / "b.yaml"
     import yaml
     cfgp.write_text(yaml.safe_dump({k: v for k, v in BRAND.items() if not k.startswith("_")}))
-    cli.main(["draft", "--oc", "oc.pdf", "--catalog", write_catalog(tmp_path), "--brand", "x", "--brand-config",
+    cli.main(["draft", "--season", "S/S 27", "--oc", "oc.pdf", "--catalog", write_catalog(tmp_path), "--brand", "x", "--brand-config",
               str(cfgp), "--out", str(tmp_path / "d.xlsx"), "--ai-titles"])
     assert len(fake.calls) == 1 and f"[INFO] {titles.CHECK}" in capsys.readouterr().out

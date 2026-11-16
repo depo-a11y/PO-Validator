@@ -48,8 +48,19 @@ def test_requirements_install_the_anthropic_sdk_the_ai_reader_imports():
     assert any(h.startswith("anthropic>=") for h in have), have
 
 
-BRAND_YAML = ("vendor: X\nseason: S/S 27\nsku_prefix: XX\ncost_multiplier: 1.5\ncost_currency: EUR\n"
+BRAND_YAML = ("vendor: X\nsku_prefix: {S/S: XS}\ncost_multiplier: 1.5\ncost_currency: EUR\n"
               "margin_floor: 2.5\n")
+
+
+# A catalog whose products carry F/W 26, so the season box offers S/S 27 (the season is picked on every run).
+CATALOG = ("catalog.csv", b"ID,Metafield: custom.product_season [single_line_text_field]\n1,F/W 26\n", "text/csv")
+
+
+def pick_season(at, season="S/S 27"):
+    (box,) = [s for s in at.selectbox if s.label == "Season of this order"]
+    box.select(season).run()
+    assert not at.exception
+    return at
 
 
 def _choose(at, label="aaa (on this computer)"):
@@ -194,7 +205,7 @@ def test_the_brand_box_starts_with_no_brand_and_build_waits_for_one(tmp_path, mo
     monkeypatch.setenv("OC_BRAND_DIR", str(d))
     at = AppTest.from_file(str(PAGE), default_timeout=60)
     at.run()
-    at.file_uploader(key="w_catalog").set_value(("catalog.csv", b"ID\n", "text/csv"))
+    at.file_uploader(key="w_catalog").set_value(CATALOG)
     at.file_uploader(key="w_oc").set_value(("oc.pdf", b"%PDF-1.4", "application/pdf"))
     at.file_uploader(key="w_po").set_value(("po.xlsx", b"PK", "application/octet-stream"))
     at.run()
@@ -203,13 +214,14 @@ def test_the_brand_box_starts_with_no_brand_and_build_waits_for_one(tmp_path, mo
     assert box.value is None and box.placeholder == "Choose a brand"
     assert box.options == ["aaa (on this computer)", "zzz (on this computer)", "Upload a brand .yaml file"]
     assert not [c for c in at.caption if c.value.startswith("Brand config:")]
-    assert any(c.value == "To build the draft, add a brand." for c in at.caption)
+    assert any(c.value == "To build the draft, add a brand and the season of this order." for c in at.caption)
     for label in ("Build draft PO", "Make upload files"):
         (b,) = [b for b in at.button if b.label == label]
         assert b.disabled, label
     _choose(at, "zzz (on this computer)")
     assert [c.value for c in at.caption if c.value.startswith("Brand config:")] == [
-        f"Brand config: {d / 'zzz.local.yaml'}. LAST, season S/S 27."]
+        f"Brand config: {d / 'zzz.local.yaml'}. LAST."]
+    pick_season(at)
     for label in ("Build draft PO", "Make upload files"):
         (b,) = [b for b in at.button if b.label == label]
         assert not b.disabled, label

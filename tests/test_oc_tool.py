@@ -14,7 +14,7 @@ from oc.resolve import Resolver
 from oc.util import norm_size, join_key, sort_sizes
 
 BRAND = dict(
-    vendor="MAISON MARGIELA", adapter="otb", oc_label="MM", season="S/S 27", sku_prefix="ZXSS27", sku_digits=3,
+    vendor="MAISON MARGIELA", adapter="otb", oc_label="MM", season="S/S 27", sku_prefix={"S/S": "ZXSS", "F/W": "ZXFW"}, sku_digits=3,
     cost_currency="EUR", cost_multiplier=1.5, margin_floor=2.25, price_round=50, status="Active",
     published_new=False, published_merge=True, new_sale="NEW", option1_name="Colour", option2_name="Size",
     title_tag="{vendor} - {title} |MARAIS",
@@ -266,7 +266,7 @@ def test_raw_code_in_title():
 
 def test_brand_config_lookup_order(tmp_path, monkeypatch):
     from oc import brand as brandm
-    body = "\n".join(f"{k}: {v}" for k, v in dict(vendor="X", adapter="otb", oc_label="MM", season="S/S 27", sku_prefix="XX",
+    body = "\n".join(f"{k}: {v}" for k, v in dict(vendor="X", adapter="otb", oc_label="MM", sku_prefix={"S/S": "XS"},
                                                     cost_multiplier=1.5, cost_currency="EUR", margin_floor=2.5).items())
     d = tmp_path / "brands"
     d.mkdir()
@@ -407,10 +407,11 @@ def test_text_that_starts_like_a_formula_is_written_as_text(catalog_path, split_
     cat = catm.load(split_catalog_path)
     cat.products["1"]["season"] = "=F/W 26"
     prefix = str(tmp_path / "m-")
-    checks = finalize.run(_merge_po(tmp_path, cost_price="=EUR 200"), dict(BRAND, season="=S/S 27"), cat, prefix)
+    # the season PU-merge writes is the PO's, in the store's spelling (finalize.SEASON_CHECK), so never a formula
+    checks = finalize.run(_merge_po(tmp_path, cost_price="=EUR 200"), BRAND, cat, prefix)
     assert not [c for c in checks if c["Result"] == "FAIL"], checks
     m = openpyxl.load_workbook(prefix + "PU-merge.xlsx")["Products"]
-    assert _cells(m, "Tags")[0] == ("=S/S 27", "s") and _cells(m, poxlsx.SEASON)[0] == ("=S/S 27", "s")
+    assert _cells(m, "Tags")[0] == ("S/S 27", "s") and _cells(m, poxlsx.SEASON)[0] == ("S/S 27", "s")
     rb = openpyxl.load_workbook(prefix + "PU-merge-ROLLBACK.xlsx")["Products"]
     assert _cells(rb, poxlsx.SEASON)[0] == ("=F/W 26", "s")
     ns = openpyxl.load_workbook(prefix + "PU-merge-new-sizes.xlsx")["Products"]

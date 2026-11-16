@@ -18,6 +18,7 @@ from .poxlsx import (FILLS, CODE, MADE_IN, COST_PRICE, TITLE_TAG, SEASON, NEW_SA
 from .draft import PRICE_CHECK
 from .resolve import Resolver, COLOUR, AI_OC, NO_RRP
 from .brand import hold_row
+from .draft import sku_gender
 from .util import blank, norm_code, norm_size, fmt_money, cost_currency, money, slug, size_match
 
 
@@ -90,7 +91,7 @@ def run(po_path, docs, brand, catalog, history, tag_lookup, out, price_overrides
     for command in ("NEW", "MERGE"):
         for r in data_rows:
             if str(get(r, "Command")).strip().upper() == command and blank(get(r, "Variant SKU")):
-                sku, s, why = R.next_sku()
+                sku, s, why = R.next_sku(sku_gender(get(r, "Type")))
                 put(r, "Variant SKU", sku, s, why + ("" if command == "NEW" else " (new size on a live product)"))
 
     # 3. retail price on NEW rows only from a brand RRP in AUD (Resolver.retail); otherwise left blank for a

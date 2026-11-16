@@ -1,10 +1,13 @@
 """oc: Order Confirmation -> PO buy sheet -> PU (product upload) + delivery file.
 
-    python -m oc draft    --oc OC.pdf --catalog export.csv --brand margiela --out PO-draft.xlsx [--cart CART.xlsx]
-                          [--prior PO-from-cart.xlsx]
-    python -m oc draft    --cart CART.xlsx --catalog export.csv --brand margiela --out PO-draft.xlsx  (no OC yet)
-    python -m oc complete --po hand_PO.xlsx --oc OC.pdf --catalog export.csv --brand margiela --out PO.xlsx [--cart CART.xlsx]
+    python -m oc draft    --oc OC.pdf --catalog export.csv --brand margiela --season "S/S 27" --out PO-draft.xlsx
+                          [--cart CART.xlsx] [--prior PO-from-cart.xlsx]
+    python -m oc draft    --cart CART.xlsx --catalog export.csv --brand margiela --season "S/S 27" --out PO-draft.xlsx
+                          (no OC yet)
+    python -m oc complete --po hand_PO.xlsx --oc OC.pdf --catalog export.csv --brand margiela --season "S/S 27"
+                          --out PO.xlsx [--cart CART.xlsx]
     python -m oc finalize --po PO.xlsx --catalog export.csv --brand margiela --out-prefix <path-prefix>
+                          [--season "S/S 27"]
     python -m oc reconcile --draft PO-draft.xlsx --po hand_PO.xlsx --oc OC.pdf --out accuracy.md
     python -m oc read     OC.pdf --brand-config brand.yaml [--reader ai] [--json out.json]
 
@@ -16,6 +19,10 @@ AI drafts NEW titles, colour words and colour family, amber) and `--ai-explain`
 nothing but say so. Exit code 1 means a gate failed; read the Checks sheet or the
 message. The brand config is found by --brand-config, else $OC_BRAND_DIR, else
 oc/brands/.
+
+--season is the season of the order, as the store writes it (S/S 27, F/W 26): one the catalog's products carry or one
+of the two after the newest. A brand config holds no season. draft and complete need it (every drafted row carries it,
+and it gives new SKUs their season digits); finalize takes the PO's own, and refuses a --season the PO does not carry.
 """
 import argparse
 import json
@@ -35,7 +42,16 @@ def _common(args):
     import validator_core
     b = brandm.load(args.brand, args.brand_config)
     print(f"brand config: {b['_path']}")
+    if getattr(args, "season", None) is not None:
+        try:
+            b = brandm.with_season(b, args.season)
+        except brandm.BrandError as e:
+            raise SystemExit(f"--season: {e}")
     cat = catm.load(args.catalog)
+    if args.cmd in ("draft", "complete"):
+        bad = service.season_rows(b, cat)
+        if bad:
+            raise SystemExit(bad[0]["Detail"])
     try:
         hist = histm.load(b["history"], b["vendor"])
     except ValueError as e:
@@ -253,6 +269,10 @@ def main(argv=None):
     for sp in (d, c):
         sp.add_argument("--cart", help="the brand's selling-session cart export (.xlsx): colour words, "
                                        "composition, made in; never quantities or prices")
+    for sp in (d, c):
+        sp.add_argument("--season", required=True, help="the season of this order as the store writes it, e.g. "
+                                                        "\"S/S 27\": every row carries it and new SKUs take its digits")
+    f.add_argument("--season", help="the season of this order; finalize takes the PO's own and refuses a different one")
     for sp in (d, c, f, r, rd):
         sp.add_argument("--brand-config", help="path to the brand .yaml (else $OC_BRAND_DIR, else oc/brands/)")
     args = p.parse_args(argv)

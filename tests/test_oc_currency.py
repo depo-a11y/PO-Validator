@@ -18,7 +18,7 @@ from oc.util import fmt_eur, fmt_money, iso_currency
 from test_oc_ai import PDF_LINES, make_pdf
 from test_oc_sportlux import ss26_pdf
 
-USD = dict(base.BRAND, vendor="EXAMPLE USD BRAND", sku_prefix="EXUS27", cost_currency="USD", _name="ex", _path="t")
+USD = dict(base.BRAND, vendor="EXAMPLE USD BRAND", sku_prefix={"S/S": "EXUS"}, cost_currency="USD", _name="ex", _path="t")
 FIXED = {"admilano": oc_synth.admilano_pdf, "adidas": oc_synth.adidas_pdf, "fog": oc_synth.fog_pdf,
          "thugclub": thug_synth.portrait_pdf, "sportlux": ss26_pdf}
 LAYOUT_WORDS = {"otb": "Maison Margiela, MM6", "admilano": "AD Milano", "adidas": "adidas AG", "fog": "Fear of God",
@@ -81,7 +81,7 @@ def test_the_cli_reads_each_fixed_layout_through_the_service(tmp_path, capsys, n
     cur = "EUR" if name in ("admilano", "sportlux") else "USD"
     who = dict(adidas="oc_label: Y-3\n", fog="oc_supplier: TEST Essentials\n", thugclub="oc_label: THUG CLUB\n",
                sportlux="oc_supplier: TEST General Trading FZCO\n").get(name, "")
-    cfg.write_text(f"vendor: X\nadapter: {name}\nseason: S/S 27\nsku_prefix: XX\ncost_multiplier: 1.5\n"
+    cfg.write_text(f"vendor: X\nadapter: {name}\nsku_prefix: {{S/S: XS}}\ncost_multiplier: 1.5\n"
                    f"cost_currency: {cur}\nmargin_floor: 2.5\n{who}")
     assert cli.main(["read", pdf, "--brand-config", str(cfg)]) == 0
     out = capsys.readouterr().out
@@ -263,7 +263,7 @@ def test_po_money_matches_the_oc_within_a_cent_in_its_own_unit(value, ok):
 
 def test_a_live_variant_whose_sku_carries_the_season_prefix_is_not_a_new_sku(tmp_path, monkeypatch):
     _stub(monkeypatch, _usd_docs())
-    _, _, checks = service.draft("oc.pdf", _catalog(tmp_path), dict(USD, sku_prefix="ZXFW26"))
+    _, _, checks = service.draft("oc.pdf", _catalog(tmp_path), dict(USD, sku_prefix={"F/W": "ZXFW"}, season="F/W 26"))
     (c,) = [c for c in checks if c["Check"].startswith("SKUs unique in the sheet")]
     assert (c["Result"], c["Detail"]) == ("PASS", "4 new SKUs (ZXFW26103..ZXFW26106); 0 duplicated"), c
 

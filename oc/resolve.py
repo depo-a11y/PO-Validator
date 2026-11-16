@@ -11,12 +11,14 @@ Every resolver returns (value, source, detail). Sources, in trust order:
   guess -> red            (nothing to go on)
 A NEW product's retail price is never resolved from the catalog, past POs or other styles: only from a
 brand RRP in AUD (see Resolver.retail). Past POs still feed Type and size runs.
+A new SKU is "rule" (amber), or "derived from live, check" (brand.DERIVED) or "not live, check" (brand.NOT_LIVE),
+both amber, as the brand config's sku_prefix_from marks its season half.
 """
 import collections
 import html
 import re
 
-from .brand import DEFAULT_JOIN_KEY, fill_text
+from .brand import DEFAULT_JOIN_KEY, DERIVED, NOT_LIVE, fill_text, prefix_gender, prefix_mark, sku_prefix
 from .cart import style_title
 from .util import cost_currency, iso_currency, norm_code, norm_size, sort_sizes, size_key, title_colour, slug
 
@@ -41,6 +43,10 @@ RANK = {GREEN: 0, AMBER: 1, RED: 2}
 def worse(a, b):
     """The less trusted of two sources (b on a tie)."""
     return a if RANK[COLOUR[a]] > RANK[COLOUR[b]] else b
+
+
+COLOUR[DERIVED] = AMBER   # a new SKU whose prefix was derived from live SKUs: check it
+COLOUR[NOT_LIVE] = AMBER   # a new SKU whose prefix no live SKU shows (kept from a hand PO): check it
 
 
 def split_code(code):
@@ -91,8 +97,9 @@ class Resolver:
             self.oc[l["code"]] = l
         self.cart = cart or {}
         self._cart_rows = self.cart.get("rows", {})
-        self._next_sku = None
+        self._next_sku = {}                # prefix -> the next number to try
         self.used_skus = set()
+        self.prefixes = collections.Counter()   # (prefix, gender) -> new SKUs drafted, for the draft's check
         self.vote_key = vote_key(brand)
 
     # ---- siblings ---------------------------------------------------------
@@ -424,16 +431,26 @@ class Resolver:
         return value, "cart", self.cart_why(row, what) + (f"; {sib[1]} says '{sib[0]}'" if sib else "")
 
     # ---- SKU ----------------------------------------------------------------
-    def next_sku(self):
-        prefix, width = self.b["sku_prefix"], self.b["sku_digits"]
-        if self._next_sku is None:
-            self._next_sku = self.cat.max_sku_number(prefix) + 1
+    def next_sku(self, gender=None):
+        """The next free SKU for a new variant of a product of `gender` (its Type's MEN/WOMEN/UNISEX), by the
+        brand's prefix for the run's season (brand.sku_prefix): each prefix counts on from the catalog's highest."""
+        prefix, how = sku_prefix(self.b, gender)
+        if prefix is None:
+            raise ValueError(how)
+        width = self.b["sku_digits"]
+        n = self._next_sku.get(prefix)
+        if n is None:
+            n = self.cat.max_sku_number(prefix) + 1
         while True:
-            sku = f"{prefix}{self._next_sku:0{width}d}"
-            self._next_sku += 1
+            sku = f"{prefix}{n:0{width}d}"
+            n += 1
             if sku not in self.cat.skus and sku not in self.used_skus:
+                self._next_sku[prefix] = n
                 self.used_skus.add(sku)
-                return sku, "rule", f"next free {prefix} number after the catalog's highest"
+                self.prefixes[(prefix, prefix_gender(self.b, gender))] += 1
+                mark, note = prefix_mark(self.b)
+                return sku, mark, f"next free {prefix} number after the catalog's highest; {how}" + (
+                    f": {note}" if note else "")
 
     # ---- fixed text ---------------------------------------------------------
     def title_tag(self, title):
