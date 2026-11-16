@@ -186,7 +186,8 @@ def write_po(path, header, rows, review=None, checks=None, fills=None, title="Sh
 DESCRIPTIONS = "Descriptions"   # the draft's sheet of NEW product descriptions (oc/describe.py, option B)
 DESCRIPTION_COLS = ["Variant SKU", "Manufacture code", "Title (as drafted)", "Description", "Source", "Why",
                     "Type (as drafted)", "Composition (as drafted)", "Made in (as drafted)",
-                    "PO composition (as drafted)", "PO made in (as drafted)"]   # finalize's merge (oc/descimport.py)
+                    "PO composition (as drafted)", "PO made in (as drafted)",
+                    "Colourway (as drafted)"]   # finalize's merge (oc/descimport.py)
 
 
 def write_descriptions(wb, rows, review, brand):
@@ -209,7 +210,7 @@ def write_descriptions(wb, rows, review, brand):
         if r["Colour"] in FILLS:
             ws.cell(ws.max_row, DESCRIPTION_COLS.index("Description") + 1).fill = FILLS[r["Colour"]]
     ws.freeze_panes = "A2"
-    for col, width in zip("ABCDEFGHIJK", (14, 24, 40, 80, 18, 80, 30, 40, 16, 40, 16)):
+    for col, width in zip("ABCDEFGHIJKL", (14, 24, 40, 80, 18, 80, 30, 40, 16, 40, 16, 24)):
         ws.column_dimensions[col].width = width
 
 

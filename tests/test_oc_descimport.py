@@ -570,7 +570,7 @@ def test_a_po_that_cannot_be_read_or_a_type_with_no_item_noun_holds_a_descriptio
     body = (f"<p>ACME STUDIO's Loop Cape in Black is a coat.</p>\n<ul>\n<li>Composition: 100% Wool</li>\n</ul><br>"
             f"<p>SKU: {code}</p>")
     d = {"Title (as drafted)": "Loop Cape in Black", "Type (as drafted)": "MEN CLOTHING COATS",
-         "Composition (as drafted)": "100% Wool"}
+         "Composition (as drafted)": "100% Wool", "Colourway (as drafted)": "Black colourway"}   # removed by hand
     row = {"Title": "Loop Cape in Black", "Type": "MEN CLOTHING CAPES", "Vendor": "ACME STUDIO", poxlsx.MADE_IN: "-",
            "Body HTML": f"<p>Composition: 100% Wool</p> <p>Made in -</p> <p>SKU: {code}</p>"}
     assert descimport.reconcile(body, d, row, BRAND) == (body, [
@@ -624,7 +624,7 @@ def test_the_colourway_bullet_goes_when_the_final_title_gives_no_colour_words(tm
 ])
 def test_the_colourway_bullet_follows_the_drafts_own_rule(final, want):
     body = "<ul>\n<li>Composition: 100% Cotton</li>\n  <li>Black colourway</li>\n  <li>Zip fastening</li>\n</ul>"
-    out, bad = descimport.colourway(body, "Loop Cap in Black", final)
+    out, bad = descimport.colourway(body, "Black colourway", final)
     assert bad == [] and out == (body.replace("  <li>Black colourway</li>", want) if want else
                                  body.replace("\n  <li>Black colourway</li>", ""))
 
@@ -652,9 +652,54 @@ def test_a_colourway_bullet_the_person_removed_is_not_put_back(tmp_path, final):
 def test_no_colourway_bullet_goes_in_for_colour_words_the_draft_would_drop():
     body = "<ul>\n<li>Composition: 100% Cotton</li>\n  <li>Zip fastening</li>\n</ul><br><p>SKU: X 1</p>"
     for final in ("Loop Cap in Summer Black", "Loop Cap in 4N0", "Loop Cap"):   # a season word, a code, none
-        assert descimport.colourway(body, "Loop Cap in 900", final) == (body, [])
-    assert descimport.colourway("<p>SKU: X 1</p>", "Loop Cap in 900", "Loop Cap in Black")[0] == \
+        assert descimport.colourway(body, None, final) == (body, [])
+    assert descimport.colourway("<p>SKU: X 1</p>", None, "Loop Cap in Black")[0] == \
         "<ul>\n  <li>Black colourway</li>\n</ul><br><p>SKU: X 1</p>"
+
+
+def test_a_red_title_with_colour_words_gets_its_colourway_bullet_from_the_stored_fact(tmp_path):
+    f = dict(code=td.TOTE, vendor="ACME STUDIO", title=("Drift Tote in Sand", "guess", "a red title"),
+             ptype=("MEN BAGS SHOPPER & TOTE BAGS", "catalog", ""), made_in=[], text=[],
+             composition=[dict(value="100% Cotton", where="x", source="OC", html=False)])
+    drafted = describe.render(describe.draft(f, BRAND))
+    assert "colourway" not in drafted   # the draft writes none for a red title, colour words or not
+    row = {"Type": "MEN BAGS SHOPPER & TOTE BAGS", poxlsx.MADE_IN: "-",
+           "Body HTML": f"<p>Composition: 100% Cotton</p> <p>Made in -</p> <p>SKU: {td.TOTE}</p>"}
+    assert descimport.as_drafted(drafted, row, BRAND)[-1] is None   # the fact the sheet stores: no bullet
+    out, bad = descimport.colourway(drafted, None, "Drift Tote in Sand")   # the title unchanged in review
+    assert bad == [] and "<li>Composition: 100% Cotton</li>\n  <li>Sand colourway</li>" in out
+
+
+def test_the_red_title_case_end_to_end_through_the_sheet(tmp_path):
+    def edit(ws):   # the jacket as a red title is drafted: no bullet written, the column blank
+        c = desc_cell(ws, td.JACKET)
+        c.value = c.value.replace("\n  <li>Slate colourway</li>", "")
+        ws.cell(c.row, poxlsx.DESCRIPTION_COLS.index("Colourway (as drafted)") + 1).value = None
+    path, _ = reviewed(tmp_path, edit)
+    run(tmp_path, path)
+    assert ("<li>Composition: Shell: 100% Cotton &amp; Linen - Lining: 100% Cupro</li>\n  <li>Slate colourway</li>"
+            in by_code(tmp_path)[td.JACKET])
+
+
+def test_a_colourway_bullet_the_person_added_that_disagrees_is_held_back(tmp_path):
+    def edit(ws):   # the loafer's draft wrote none (its title a colour code); the person typed one in
+        c = desc_cell(ws, td.LOAFER)
+        c.value = c.value.replace("<ul>\n", "<ul>\n  <li>Ink colourway</li>\n")
+    path, _ = reviewed(tmp_path, edit)   # the review fixes the title to 'Mesa Loafer in Black'
+    typed(path, td.LOAFER, "Upper: 100% Calf Leather")
+    checks = run(tmp_path, path)
+    assert td.LOAFER not in by_code(tmp_path)
+    assert ("its colourway bullet says 'Ink', the final title's colour words 'Black': make them agree"
+            in check(checks)["Detail"])
+
+
+def test_a_descriptions_sheet_without_the_colourway_column_writes_no_import(tmp_path):
+    path, _ = reviewed(tmp_path)
+    wb = openpyxl.load_workbook(path)
+    wb[poxlsx.DESCRIPTIONS].delete_cols(poxlsx.DESCRIPTION_COLS.index("Colourway (as drafted)") + 1)
+    wb.save(path)
+    checks = run(tmp_path, path)
+    assert imported(tmp_path) is None and "lacks the column(s) Colourway (as drafted)" in check(checks)["Detail"]
 
 
 def test_an_edited_colourway_bullet_that_disagrees_with_the_final_title_is_held_back(tmp_path):

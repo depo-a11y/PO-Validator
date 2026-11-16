@@ -622,10 +622,10 @@ so a fix made on the PO is one edit, never two:
 The Title and the item noun: a description still holding the drafted one takes the PO's; an edited one must agree.
 A final Title already in the frame is not swapped again (a final Title that holds the drafted one would get its
 prefix twice). The colourway bullet: still as drafted, it takes the final title's colour words, or goes when the final
-title gives none (a colour code with a digit, or no " in <colour>"); edited, it must agree with the final title. Where
-the drafted title gave none (its colour a code, as a raw-code title has) and the final one gives colour words, the
-bullet goes in at the draft's place, right after the Composition line; one the draft gave and the person removed stays
-out. Any
+title gives none (a colour code with a digit, or no " in <colour>"); edited, or added by hand, it must agree with the
+final title. Where the draft wrote none (the Descriptions sheet's "Colourway (as drafted)" is blank: a colour code, as
+a raw-code title has, or a red title) and the final title gives colour words, the bullet goes in at the draft's place,
+right after the Composition line; one the draft wrote and the person removed stays out. Any
 other text that still names a colour word the drafted title had and the final one has not (an AI part quoting the
 order's colour, a bullet typed by hand) holds the description back.
 

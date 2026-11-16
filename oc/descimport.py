@@ -18,9 +18,9 @@ reviewed PO's final values for every field it restates (reconcile), so a fix mad
 - the Made in line, from the PO's custom.made_in, which complete and PU-new treat as authoritative (the template
   body's Made in line is left as entered), else from the template body's Made in line; only a country the tool knows,
   and the two must not name different countries;
-- the colourway bullet, from the final title's colour words by the draft's own rule (colourway), put in where the
-  drafted title gave none (a colour code) and the final one gives colour words; any other text that still names the
-  drafted title's colour holds the product (old_colour).
+- the colourway bullet, from the final title's colour words by the draft's own rule (colourway), keyed on the bullet
+  the draft wrote (its "Colourway (as drafted)" column): put in where the draft wrote none, left out where the person
+  removed one; any other text that still names the drafted title's colour holds the product (old_colour).
 The Title and the item noun: a description still holding the drafted one takes the PO's; an edited one must agree.
 Composition and Made in are a three-way merge whose base is the PO's own value at draft (merge): the PO and the
 description draw on different sources at draft (the description the OC line first, the PO's template the cart, then
@@ -76,13 +76,16 @@ def frame(vendor, title):
 
 def as_drafted(body, row, brand):
     """The Descriptions sheet's "(as drafted)" values after the Title: the PO row's Type, the drafted description's
-    Composition and Made in as it wrote them (None where it wrote no such line), and the PO row's own composition and
-    made in at draft, read as finalize reads them (template_values, po_made_in): the merge's base."""
+    Composition and Made in as it wrote them (None where it wrote no such line), the PO row's own composition and
+    made in at draft, read as finalize reads them (template_values, po_made_in): the merge's base, and the colourway
+    bullet the draft wrote (None when it wrote none: a colour code, a red title, a banned word)."""
     lines = [rx.search(str(body or "")) for rx in (COMPOSITION, MADE_IN_LINE)]
     values = template_values(row.get("Body HTML"), brand["body_html"])
     raw = (values or {}).get("composition")
+    bullet = COLOURWAY.search(str(body or ""))
     return ([row.get("Type")] + [m.group(1).strip() if m else None for m in lines]
-            + [None if raw is None else _text(raw), _text(po_made_in(row, values, brand)[0]) or None])
+            + [None if raw is None else _text(raw), _text(po_made_in(row, values, brand)[0]) or None]
+            + [f"{_text(bullet.group(1))} colourway" if bullet else None])
 
 
 def swap_title(body, drafted, final, vendor):
@@ -261,26 +264,28 @@ def stale_bullets(body, drafted, final, item=""):
 
 def colourway(body, drafted, final):
     """(body, problems): the colourway bullet brought to the final title by the draft's own rule (describe.draft: the
-    title's colour words, none for a code with a digit or a banned word). A bullet still as drafted takes the final
-    colour words, or goes when the final title gives none; an edited one that disagrees with the final title holds.
-    Where the drafted title gave none (its colour a code, or missing) and the final one gives colour words, the bullet
-    goes in at the draft's place: right after the Composition line, else first in the list. A bullet the draft gave
-    and the person removed stays out."""
+    title's colour words, none for a code with a digit or a banned word), keyed on `drafted`, the bullet the draft
+    wrote (the "Colourway (as drafted)" column; None when it wrote none).
+    - The draft wrote none and the body has none: the final title's goes in at the draft's place, right after the
+      Composition line, else first in the list (a raw-code title fixed in review, a red title).
+    - The body still holds the drafted bullet: it takes the final colour words, or goes when the final title gives none.
+    - The draft wrote one and the body has none: the person removed it, so it stays out.
+    - Any other colourway bullet is an edit, held when it disagrees with the final title."""
     rule = lambda c: c if c and not re.search(r"\d", c) and not describe.banned(f"{c} colourway") else ""
-    old = rule(title_colour(drafted)[1] if describe.squash(drafted) else "")
     new = rule(title_colour(final)[1])
     out = []
-    for m in reversed(list(COLOURWAY.finditer(body))):
+    found = list(COLOURWAY.finditer(body))
+    if not found and not drafted and new:
+        body = _after_composition(body, f"  <li>{_e(new)} colourway</li>")
+    for m in reversed(found):
         said = _text(m.group(1))
         if said.casefold() == new.casefold():
             continue
-        if old and said.casefold() == _text(old).casefold():
+        if drafted and f"{said} colourway".casefold() == _text(drafted).casefold():
             body = body[:m.start(1)] + _e(new) + body[m.end(1):] if new else body[:m.start()] + body[m.end():]
         else:
             out.append(f"its colourway bullet says '{said}', the final title's colour words "
                        f"'{new or 'none'}': make them agree")
-    if not old and new and not COLOURWAY.search(body):
-        body = _after_composition(body, f"  <li>{_e(new)} colourway</li>")
     return body, out
 
 
@@ -307,7 +312,7 @@ def reconcile(body, d, row, brand):
     vendor, title, ptype = row.get("Vendor") or brand["vendor"], describe.squash(row.get("Title")), row.get("Type")
     out = []
     body, _ = swap_title(body, d.get("Title (as drafted)"), title, vendor)
-    body, bad = colourway(body, d.get("Title (as drafted)"), title)
+    body, bad = colourway(body, d.get("Colourway (as drafted)"), title)
     out += bad
     stale = old_colour(body, d.get("Title (as drafted)"), title)
     if stale:

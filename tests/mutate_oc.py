@@ -2280,8 +2280,8 @@ MUTANTS += [   # round 8: a three-way merge on the PO's own value at draft (GM, 
     (X, '    return "" if _placeholder(t, brand) else t.casefold()',
      '    return t.casefold()',
      'B: a placeholder on the PO not read as none (a clear goes unseen)'),
-    (X, '            + [None if raw is None else _text(raw), _text(po_made_in(row, values, brand)[0]) or None])',
-     '            + [None, None])',
+    (X, '            + [None if raw is None else _text(raw), _text(po_made_in(row, values, brand)[0]) or None]',
+     '            + [None, None]',
      "B: the PO's own composition and made in not kept at draft"),
 ]
 
@@ -2325,9 +2325,18 @@ MUTANTS += [   # round 9b: the colourway bullet for a title fixed in review (GM)
     (X, '        body = _after_composition(body, f"  <li>{_e(new)} colourway</li>")',
      '        body = body',
      'B: the colourway bullet not put in for a fixed raw-code title'),
-    (X, '    if not old and new and not COLOURWAY.search(body):',
-     '    if new and not COLOURWAY.search(body):',
+    (X, '    if not found and not drafted and new:',
+     '    if not found and new:',
      'B: a colourway bullet the person removed put back'),
+]
+
+MUTANTS += [   # round 9c: the colourway bullet keyed on the stored fact (GM)
+    (X, '    body, bad = colourway(body, d.get("Colourway (as drafted)"), title)',
+     '    body, bad = colourway(body, (lambda c: f"{c} colourway" if c and not re.search(r"\\d", c) else None)(title_colour(d.get("Title (as drafted)") or "")[1]), title)',
+     'B: the drafted-colourway column ignored (the bullet inferred from the drafted title again)'),
+    (X, '            + [f"{_text(bullet.group(1))} colourway" if bullet else None])',
+     '            + [None])',
+     'B: the colourway bullet the draft wrote not kept at draft'),
 ]
 
 
