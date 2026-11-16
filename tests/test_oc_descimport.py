@@ -196,6 +196,10 @@ def test_an_edited_description_is_kept_and_must_hold_the_final_title(tmp_path):
     (lambda b: b.replace("ZQ0001AB1P0001 101</p>", "ZQ9999ZZ9P9999 999</p>"), "its SKU line is not this product's code"),
     (lambda b: b.replace("<li>Composition: Shell: 100% Cotton &amp; Linen - Lining: 100% Cupro</li>",
                          "<li>Composition: -</li>"), "its Composition line is a placeholder"),
+    (lambda b: b.replace("<li>Composition: Shell: 100% Cotton &amp; Linen - Lining: 100% Cupro</li>",
+                         "<li>Composition: --</li>"), "its Composition line is a placeholder"),
+    (lambda b: b.replace("<li>Composition: Shell: 100% Cotton &amp; Linen - Lining: 100% Cupro</li>",
+                         "<li>Composition: N/A</li>"), "its Composition line is a placeholder"),
     (lambda b: b.replace("<li>Composition: Shell: 100% Cotton &amp; Linen - Lining: 100% Cupro</li>\n", ""),
      "it has no Composition line"),
     (lambda b: b.replace("<li>Made in Italy</li>", "<li>Made in -</li>"), "it says 'Made in -'"),
@@ -409,6 +413,7 @@ def test_a_made_in_on_the_po_is_written_only_as_a_country_the_tool_knows(tmp_pat
     made_in_both(path, td.JACKET, value, value)
     checks = run(tmp_path, path)
     assert td.JACKET not in by_code(tmp_path) and why in check(checks)["Detail"]
+    assert ("not a country the tool knows" in check(checks)["Detail"]) == ("cleared" not in why)   # '--', n.a.: none
 
 
 @pytest.mark.parametrize("line,why", [
