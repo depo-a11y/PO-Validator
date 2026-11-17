@@ -2391,9 +2391,30 @@ MUTANTS += [   # round 10c (case 2026-11-17-buyer-13): template slots, _core's s
     (X, '    first = re.sub(r"^an? ", "", first.rstrip("."))',
      '    first = re.sub(r"^an? ", "", first)',
      "B: the intro's full stop not undone (a one-sentence intro)"),
-    (X, '        hit = [w for w in sorted(gone) if re.search(rf"(?<!\\w){re.escape(w)}(?!\\w)",',
-     '        hit = [w for w in sorted(gone) if re.search(rf"(?<![\\w-]){re.escape(w)}(?![\\w-])",',
+    (X, '        said = [w.casefold() for w in re.findall(r"\\w+(?:-\\w+)*", x.replace(describe.squash(final), " "))]',
+     '        said = [w.casefold() for w in re.findall(r"(?<![\\w-])\\w+(?![\\w-])", x.replace(describe.squash(final), " "))]',
      'B: a dropped colour word beside a hyphen not read (the hyphen guard back)'),
+]
+
+MUTANTS += [   # round 10d (case 2026-11-18-buyer-2): off-template code-only bodies; colour tokens as written
+    (X, '    if "made_in" not in (values or {}):',
+     '    if values is not None and "made_in" not in values:',
+     "B: an off-template body's made in read as a cleared line when the template has no slot"),
+    (X, '    if values is None and slots:',
+     '    if values is None:',
+     'B: an off-template body held when the template holds nothing to read'),
+    (X, '    unread = values is None and "made in" in slots   # held by the one reason above, no second',
+     '    unread = values is None',
+     'B: made in left unread when the template has no made in slot'),
+    (X, '        hit = [g for g in sorted(gone) if any(w == g or ("-" not in g and g in w.split("-")) for w in said)]',
+     '        hit = [g for g in sorted(gone) if any(("-" not in g and g in w.split("-")) for w in said)]',
+     "B: a dropped hyphen-compound colour not matched whole ('Off-white piping')"),
+    (X, '        hit = [g for g in sorted(gone) if any(w == g or ("-" not in g and g in w.split("-")) for w in said)]',
+     '        hit = [g for g in sorted(gone) if any(w == g for w in said)]',
+     "B: a dropped single colour word not matched as part of a compound ('Slate-tone trims')"),
+    (X, '            if not set(t.split("-")) <= parts}   # \'Off-White\' respelt \'Off White\' is not gone',
+     '            if True}',
+     'B: a colour compound respelt in the final title read as gone'),
 ]
 
 

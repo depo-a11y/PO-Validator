@@ -470,6 +470,34 @@ def test_a_template_with_no_made_in_slot_reads_custom_made_in_alone(tmp_path, te
         assert ("cleared" in detail) == ("cleared" in why)   # an unknown country is never a clear
 
 
+@pytest.mark.parametrize("meta,made", [(None, "Italy"), ("PT", "Portugal")])
+def test_a_code_only_template_with_a_body_off_it_still_writes_made_in_from_custom_made_in(tmp_path, meta, made):
+    brand = dict(BRAND, body_html="<p>{code}</p>")   # a <p> body would match: the code slot takes anything
+    path, _ = reviewed(tmp_path, brand=brand)
+    po_edit(path, td.JACKET, "Body HTML", lambda v: f"<div>{v}</div>")
+    if meta:
+        po_edit(path, td.JACKET, poxlsx.MADE_IN, lambda v: meta)
+    checks = run(tmp_path, path, brand)
+    assert f"<li>Made in {made}</li>" in by_code(tmp_path)[td.JACKET]   # written: the template holds nothing unread
+    assert td.JACKET not in check(checks)["Detail"].split("held back", 1)[-1]
+
+
+def test_a_composition_only_template_off_its_body_gives_one_reason_and_still_reads_custom_made_in():
+    code = "ZQ0006AB6P0006 900"
+    brand = dict(BRAND, body_html="<p>Composition: {composition}</p> <p>SKU: {code}</p>")
+    body = (f"<p>ACME STUDIO's Loop Cape in Black is a coat.</p>\n<ul>\n<li>Composition: 100% Wool</li>\n"
+            f"<li>Made in Italy</li>\n</ul><br><p>SKU: {code}</p>")
+    d = {"Title (as drafted)": "Loop Cape in Black", "Type (as drafted)": "MEN CLOTHING COATS",
+         "Composition (as drafted)": "100% Wool", "Made in (as drafted)": "Italy", "PO composition (as drafted)": "100% Wool",
+         "PO made in (as drafted)": "Italy", "Colourway (as drafted)": "Black colourway", "Description (as drafted)": body}
+    row = {"Title": "Loop Cape in Black", "Type": "MEN CLOTHING COATS", "Vendor": "ACME STUDIO", poxlsx.MADE_IN: "PT",
+           "Body HTML": "<div>All wool.</div>"}
+    out, why = descimport.reconcile(body, d, row, brand)
+    assert why == [f"the PO's Body HTML no longer follows the brand's template ({brand['body_html']}), so its "
+                   "composition cannot be read"]
+    assert "<li>Made in Portugal</li>" in out   # the template holds no made in: custom.made_in is still read
+
+
 def test_the_draft_fills_both_made_in_copies_from_one_value(tmp_path):
     """The single base ('PO made in (as drafted)') rests on this: draft.build writes custom.made_in and the template
     body's Made in line from one value, so at draft the two copies never differ."""
@@ -873,6 +901,26 @@ def test_a_dropped_colour_word_in_a_hyphen_compound_holds(line, held):
                                                                              f"  <li>{line}</li>")
     got = descimport.old_colour(now, "Orbit Field Jacket in Slate", "Orbit Field Jacket in Navy", drafted)
     assert ("names 'slate'" in got) == held
+
+
+@pytest.mark.parametrize("drafted,final,line,held", [
+    ("Loop Coat in Off-White", "Loop Coat in White", "Zip-off hood", False),   # 'off' is no colour of its own
+    ("Loop Coat in Two-Tone Black", "Loop Coat in Black", "Two-way zip", False),
+    ("Loop Coat in Two-Tone Black", "Loop Coat in Black", "Gold-tone hardware", False),
+    ("Loop Coat in Off-White", "Loop Coat in White", "Off-white piping", True),   # the compound whole
+    ("Loop Coat in Two-Tone Black", "Loop Coat in Black", "Two-tone piping", True),
+    ("Loop Coat in Slate", "Loop Coat in Navy", "Slate-tone trims", True),   # a single word as one part
+    ("Loop Coat in Slate", "Loop Coat in Navy", "Blue-slate piping", True),
+    ("Loop Coat in Slate", "Loop Coat in Navy", "Slates", False),   # a word character blocks
+    ("Loop Coat in Off-White", "Loop Coat in Off White", "Off-white piping", False),   # respelt, not gone
+    # Accepted residue: 'Off White' written with a space leaves 'off' gone on its own, so this holds (and never writes)
+    ("Loop Coat in Off White", "Loop Coat in White", "Zip-off hood", True),
+])
+def test_a_dropped_colour_is_read_as_the_title_writes_it(drafted, final, line, held):
+    was = (f"<p>ACME STUDIO's {drafted} is a coat.</p>\n<ul>\n<li>Composition: 100% Wool</li>\n"
+           "  <li>Zip fastening</li>\n</ul><br><p>SKU: X 1</p>")
+    now = was.replace(drafted, final).replace("  <li>Zip fastening</li>", f"  <li>{line}</li>")
+    assert bool(descimport.old_colour(now, drafted, final, was)) == held
 
 
 def test_the_sheet_keeps_the_drafted_description_whole(tmp_path):

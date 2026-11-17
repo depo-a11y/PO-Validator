@@ -346,9 +346,16 @@ def old_colour(body, drafted, final, drafted_body, old_item=None, new_item=None)
     ''. A part still as drafted rests on order fields review did not change (no tool or AI part rests on the title
     but the colourway bullet, which colourway handles), and the Composition and Made in lines come from the PO, so
     neither is read: 'Gold hardware' and '100% Camel Hair' stay true whatever the title's colour. A colour word can
-    be a material, so the message asks for a check, never for the line to go."""
-    words = lambda c: {w.casefold() for w in re.findall(r"[^\W\d_]{3,}", c or "")}
-    gone = words(title_colour(drafted)[1] if describe.squash(drafted) else "") - words(title_colour(final)[1])
+    be a material, so the message asks for a check, never for the line to go. The colour is read in tokens as the
+    title writes them: a hyphen compound ('Two-Tone', 'Off-White') is gone whole and matches a whole word, never a
+    part ('Two-way zip', 'Zip-off hood' stay); a single word also matches as one part of a hyphen compound ('Slate-tone
+    trims'); a word character always blocks ('Slates')."""
+    tokens = lambda c: {t.casefold() for t in re.findall(r"[^\W\d_]+(?:-[^\W\d_]+)*", c or "")
+                        if "-" in t or len(t) >= 3}   # as the title writes them: 'two-tone' whole, never 'two'
+    now = tokens(title_colour(final)[1])
+    parts = {x for t in now for x in t.split("-")}
+    gone = {t for t in tokens(title_colour(drafted)[1] if describe.squash(drafted) else "") - now
+            if not set(t.split("-")) <= parts}   # 'Off-White' respelt 'Off White' is not gone
     if not gone:
         return ""
     intro, core, lines, rest = _parts(body, final, new_item)
@@ -357,8 +364,8 @@ def old_colour(body, drafted, final, drafted_body, old_item=None, new_item=None)
     read += [x for x in lines if x not in was_lines and not re.match(r"(?:Composition:|Made in\b)", x)
              and not COLOURWAY.fullmatch(f"<li>{_e(x)}</li>")]
     for x in read:
-        hit = [w for w in sorted(gone) if re.search(rf"(?<!\w){re.escape(w)}(?!\w)",
-                                                    x.replace(describe.squash(final), " "), re.I)]
+        said = [w.casefold() for w in re.findall(r"\w+(?:-\w+)*", x.replace(describe.squash(final), " "))]
+        hit = [g for g in sorted(gone) if any(w == g or ("-" not in g and g in w.split("-")) for w in said)]
         if hit:
             return (f"its '{x}' names '{hit[0]}', a colour word of the drafted title that the final title drops: "
                     "check whether it means the old colour")

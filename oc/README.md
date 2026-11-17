@@ -628,7 +628,9 @@ a raw-code title has, or a red title) and the final title gives colour words, th
 right after the Composition line; one the draft wrote and the person removed stays out. A part the draft did not
 write so (a line typed or edited by hand, the drafted title moved out of the intro's frame) that still names a colour
 word the drafted title had and the final one drops holds the description back, with a message that asks for a check,
-not a deletion: a colour word can be a material. Lines still as drafted rest on order fields review did not change (no
+not a deletion: a colour word can be a material. Colour words are read as the title writes them: a hyphen compound
+("Two-Tone", "Off-White") is gone whole and matches only a whole word, never a part ("Two-way zip" stays); a single
+word also matches as one part of a hyphen compound ("Slate-tone trims"). Lines still as drafted rest on order fields review did not change (no
 tool or AI part rests on the title but the colourway bullet: an AI claim's field is never the title), and the
 Composition and Made in lines come from the PO, so neither is read ("Gold hardware", "100% Camel Hair").
 
