@@ -364,3 +364,19 @@ def test_a_bar_below_sixty_percent_accepts_what_sixty_refuses(tmp_path, bar, vot
     want = ("BLACK", "catalog", "same colour code 001 is BLACK on 4 of 7 product(s)") if voted else (
         "", "guess", "no colour family for '001'")
     assert R.colour_family("ZXSA00001 001", "001") == want
+
+
+@pytest.mark.parametrize("desc,want", [("Black", ("Black", "catalog")), ("black", ("Black", "catalog")),
+                                       ("Navy", ("Navy", "cart"))])
+def test_a_cart_colour_its_same_fabric_agrees_with_is_green(tmp_path, desc, want):
+    """The cart's Color Description is the colour name; it is green only where the same fabric+colour's live title
+    colour says the same (the vote runs with a cart row too)."""
+    code = "ZXRO000001 ZF 09"
+    cart = dict(label="cart.xlsx", rows={resolve.norm_code(code): dict(colour=desc, row=7)})
+    R = resolve.Resolver(dict(BRAND, join_key="{style} {fabric} {colour}"),
+                         catm.load(write_catalog(tmp_path, [_live("8", "ZXRO000002 ZF 09")])), past_po(tmp_path),
+                         base._tags(), cart=cart)
+    name, src, why = R.colour_name(code)
+    assert (name, src) == want
+    assert why == ("same fabric+colour ZF 09 titled 'Black' on 1 of 1 product(s); cart.xlsx row 7: Color Description "
+                   "agrees" if src == "catalog" else f"cart.xlsx row 7: Color Description '{desc}'")
