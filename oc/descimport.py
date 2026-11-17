@@ -16,11 +16,13 @@ reviewed PO's final values for every field it restates (reconcile), so a fix mad
 - the item noun the final Type gives (with its article), in the same frame;
 - the Composition line, from the PO's template Body HTML, which the person reviews and PU-new imports;
 - the Made in line, from the PO's custom.made_in, which complete and PU-new treat as authoritative (the template
-  body's Made in line is left as entered), else from the template body's Made in line; only a country the tool knows,
-  and the two must not name different countries;
+  body's Made in line is left as entered), else from the template body's Made in line; only a country the tool knows.
+  Both copies are read against the one value the draft filled them from, so custom.made_in fixed alone is one edit,
+  and only a body line changed alone, or the two changed apart, holds (made_in_now);
 - the colourway bullet, from the final title's colour words by the draft's own rule (colourway), keyed on the bullet
   the draft wrote (its "Colourway (as drafted)" column): put in where the draft wrote none, left out where the person
-  removed one; any other text that still names the drafted title's colour holds the product (old_colour).
+  removed one; a part the draft did not write so (typed or edited by hand) that still names a colour word the final
+  title drops holds the product (old_colour): lines still as drafted and the lines the merge wrote are not read.
 The Title and the item noun: a description still holding the drafted one takes the PO's; an edited one must agree.
 Composition and Made in are a three-way merge whose base is the PO's own value at draft (merge): the PO and the
 description draw on different sources at draft (the description the OC line first, the PO's template the cart, then
@@ -77,15 +79,17 @@ def frame(vendor, title):
 def as_drafted(body, row, brand):
     """The Descriptions sheet's "(as drafted)" values after the Title: the PO row's Type, the drafted description's
     Composition and Made in as it wrote them (None where it wrote no such line), the PO row's own composition and
-    made in at draft, read as finalize reads them (template_values, po_made_in): the merge's base, and the colourway
-    bullet the draft wrote (None when it wrote none: a colour code, a red title, a banned word)."""
+    made in at draft (the composition read through the template; the made in as written, the one value the draft fills
+    both custom.made_in and the template's Made in line from): the merge's base, the colourway bullet the draft wrote
+    (None when it wrote none: a colour code, a red title, a banned word), and the drafted description whole."""
     lines = [rx.search(str(body or "")) for rx in (COMPOSITION, MADE_IN_LINE)]
     values = template_values(row.get("Body HTML"), brand["body_html"])
     raw = (values or {}).get("composition")
     bullet = COLOURWAY.search(str(body or ""))
     return ([row.get("Type")] + [m.group(1).strip() if m else None for m in lines]
-            + [None if raw is None else _text(raw), _text(po_made_in(row, values, brand)[0]) or None]
-            + [f"{_text(bullet.group(1))} colourway" if bullet else None])
+            + [None if raw is None else _text(raw), _text(row.get(MADE_IN) if not blank(row.get(MADE_IN))
+                                                          else (values or {}).get("made_in")) or None]
+            + [f"{_text(bullet.group(1))} colourway" if bullet else None, body])
 
 
 def swap_title(body, drafted, final, vendor):
@@ -166,27 +170,40 @@ def po_composition(values, brand):
         (_e(describe.house_case(text)), "")
 
 
-def po_made_in(row, values, brand):
-    """(the country the reviewed PO gives, escaped, or None when it gives none; why its value cannot be written, else
-    ''). Its custom.made_in, which complete and PU-new treat as authoritative, else its template body's Made in line.
-    Only a country the tool knows is written (describe.country, the draft's own rule): 'Itlay' or 'x' holds the
-    product."""
-    for v in (None if blank(row.get(MADE_IN)) else row.get(MADE_IN), (values or {}).get("made_in")):
-        text = _text(v)
-        if not _placeholder(text, brand):
-            name = describe.country(text, brand)
-            return (_e(name), "") if name else \
-                (None, f"the PO's made in '{text}' is not a country the tool knows: fix it there")
-    return None, ""
+def place(value, brand):
+    """A made in as compared: '' for none or a placeholder, else the country name the tool knows, else the text."""
+    t = _text(value)
+    return "" if _placeholder(t, brand) else (describe.country(t, brand) or t)
 
 
-def made_in_disagrees(row, values, brand):
-    """Why the PO's custom.made_in and its template body's Made in line name two different countries, else '': the
-    description cannot know which is right, whichever of them review changed."""
-    meta, line = ("" if blank(row.get(MADE_IN)) else _text(row.get(MADE_IN))), _text((values or {}).get("made_in"))
-    a, b = describe.country(meta, brand), describe.country(line, brand)
-    return f"the PO's custom.made_in says '{meta}', its Body HTML Made in line '{line}': make them agree" \
-        if a and b and a != b else ""
+def made_in_now(row, values, base, brand):
+    """(the made in the reviewed PO gives, escaped, or None when it gives none; the problems), from its two copies:
+    custom.made_in, which complete and PU-new treat as authoritative, and the template body's Made in line. Each is
+    read against `base`, the one value the draft filled both from (draft.build writes both from n['made']), so the
+    copy review changed is known:
+    - custom.made_in empty then and now: the line is the source;
+    - only custom.made_in changed: it is carried, unless it was cleared while the line still names a country;
+    - only the line changed, or both to different values: the two disagree, and which is right cannot be told;
+    - both changed to one value: it is carried.
+    Only a country the tool knows is written; any other value is named as that, never as a clear."""
+    meta = place(None if blank(row.get(MADE_IN)) else row.get(MADE_IN), brand)
+    line, was = place((values or {}).get("made_in"), brand), place(base, brand)
+    same = lambda a, b: a.casefold() == b.casefold()
+    if not was and not meta:
+        now = line
+    elif same(line, was) and not meta:
+        return None, [f"the PO's custom.made_in was cleared, its Body HTML Made in line still says '{line}': make "
+                      "them agree"]
+    elif same(line, was):
+        now = meta
+    elif same(meta, was) or not same(meta, line):
+        return None, [f"the PO's custom.made_in says '{meta or '-'}', its Body HTML Made in line '{line or '-'}': "
+                      "make them agree"]
+    else:
+        now = meta
+    if now and not describe.country(now, brand):
+        return None, [f"the PO's made in '{now}' is not a country the tool knows: fix it there"]
+    return (_e(now) if now else None), []
 
 
 def _insert(body, li, first):
@@ -295,15 +312,39 @@ def _after_composition(body, li):
     return body[:comp.end()] + "\n" + li + body[comp.end():] if comp else _insert(body, li, True)
 
 
-def old_colour(body, drafted, final):
-    """Why the description still names a colour word the drafted title had and the final one has not (an AI part
-    quoting the order's colour, a bullet typed by hand, the drafted title outside the intro's frame), else ''."""
+def _parts(body, title):
+    """(the intro after its title, the list's lines, the rest) of a description, as text."""
+    body = str(body or "")
+    intro = INTRO.match(body)
+    lines = [_text(x) for x in re.findall(r"<li>(.*?)</li>", body, re.S)]
+    rest = re.sub(r"<li>.*?</li>", " ", body[intro.end():] if intro else body, flags=re.S)
+    return (_text(intro.group(1)).replace(describe.squash(title), " ", 1) if intro else None, lines,
+            _text(SKU_LINE.sub(" ", rest)))
+
+
+def old_colour(body, drafted, final, drafted_body):
+    """Why the description still names a colour word the drafted title had and the final one drops, in a part the
+    draft did not write so (a line typed or edited by hand, the drafted title moved out of the intro's frame), else
+    ''. A part still as drafted rests on order fields review did not change (no tool or AI part rests on the title
+    but the colourway bullet, which colourway handles), and the Composition and Made in lines come from the PO, so
+    neither is read: 'Gold hardware' and '100% Camel Hair' stay true whatever the title's colour. A colour word can
+    be a material, so the message asks for a check, never for the line to go."""
     words = lambda c: {w.casefold() for w in re.findall(r"[^\W\d_]{3,}", c or "")}
     gone = words(title_colour(drafted)[1] if describe.squash(drafted) else "") - words(title_colour(final)[1])
-    text = _text(body).replace(describe.squash(final), " ")
-    hit = sorted(w for w in gone if re.search(rf"(?<![\w-]){re.escape(w)}(?![\w-])", text, re.I))
-    return f"it still names the drafted title's colour '{', '.join(hit)}': make it agree with the final title" \
-        if hit else ""
+    if not gone:
+        return ""
+    intro, lines, rest = _parts(body, final)
+    was_intro, was_lines, was_rest = _parts(drafted_body, drafted) if drafted_body else (None, [], None)
+    read = [x for x in (intro if intro != was_intro else None, rest if rest != was_rest else None) if x]
+    read += [x for x in lines if x not in was_lines and not re.match(r"(?:Composition:|Made in\b)", x)
+             and not COLOURWAY.fullmatch(f"<li>{_e(x)}</li>")]
+    for x in read:
+        hit = [w for w in sorted(gone) if re.search(rf"(?<![\w-]){re.escape(w)}(?![\w-])",
+                                                    x.replace(describe.squash(final), " "), re.I)]
+        if hit:
+            return (f"its '{x}' names '{hit[0]}', a colour word of the drafted title that the final title drops: "
+                    "check whether it means the old colour")
+    return ""
 
 
 def reconcile(body, d, row, brand):
@@ -314,9 +355,6 @@ def reconcile(body, d, row, brand):
     body, _ = swap_title(body, d.get("Title (as drafted)"), title, vendor)
     body, bad = colourway(body, d.get("Colourway (as drafted)"), title)
     out += bad
-    stale = old_colour(body, d.get("Title (as drafted)"), title)
-    if stale:
-        out.append(stale)
     old_type = d.get("Type (as drafted)")
     old = describe.item_noun(old_type, d.get("Title (as drafted)")) if describe.squash(old_type) else None
     new = describe.item_noun(ptype, title) if describe.squash(ptype) else None
@@ -344,19 +382,20 @@ def reconcile(body, d, row, brand):
         if drafted and after and not same_text(drafted, after.group(1)):   # changed, by the merge or by hand
             out += [f"its {where} '{t}' comes from the drafted composition, which changed: remove it or make it agree"
                     for where, t in stale_bullets(body, drafted, after.group(1), new or "")]
-    made, why = po_made_in(row, values, brand)
-    if why:
-        out.append(why)
-    why = made_in_disagrees(row, values, brand)
-    if why:
-        out.append(why)
-    place = lambda t: (describe.country(_text(t), brand) or _text(t)).casefold()
-    body, how, said = merge(body, MADE_IN_LINE, d.get("Made in (as drafted)"), d.get("PO made in (as drafted)"),
-                            _text(made), made, lambda a, b: place(a) == place(b), "Made in ", False, brand)
-    if how == "cleared":
-        out.append(f"the PO's made in was cleared, and the description still says 'Made in {said}'")
-    if how == "disagrees":
-        out.append(f"its Made in line says '{said}', the PO's made in '{_text(made)}': make them agree")
+    made, why = made_in_now(row, values, d.get("PO made in (as drafted)"), brand)
+    out += why
+    if not why:
+        same = lambda a, b: place(a, brand).casefold() == place(b, brand).casefold()
+        body, how, said = merge(body, MADE_IN_LINE, d.get("Made in (as drafted)"),
+                                place(d.get("PO made in (as drafted)"), brand), _text(made), made, same, "Made in ",
+                                False, brand)
+        if how == "cleared":
+            out.append(f"the PO's made in was cleared, and the description still says 'Made in {said}'")
+        if how == "disagrees":
+            out.append(f"its Made in line says '{said}', the PO's made in '{_text(made)}': make them agree")
+    stale = old_colour(body, d.get("Title (as drafted)"), title, d.get("Description (as drafted)"))
+    if stale:
+        out.append(stale)
     return body, out
 
 

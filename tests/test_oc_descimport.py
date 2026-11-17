@@ -389,32 +389,80 @@ def test_made_in_comes_from_the_pos_custom_made_in_before_its_body(tmp_path):
     run(tmp_path, path)
     jacket = by_code(tmp_path)[td.JACKET]
     assert "\n<li>Made in Portugal</li>\n</ul>" in jacket and "Italy" not in jacket
-    made_in_both(path, td.JACKET, "Spain", "Itlay")   # custom.made_in rules; its body's typo is not read
+    made_in_both(path, td.JACKET, "Spain", "Itlay")   # both changed, to two values: which is right is not known
+    checks = run(tmp_path, path)
+    assert td.JACKET not in by_code(tmp_path)
+    assert ("the PO's custom.made_in says 'Spain', its Body HTML Made in line 'Itlay': make them agree"
+            in check(checks)["Detail"])
+
+
+def test_custom_made_in_fixed_alone_is_one_edit(tmp_path):
+    path, _ = reviewed(tmp_path)
+    po_edit(path, td.JACKET, poxlsx.MADE_IN, lambda v: "PT")   # the template body still says Made in Italy, as drafted
+    checks = run(tmp_path, path)
+    jacket = by_code(tmp_path)[td.JACKET]
+    assert "<li>Made in Portugal</li>" in jacket and "Italy" not in jacket and "custom.made_in" not in check(checks)["Detail"]
+
+
+def test_a_made_in_changed_only_in_the_template_body_holds_the_product(tmp_path):
+    path, _ = reviewed(tmp_path)
+    po_edit(path, td.JACKET, "Body HTML", lambda v: v.replace("Made in Italy", "Made in Portugal"))
+    checks = run(tmp_path, path)
+    assert td.JACKET not in by_code(tmp_path)
+    assert ("the PO's custom.made_in says 'Italy', its Body HTML Made in line 'Portugal': make them agree"
+            in check(checks)["Detail"])
+
+
+@pytest.mark.parametrize("cleared", ["-", "n.a.", None])
+def test_custom_made_in_cleared_while_the_body_line_names_a_country_holds_the_product(tmp_path, cleared):
+    path, _ = reviewed(tmp_path)
+    po_edit(path, td.JACKET, poxlsx.MADE_IN, lambda v: cleared)   # the template body still says Made in Italy
+    checks = run(tmp_path, path)
+    assert td.JACKET not in by_code(tmp_path)
+    assert ("the PO's custom.made_in was cleared, its Body HTML Made in line still says 'Italy': make them agree"
+            in check(checks)["Detail"])
+
+
+def test_a_custom_made_in_empty_at_draft_and_still_reads_the_body_line(tmp_path):
+    path, _ = reviewed(tmp_path, cart=NO_PO_VALUES)   # custom.made_in '-' and 'Made in -' at draft
+    po_edit(path, td.JACKET, "Body HTML", lambda v: v.replace("Made in -", "Made in Spain"))
     run(tmp_path, path)
     assert "<li>Made in Spain</li>" in by_code(tmp_path)[td.JACKET]
 
 
-def test_a_custom_made_in_and_a_body_line_naming_two_countries_hold_the_product(tmp_path):
-    path, _ = reviewed(tmp_path)
-    po_edit(path, td.JACKET, poxlsx.MADE_IN, lambda v: "PT")   # the template body still says Made in Italy
-    checks = run(tmp_path, path)
-    assert td.JACKET not in by_code(tmp_path)
-    assert ("the PO's custom.made_in says 'PT', its Body HTML Made in line 'Italy': make them agree"
-            in check(checks)["Detail"])
+def test_the_draft_fills_both_made_in_copies_from_one_value(tmp_path):
+    """The single base ('PO made in (as drafted)') rests on this: draft.build writes custom.made_in and the template
+    body's Made in line from one value, so at draft the two copies never differ."""
+    from oc import draft as draftm
+    cat = catm.load(td.write_catalog(tmp_path))
+    for cart in (td.cart, PORTUGAL, NO_PO_VALUES, None):
+        rows, *_ = draftm.build(td.docs(), BRAND, cat, histm.History([("F/W 26", [])]), td.base._tags(),
+                                cart=cart() if cart else None)
+        new = [r for r in rows if r["Command"] == "NEW"]
+        assert new
+        for r in new:
+            line = descimport.template_values(r["Body HTML"], BRAND["body_html"])["made_in"]
+            assert descimport.place(r[poxlsx.MADE_IN], BRAND) == descimport.place(line, BRAND), r[poxlsx.CODE]
 
 
 @pytest.mark.parametrize("value,why", [
     ("Itlay", "the PO's made in 'Itlay' is not a country the tool knows: fix it there"),
+    ("Itlay-meta", "the PO's made in 'Itlay' is not a country the tool knows: fix it there"),
     ("x", "the PO's made in 'x' is not a country the tool knows: fix it there"),
     ("--", "the PO's made in was cleared, and the description still says 'Made in Italy'"),
     ("n.a.", "the PO's made in was cleared, and the description still says 'Made in Italy'"),
 ])
 def test_a_made_in_on_the_po_is_written_only_as_a_country_the_tool_knows(tmp_path, value, why):
     path, _ = reviewed(tmp_path)
-    made_in_both(path, td.JACKET, value, value)
+    if value.endswith("-meta"):   # custom.made_in alone changed, the template line still as drafted
+        po_edit(path, td.JACKET, poxlsx.MADE_IN, lambda v: value[:-len("-meta")])
+    else:
+        made_in_both(path, td.JACKET, value, value)
     checks = run(tmp_path, path)
     assert td.JACKET not in by_code(tmp_path) and why in check(checks)["Detail"]
     assert ("not a country the tool knows" in check(checks)["Detail"]) == ("cleared" not in why)   # '--', n.a.: none
+    if "cleared" not in why:   # an unknown country is named as that, never as a clear
+        assert "cleared" not in check(checks)["Detail"]
 
 
 @pytest.mark.parametrize("line,why", [
@@ -665,7 +713,7 @@ def test_a_red_title_with_colour_words_gets_its_colourway_bullet_from_the_stored
     assert "colourway" not in drafted   # the draft writes none for a red title, colour words or not
     row = {"Type": "MEN BAGS SHOPPER & TOTE BAGS", poxlsx.MADE_IN: "-",
            "Body HTML": f"<p>Composition: 100% Cotton</p> <p>Made in -</p> <p>SKU: {td.TOTE}</p>"}
-    assert descimport.as_drafted(drafted, row, BRAND)[-1] is None   # the fact the sheet stores: no bullet
+    assert descimport.as_drafted(drafted, row, BRAND)[-2] is None   # the fact the sheet stores: no bullet
     out, bad = descimport.colourway(drafted, None, "Drift Tote in Sand")   # the title unchanged in review
     assert bad == [] and "<li>Composition: 100% Cotton</li>\n  <li>Sand colourway</li>" in out
 
@@ -721,8 +769,48 @@ def test_the_drafted_colour_left_anywhere_else_holds_the_product(tmp_path):
     po_edit(path, td.JACKET, "Title", lambda v: "Orbit Field Jacket in Navy")
     checks = run(tmp_path, path)
     assert td.JACKET not in by_code(tmp_path)
-    assert ("it still names the drafted title's colour 'slate': make it agree with the final title"
-            in check(checks)["Detail"])
+    assert ("its 'Zip fastening in slate tone' names 'slate', a colour word of the drafted title that the final title "
+            "drops: check whether it means the old colour") in check(checks)["Detail"]
+
+
+def test_a_drafted_line_naming_the_old_colour_is_not_held_when_the_title_colour_is_fixed(tmp_path):
+    def edit(ws):   # as if the draft wrote a line from the order's own words that names the colour
+        c = desc_cell(ws, td.JACKET)
+        c.value = c.value.replace("  <li>Zip fastening</li>", "  <li>Zip fastening</li>\n  <li>Slate tone shell</li>")
+        ws.cell(c.row, poxlsx.DESCRIPTION_COLS.index("Description (as drafted)") + 1).value = c.value
+    path, _ = reviewed(tmp_path, edit)
+    po_edit(path, td.JACKET, "Title", lambda v: "Orbit Field Jacket in Navy")
+    run(tmp_path, path)
+    jacket = by_code(tmp_path)[td.JACKET]
+    assert "  <li>Slate tone shell</li>" in jacket and "  <li>Navy colourway</li>" in jacket
+
+
+@pytest.mark.parametrize("drafted,final,line", [
+    ("Loop Boot in Black Leather", "Loop Boot in Black", "  <li>Leather upper</li>"),
+    ("Loop Tote in Natural", "Loop Tote in Ecru", "  <li>Natural leather trims</li>"),
+    ("Loop Ring in Gold", "Loop Ring in Silver", "  <li>Gold hardware</li>"),
+    ("Loop Coat in Camel", "Loop Coat in Brown", "<li>Composition: 100% Camel Hair</li>"),
+])
+def test_a_colour_word_in_a_line_as_drafted_or_reconciled_from_the_po_does_not_hold(drafted, final, line):
+    body = (f"<p>ACME STUDIO's {drafted} is a coat.</p>\n<ul>\n<li>Composition: 100% Wool</li>\n{line}\n</ul><br>"
+            "<p>SKU: X 1</p>")
+    now = body.replace(drafted, final)
+    if line.startswith("<li>Composition:"):   # the merge wrote this line from the PO
+        body, now = body.replace(line + "\n", ""), now.replace("<li>Composition: 100% Wool</li>", line[:-5] + "</li>")
+    assert descimport.old_colour(now, drafted, final, body) == ""
+
+
+@pytest.mark.parametrize("edit", [
+    lambda b: b.replace("  <li>Zip fastening</li>", "  <li>Slate trims</li>"),   # typed by hand
+    lambda b: b.replace("</ul><br>", "</ul><br><p>Also the Orbit Field Jacket in Slate.</p>"),   # the drafted title, moved
+    lambda b: b.replace("is a waxed lightweight jacket.", "is a waxed lightweight jacket in slate."),   # the intro edited
+])
+def test_a_dropped_colour_word_in_a_part_the_draft_did_not_write_so_holds(edit):
+    drafted = ("<p>ACME STUDIO's Orbit Field Jacket in Slate is a waxed lightweight jacket.</p>\n<ul>\n"
+               "<li>Composition: 100% Cotton</li>\n  <li>Zip fastening</li>\n</ul><br><p>SKU: X 1</p>")
+    now = edit(drafted.replace("Jacket in Slate is", "Jacket in Navy is"))
+    assert "names 'slate'" in descimport.old_colour(now, "Orbit Field Jacket in Slate", "Orbit Field Jacket in Navy",
+                                                    drafted)
 
 
 # ---- the page and the CLI -----------------------------------------------------------------------------

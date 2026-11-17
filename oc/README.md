@@ -625,9 +625,12 @@ prefix twice). The colourway bullet: still as drafted, it takes the final title'
 title gives none (a colour code with a digit, or no " in <colour>"); edited, or added by hand, it must agree with the
 final title. Where the draft wrote none (the Descriptions sheet's "Colourway (as drafted)" is blank: a colour code, as
 a raw-code title has, or a red title) and the final title gives colour words, the bullet goes in at the draft's place,
-right after the Composition line; one the draft wrote and the person removed stays out. Any
-other text that still names a colour word the drafted title had and the final one has not (an AI part quoting the
-order's colour, a bullet typed by hand) holds the description back.
+right after the Composition line; one the draft wrote and the person removed stays out. A part the draft did not
+write so (a line typed or edited by hand, the drafted title moved out of the intro's frame) that still names a colour
+word the drafted title had and the final one drops holds the description back, with a message that asks for a check,
+not a deletion: a colour word can be a material. Lines still as drafted rest on order fields review did not change (no
+tool or AI part rests on the title but the colourway bullet: an AI claim's field is never the title), and the
+Composition and Made in lines come from the PO, so neither is read ("Gold hardware", "100% Camel Hair").
 
 Composition and Made in are a **three-way merge whose base is the PO's own value at draft**. At draft the two sides
 draw on different sources: the description takes the OC line first, the PO's template the cart, then the live same
@@ -648,10 +651,14 @@ every word of which the drafted composition holds and the final one does not (th
 the AI rested on the composition). A placeholder is never written: a run of dashes and any spelling of n/a count as
 one. A composition on the PO that cannot be written (cut off, garbled, in codes), when it is the value the merge would
 use, holds the description back until it is fixed there, and so does a PO Body HTML that no longer follows the brand
-template. A made in on the PO that is not a country the tool knows ("Itlay", "x") holds the product, and so does a
-`custom.made_in` and a template body Made in line that name two different countries: the description cannot know
-which is right. The Descriptions sheet keeps every value the merge needs in its "(as drafted)" columns (the Title,
-Type, Composition and Made in the description was drafted with, and the PO's own composition and made in at draft);
+template. A made in on the PO that is not a country the tool knows ("Itlay", "x") holds the product, named as that,
+never as a clear. The PO's two copies of made in, `custom.made_in` and the template body's Made in line, are each read
+against the one value the draft filled both from: `custom.made_in` changed alone is carried (one edit); cleared while
+the line still names a country, the line changed alone, or the two changed to different values, holds the product,
+naming both; both changed to one value is carried; `custom.made_in` empty at draft and still empty leaves the line as
+the source. The Descriptions sheet keeps every value the merge needs in its "(as drafted)" columns (the Title, Type,
+Composition and Made in the description was drafted with, the PO's own composition and made in at draft, the
+colourway bullet the draft wrote and the drafted description whole);
 a sheet without them writes no import (a WARN says to draft the PO again). The draft's Why already says where a
 description's composition or Made in differs from the PO's ("composition: cart ... says ..., used the OC line
 first"), in the Descriptions sheet and the Review row alike.
