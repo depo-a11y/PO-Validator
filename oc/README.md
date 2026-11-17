@@ -656,7 +656,9 @@ never as a clear. The PO's two copies of made in, `custom.made_in` and the templ
 against the one value the draft filled both from: `custom.made_in` changed alone is carried (one edit); cleared while
 the line still names a country, the line changed alone, or the two changed to different values, holds the product,
 naming both; both changed to one value is carried; `custom.made_in` empty at draft and still empty leaves the line as
-the source. The Descriptions sheet keeps every value the merge needs in its "(as drafted)" columns (the Title, Type,
+the source. A brand `body_html` with no `{made_in}` slot leaves the PO one copy, `custom.made_in`, read alone. A PO body
+that no longer follows the template holds the product with one reason naming the template and what it cannot read
+(composition, made in, or both). The Descriptions sheet keeps every value the merge needs in its "(as drafted)" columns (the Title, Type,
 Composition and Made in the description was drafted with, the PO's own composition and made in at draft, the
 colourway bullet the draft wrote and the drafted description whole);
 a sheet without them writes no import (a WARN says to draft the PO again). The draft's Why already says where a

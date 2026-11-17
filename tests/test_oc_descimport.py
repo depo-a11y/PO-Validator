@@ -430,6 +430,46 @@ def test_a_custom_made_in_empty_at_draft_and_still_reads_the_body_line(tmp_path)
     assert "<li>Made in Spain</li>" in by_code(tmp_path)[td.JACKET]
 
 
+def test_a_po_body_off_its_template_gives_one_reason_whatever_its_made_in():
+    code = "ZQ0006AB6P0006 900"
+    body = (f"<p>ACME STUDIO's Loop Cape in Black is a coat.</p>\n<ul>\n<li>Composition: 100% Wool</li>\n"
+            f"<li>Made in Italy</li>\n</ul><br><p>SKU: {code}</p>")
+    d = {"Title (as drafted)": "Loop Cape in Black", "Type (as drafted)": "MEN CLOTHING COATS",
+         "Composition (as drafted)": "100% Wool", "Made in (as drafted)": "Italy", "PO composition (as drafted)": "100% Wool",
+         "PO made in (as drafted)": "Italy", "Colourway (as drafted)": "Black colourway", "Description (as drafted)": body}
+    for meta in ("Italy", "Itlay", "-"):
+        row = {"Title": "Loop Cape in Black", "Type": "MEN CLOTHING COATS", "Vendor": "ACME STUDIO", poxlsx.MADE_IN: meta,
+               "Body HTML": "<p>All wool, made in a mill.</p>"}
+        assert descimport.reconcile(body, d, row, BRAND)[1] == [
+            f"the PO's Body HTML no longer follows the brand's template ({BRAND['body_html']}), so its composition and "
+            "made in cannot be read"], meta
+
+
+NO_MADE_IN_SLOT = ["<p>Composition: {composition}</p> <p>SKU: {code}</p>", "<p>{code}</p>"]
+
+
+@pytest.mark.parametrize("template", NO_MADE_IN_SLOT)
+@pytest.mark.parametrize("meta,made,why", [
+    (None, "Italy", None),   # untouched
+    ("PT", "Portugal", None),   # custom.made_in fixed
+    ("-", None, "the PO's made in was cleared, and the description still says 'Made in Italy'"),
+    ("Itlay", None, "the PO's made in 'Itlay' is not a country the tool knows: fix it there"),
+])
+def test_a_template_with_no_made_in_slot_reads_custom_made_in_alone(tmp_path, template, meta, made, why):
+    brand = dict(BRAND, body_html=template)
+    path, _ = reviewed(tmp_path, brand=brand)
+    if meta:
+        po_edit(path, td.JACKET, poxlsx.MADE_IN, lambda v: meta)
+    checks = run(tmp_path, path, brand)
+    detail = check(checks)["Detail"]
+    assert "Made in line" not in detail and "no longer follows" not in detail
+    if made:
+        assert f"<li>Made in {made}</li>" in by_code(tmp_path)[td.JACKET]   # written end to end
+    else:
+        assert td.JACKET not in by_code(tmp_path) and why in detail
+        assert ("cleared" in detail) == ("cleared" in why)   # an unknown country is never a clear
+
+
 def test_the_draft_fills_both_made_in_copies_from_one_value(tmp_path):
     """The single base ('PO made in (as drafted)') rests on this: draft.build writes custom.made_in and the template
     body's Made in line from one value, so at draft the two copies never differ."""
@@ -624,8 +664,13 @@ def test_a_po_that_cannot_be_read_or_a_type_with_no_item_noun_holds_a_descriptio
     assert descimport.reconcile(body, d, row, BRAND) == (body, [
         "the final Type 'MEN CLOTHING CAPES' gives the tool no item noun to check the intro's 'coat' against"])
     row.update(Type="MEN CLOTHING COATS", **{"Body HTML": "<p>All wool.</p>"})
-    assert descimport.reconcile(body, d, row, BRAND)[1] == [
-        "the PO's Body HTML no longer follows the brand's template, so its composition cannot be read"]
+    assert descimport.reconcile(body, d, row, BRAND)[1] == [   # one reason, and no made in line read as '-'
+        f"the PO's Body HTML no longer follows the brand's template ({BRAND['body_html']}), so its composition and "
+        "made in cannot be read"]
+    made_only = dict(BRAND, body_html="<p>Made in {made_in}</p> <p>SKU: {code}</p>")
+    assert descimport.reconcile(body, d, row, made_only)[1] == [
+        f"the PO's Body HTML no longer follows the brand's template ({made_only['body_html']}), so its made in cannot "
+        "be read"]
 
 
 def test_the_pos_values_are_read_through_the_brands_template():
@@ -805,6 +850,29 @@ def test_a_type_and_title_fixed_together_leave_a_drafted_intro_sentence_alone(tm
     run(tmp_path, path)
     assert by_code(tmp_path)[td.JACKET].startswith(
         "<p>ACME STUDIO's Orbit Field Jacket in Navy is a waxed bomber jacket. Its slate tone suits any coat.</p>")
+
+
+def test_an_article_the_item_swap_changes_does_not_make_the_intro_read():
+    drafted = INTRO_SLATE.format(" Its slate tone suits any coat.").replace("a waxed lightweight jacket", "a lightweight jacket")
+    now = drafted.replace("in Slate is a lightweight jacket.", "in Navy is an umbrella.")   # 'a' became 'an'
+    assert descimport.old_colour(now, "Orbit Field Jacket in Slate", "Orbit Field Jacket in Navy", drafted,
+                                 "lightweight jacket", "umbrella") == ""
+
+
+def test_a_one_sentence_intro_whose_adjective_is_a_dropped_colour_word_does_not_read():
+    drafted = INTRO_SLATE.format("").replace("Jacket in Slate is a waxed", "Jacket in Washed Slate is a washed")
+    now = drafted.replace("in Washed Slate is a washed lightweight jacket.", "in Slate is a washed bomber jacket.")
+    assert descimport.old_colour(now, "Orbit Field Jacket in Washed Slate", "Orbit Field Jacket in Slate", drafted,
+                                 "lightweight jacket", "bomber jacket") == ""
+
+
+@pytest.mark.parametrize("line,held", [("Slate-tone trims", True), ("Blue-slate piping", True), ("Slates", False)])
+def test_a_dropped_colour_word_in_a_hyphen_compound_holds(line, held):
+    drafted = INTRO_SLATE.format("")
+    now = drafted.replace("Jacket in Slate is", "Jacket in Navy is").replace("  <li>Zip fastening</li>",
+                                                                             f"  <li>{line}</li>")
+    got = descimport.old_colour(now, "Orbit Field Jacket in Slate", "Orbit Field Jacket in Navy", drafted)
+    assert ("names 'slate'" in got) == held
 
 
 def test_the_sheet_keeps_the_drafted_description_whole(tmp_path):

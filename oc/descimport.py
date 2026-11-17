@@ -185,11 +185,15 @@ def made_in_now(row, values, base, brand):
     - only custom.made_in changed: it is carried, unless it was cleared while the line still names a country;
     - only the line changed, or both to different values: the two disagree, and which is right cannot be told;
     - both changed to one value: it is carried.
+    A brand template with no {made_in} slot leaves the PO one copy, custom.made_in: changed or not, it is the value;
+    cleared, the PO gives none, and merge's cleared rule decides.
     Only a country the tool knows is written; any other value is named as that, never as a clear."""
     meta = place(None if blank(row.get(MADE_IN)) else row.get(MADE_IN), brand)
     line, was = place((values or {}).get("made_in"), brand), place(base, brand)
     same = lambda a, b: a.casefold() == b.casefold()
-    if not was and not meta:
+    if "made_in" not in (values or {}):
+        now = meta
+    elif not was and not meta:
         now = line
     elif same(line, was) and not meta:
         return None, [f"the PO's custom.made_in was cleared, its Body HTML Made in line still says '{line}': make "
@@ -353,7 +357,7 @@ def old_colour(body, drafted, final, drafted_body, old_item=None, new_item=None)
     read += [x for x in lines if x not in was_lines and not re.match(r"(?:Composition:|Made in\b)", x)
              and not COLOURWAY.fullmatch(f"<li>{_e(x)}</li>")]
     for x in read:
-        hit = [w for w in sorted(gone) if re.search(rf"(?<![\w-]){re.escape(w)}(?![\w-])",
+        hit = [w for w in sorted(gone) if re.search(rf"(?<!\w){re.escape(w)}(?!\w)",
                                                     x.replace(describe.squash(final), " "), re.I)]
         if hit:
             return (f"its '{x}' names '{hit[0]}', a colour word of the drafted title that the final title drops: "
@@ -377,8 +381,10 @@ def reconcile(body, d, row, brand):
                    f"'{old}' against")
     body = swap_item(body, vendor, title, old, new)
     values = template_values(row.get("Body HTML"), brand["body_html"])
-    if values is None and "{composition}" in brand["body_html"]:
-        out.append("the PO's Body HTML no longer follows the brand's template, so its composition cannot be read")
+    slots = [w for k, w in (("composition", "composition"), ("made_in", "made in")) if f"{{{k}}}" in brand["body_html"]]
+    if values is None and slots:
+        out.append(f"the PO's Body HTML no longer follows the brand's template ({brand['body_html']}), so its "
+                   f"{' and '.join(slots)} cannot be read")
     elif values is not None:
         raw, base = _text(values.get("composition")), d.get("PO composition (as drafted)")
         comp, why = po_composition(values, brand)
@@ -396,9 +402,10 @@ def reconcile(body, d, row, brand):
         if drafted and after and not same_text(drafted, after.group(1)):   # changed, by the merge or by hand
             out += [f"its {where} '{t}' comes from the drafted composition, which changed: remove it or make it agree"
                     for where, t in stale_bullets(body, drafted, after.group(1), new or "")]
-    made, why = made_in_now(row, values, d.get("PO made in (as drafted)"), brand)
+    unread = values is None and "made in" in slots   # held by the one reason above, no second
+    made, why = (None, []) if unread else made_in_now(row, values, d.get("PO made in (as drafted)"), brand)
     out += why
-    if not why:
+    if not why and not unread:
         same = lambda a, b: place(a, brand).casefold() == place(b, brand).casefold()
         body, how, said = merge(body, MADE_IN_LINE, d.get("Made in (as drafted)"),
                                 place(d.get("PO made in (as drafted)"), brand), _text(made), made, same, "Made in ",
