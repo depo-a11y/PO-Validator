@@ -506,7 +506,6 @@ def test_switching_brand_clears_the_season(tmp_path, monkeypatch):
 
 def test_a_new_brand_file_clears_the_season(tmp_path, monkeypatch):
     at = _page(tmp_path, monkeypatch)
-    at.run()   # the brand box is redrawn under the brand chosen first (slice 1's index from the session)
     (box,) = [s for s in at.selectbox if s.label == "Brand"]
     box.select("Upload a brand .yaml file").run()
     at.file_uploader(key="w_brand").set_value(("a.yaml", PAGE_YAML.encode(), "text/yaml")).run()

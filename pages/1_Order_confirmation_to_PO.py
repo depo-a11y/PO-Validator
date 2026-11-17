@@ -258,8 +258,12 @@ with col1:
     saved, hidden_why, offer_login = secret_brands()
     opts = brand_options(saved)
     labels = list(opts)
-    # No brand until one is picked: a default would be the alphabetically first config, a brand nobody chose.
-    choice = st.selectbox("Brand", labels, index=labels.index(S["brand_choice"]) if S.get("brand_choice") in labels else None,
+    # No brand until one is picked: a default would be the alphabetically first config, a brand nobody chose. The box
+    # keeps its pick under its own key; an index from the session gave it a new identity after each pick, so a switch
+    # took two picks. Streamlit drops a keyed box's state when the page is left, so the brand comes back from S.
+    if S.get("brand_choice"):
+        S.setdefault("w_brand_box", S["brand_choice"])
+    choice = st.selectbox("Brand", labels, index=None, key="w_brand_box",
                           placeholder="Choose a brand",
                           help="The brand config holds the SKU prefixes, cost rule and past POs. The season is "
                                "picked below, for each order.")

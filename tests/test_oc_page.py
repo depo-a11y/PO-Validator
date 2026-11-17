@@ -9,6 +9,8 @@ import pandas as pd
 import pytest
 from streamlit.testing.v1 import AppTest
 
+from oc import service
+
 ROOT = Path(__file__).resolve().parent.parent
 PAGE = ROOT / "pages" / "1_Order_confirmation_to_PO.py"
 
@@ -227,3 +229,72 @@ def test_the_brand_box_starts_with_no_brand_and_build_waits_for_one(tmp_path, mo
         assert not b.disabled, label
     at.run()
     assert [s for s in at.selectbox if s.label == "Brand"][0].value == "zzz (on this computer)"
+
+
+# ---- a brand switch takes on the first pick (slice 2b) ----------------------------------------------------------------
+# Slice 1 restored the box through index=, from the session. That gave the box a new identity on the run after each
+# pick, so the next pick landed on the box that run replaced: a switch took two picks, and the page kept the old brand.
+def _otb(vendor):
+    return BRAND_YAML.replace("vendor: X", f"vendor: {vendor}") + "adapter: otb\noc_label: MM\n"
+
+
+def _brands(tmp_path, monkeypatch):
+    d = tmp_path / "brands"
+    d.mkdir()
+    for name, vendor in (("aaa", "FIRST"), ("bbb", "SECOND"), ("ccc", "THIRD")):
+        (d / f"{name}.local.yaml").write_text(_otb(vendor))
+    monkeypatch.setenv("OC_BRAND_DIR", str(d))
+    return d
+
+
+def _brand_now(at):
+    (box,) = [s for s in at.selectbox if s.label == "Brand"]
+    return box.value, [c.value for c in at.caption if c.value.startswith("Brand config:")]
+
+
+def test_a_brand_switch_takes_on_the_first_pick_and_the_draft_is_built_for_it(tmp_path, monkeypatch):
+    seen = []
+    monkeypatch.setattr(service, "draft", lambda oc, cat, cfg, **kw: seen.append(cfg["vendor"]) or
+                        (None, pd.DataFrame(), [dict(Check="A gate", Result="FAIL", Detail="x")]))
+    d = _brands(tmp_path, monkeypatch)
+    at = AppTest.from_file(str(PAGE), default_timeout=60)
+    at.run()
+    at.file_uploader(key="w_catalog").set_value(CATALOG)
+    at.file_uploader(key="w_oc").set_value(("oc.pdf", b"%PDF-1.4", "application/pdf")).run()
+    for name, vendor in (("aaa", "FIRST"), ("bbb", "SECOND"), ("aaa", "FIRST"), ("ccc", "THIRD")):
+        _choose(at, f"{name} (on this computer)")
+        assert _brand_now(at) == (f"{name} (on this computer)", [f"Brand config: {d / f'{name}.local.yaml'}. {vendor}."])
+    pick_season(at)
+    (build,) = [b for b in at.button if b.label == "Build draft PO"]
+    build.click().run()
+    assert not at.exception and seen == ["THIRD"]
+
+
+def test_the_upload_choice_shares_the_box_and_takes_on_the_first_pick_both_ways(tmp_path, monkeypatch):
+    d = _brands(tmp_path, monkeypatch)
+    at = AppTest.from_file(str(PAGE), default_timeout=60)
+    at.run()
+    _choose(at)
+    _choose(at, "Upload a brand .yaml file")
+    assert _brand_now(at) == ("Upload a brand .yaml file", [])
+    at.file_uploader(key="w_brand").set_value(("up.yaml", _otb("UPLOADED").encode(), "text/yaml")).run()
+    assert _brand_now(at)[1] == ["Brand config: uploaded file up.yaml. UPLOADED."]
+    _choose(at, "bbb (on this computer)")
+    assert _brand_now(at) == ("bbb (on this computer)", [f"Brand config: {d / 'bbb.local.yaml'}. SECOND."])
+    _choose(at, "Upload a brand .yaml file")
+    assert _brand_now(at) == ("Upload a brand .yaml file", ["Brand config: uploaded file up.yaml. UPLOADED."])
+
+
+def test_the_brand_picked_is_still_picked_after_leaving_the_page(tmp_path, monkeypatch):
+    """Streamlit drops a keyed box's own state when its page is left; the brand comes back from the session."""
+    d = _brands(tmp_path, monkeypatch)
+    at = AppTest.from_file(str(ROOT / "app.py"), default_timeout=60)
+    at.run()
+    at.switch_page("pages/1_Order_confirmation_to_PO.py").run()
+    assert _brand_now(at) == (None, [])
+    _choose(at, "bbb (on this computer)")
+    at.switch_page("app.py").run()
+    assert not at.exception and not [s for s in at.selectbox if s.label == "Brand"]
+    at.switch_page("pages/1_Order_confirmation_to_PO.py").run()
+    assert not at.exception
+    assert _brand_now(at) == ("bbb (on this computer)", [f"Brand config: {d / 'bbb.local.yaml'}. SECOND."])

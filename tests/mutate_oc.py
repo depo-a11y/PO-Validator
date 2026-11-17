@@ -1505,7 +1505,7 @@ MUTANTS += [   # review 2026-11-16-buyer-2 F7: a NEW title that lost its colour 
 
 
 MUTANTS += [   # the brand box starts with no brand chosen; Build and Make upload files wait for one
-    ("pages/1_Order_confirmation_to_PO.py", 'S.get("brand_choice") in labels else None,', 'S.get("brand_choice") in labels else 0,',
+    ("pages/1_Order_confirmation_to_PO.py", 'labels, index=None, key="w_brand_box",', 'labels, index=0, key="w_brand_box",',
      "page: the alphabetically first brand config pre-selected"),
     ("pages/1_Order_confirmation_to_PO.py", "    kind, name, value = opts[choice] if choice is not None else (None, None, None)",
      "    kind, name, value = opts[choice]", "page: no brand chosen crashes the page"),
@@ -1746,6 +1746,21 @@ MUTANTS += [   # review 2026-11-17-buyer-3: a season printed in lower or mixed c
      "season: a lower-case live season does not sort"),
     ("oc/draft.py", '    word = str(ptype or "").split(" ")[0].upper()', '    word = str(ptype or "").split(" ")[0]',
      "draft: a mixed-case Type's gender not read"),
+]
+
+
+MUTANTS += [   # slice 2b: a brand switch takes on the first pick, and the brand picked survives leaving the page
+    ("pages/1_Order_confirmation_to_PO.py", '    choice = st.selectbox("Brand", labels, index=None, key="w_brand_box",\n',
+     '    choice = st.selectbox("Brand", labels, index=labels.index(S["brand_choice"]) if S.get("brand_choice") in '
+     'labels else None,\n', "page: the brand box restored through an index from the session (a switch takes two picks)"),
+    ("pages/1_Order_confirmation_to_PO.py", 'labels, index=None, key="w_brand_box",', "labels, index=None,",
+     "page: the brand box has no key of its own (leaving the page drops the brand)"),
+    ("pages/1_Order_confirmation_to_PO.py", '        S.setdefault("w_brand_box", S["brand_choice"])',
+     '        S["w_brand_box"] = S["brand_choice"]', "page: the brand from the session overrides each new pick"),
+    ("pages/1_Order_confirmation_to_PO.py", '    if S.get("brand_choice"):\n        S.setdefault(',
+     "    if False:\n        S.setdefault(", "page: leaving the page and coming back drops the brand picked"),
+    ("pages/1_Order_confirmation_to_PO.py", '    if S.get("brand_choice"):\n        S.setdefault(',
+     "    if True:\n        S.setdefault(", "page: the brand restored before one was ever picked (the first load fails)"),
 ]
 
 
