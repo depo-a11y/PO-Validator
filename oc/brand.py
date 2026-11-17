@@ -77,6 +77,11 @@ prefix ends in its half's season letters (S for S/S; F or W for F/W). A half wit
 live, check" (from the brand's live SKUs) or says "not live, check" (kept from a hand-made PO, with no live SKUs of
 that half to derive from). Every new SKU of that half is then amber under that mark, with the sentence in its Why and
 in the draft's checks. A half with no sentence is a prefix the config sets by hand ("rule").
+
+`colour_vote_bar` (default 0.6) is the share of the live products a colour vote saw (resolve.Resolver._colour_votes:
+a NEW product's colour words and colour family) that its winner needs, blank products counted against it. A brand
+whose catalog names one colour code in many colours raises it (0.8: 8 of 10). It is above 0.5, or two colours each on
+half the products would both pass and the catalog's order would pick, and at most 1; anything else is refused at load.
 """
 import copy
 import os
@@ -97,6 +102,7 @@ DEFAULTS = dict(
     body_html="<p>Composition: {composition}</p> <p>Made in {made_in}</p> <p>SKU: {code}</p>",
     unknown="-", womens_prefix="Womens ", history=[], product_class_types={},
     colour_families={}, default_gender="MEN", country_names={},
+    colour_vote_bar=0.6,
 )
 
 REQUIRED = ["vendor", "adapter", "sku_prefix", "cost_multiplier",
@@ -455,7 +461,8 @@ def _reader_keys(cfg, data, source):
 
 def _numbers(cfg, source):
     """Numbers from a config, which can be an upload: checked so none can blow up memory or time. sku_digits is a
-    format width (a huge one builds a huge string); the money rates must be ordinary positive numbers."""
+    format width (a huge one builds a huge string); the money rates must be ordinary positive numbers, and the colour
+    vote bar a share above a half."""
     digits = cfg.get("sku_digits")
     if isinstance(digits, bool) or not isinstance(digits, int) or not 1 <= digits <= 12:
         raise BrandError(f"{source}: sku_digits is how many digits follow the SKU prefix, a whole number from 1 to "
@@ -464,6 +471,10 @@ def _numbers(cfg, source):
         v = cfg.get(key)
         if isinstance(v, bool) or not isinstance(v, (int, float)) or not 0 < v < 20:
             raise BrandError(f"{source}: {key} is a number above 0 and below 20, got {v!r}")
+    bar = cfg.get("colour_vote_bar")
+    if isinstance(bar, bool) or not isinstance(bar, (int, float)) or not 0.5 < bar <= 1:
+        raise BrandError(f"{source}: colour_vote_bar is the share of the live products a colour vote saw that its "
+                         f"winner needs, a number above 0.5 and at most 1 (0.8 is 80%), got {bar!r}")
     cfg.pop("price_round", None)   # retail is never fitted or rounded since 2026-11-12; an old config's key is unused
 
 

@@ -12,8 +12,9 @@ Invented codes throughout.
 import os
 
 import pytest
+import yaml
 
-from oc import catalog as catm, finalize, resolve, service
+from oc import brand as brandm, catalog as catm, finalize, resolve, service
 from oc.adapters import otb
 from test_oc_tool import BRAND as TOOL_BRAND, _finalize_po, catalog_path  # noqa: F401
 from test_oc_agent import Fake, base, build, _line, BRAND, key, one, past_po, sent_evidence, write_catalog  # noqa: F401
@@ -233,3 +234,74 @@ def test_finalize_fails_a_new_title_that_lost_its_colour_words(catalog_path, tmp
     if fails:
         assert f"'{title.strip()}'" in check["Detail"] and service.blocking([check]) == [check]
         assert not any(os.path.exists(prefix + n) for n in finalize.OUTPUTS)
+
+
+# ---- the bar is the brand's own: colour_vote_bar, 0.6 unless the config says (slice 2c) ---------------------------
+def _config(**kw):
+    """A brand config loaded as the page loads one, with the colour code after the space."""
+    return brandm.from_mapping(dict({k: v for k, v in BRAND.items() if not k.startswith("_")},
+                                    join_key="{style} {colour}", **kw), "test config")
+
+
+def _shared(black, navy=0, blank=0):
+    """Live products of other styles sharing colour code 001: `black` BLACK, `navy` NAVY, `blank` with no colour."""
+    return ([_live(str(20 + i), f"ZXSB0000{i} 001") for i in range(black)]
+            + [_live(str(40 + i), f"ZXSC0000{i} 001", title=f"Field Jacket {40 + i} in Navy", colour="NAVY")
+               for i in range(navy)]
+            + [_blank(str(60 + i), f"ZXSD0000{i} 001") for i in range(blank)])
+
+
+def _resolver(tmp_path, live, **kw):
+    return resolve.Resolver(_config(**kw), catm.load(write_catalog(tmp_path, live)), past_po(tmp_path), base._tags())
+
+
+def test_a_config_with_no_colour_vote_bar_loads_sixty_percent(tmp_path):
+    assert _config()["colour_vote_bar"] == 0.6 and _config(colour_vote_bar=0.8)["colour_vote_bar"] == 0.8
+    path = tmp_path / "zz.local.yaml"
+    path.write_text(yaml.safe_dump(dict({k: v for k, v in BRAND.items() if not k.startswith("_")})) +
+                    "colour_vote_bar: 0.8\n")
+    assert brandm.load(str(path))["colour_vote_bar"] == 0.8
+
+
+@pytest.mark.parametrize("bar,voted", [(None, True), (0.6, True), (0.8, False)])
+def test_a_brand_at_eighty_percent_refuses_a_seventy_percent_winner_that_sixty_accepts(tmp_path, bar, voted):
+    review = _draft(tmp_path, "{style} {colour}", _line(1, "ZXSA00001", "", "001", "JACKET", {"M": 1}, 100.0),
+                    _shared(7, navy=3), **({} if bar is None else {"colour_vote_bar": bar}))
+    fam, title = _colour(review, "ZXSA00001 001")
+    if voted:
+        assert (fam["Value"], fam["Source"], fam["Colour"]) == ("BLACK", "catalog", resolve.GREEN)
+        assert fam["Why"] == "same colour code 001 is BLACK on 7 of 10 product(s)" and "Black" in title["Value"]
+    else:
+        assert fam["Colour"] == resolve.RED and fam["Value"] == "" and "Black" not in title["Value"]
+
+
+@pytest.mark.parametrize("bar,black,navy", [(None, 3, 2), (0.8, 4, 1), (1, 5, 0)])
+def test_a_winner_at_exactly_the_bar_is_voted(tmp_path, bar, black, navy):
+    R = _resolver(tmp_path, _shared(black, navy=navy), **({} if bar is None else {"colour_vote_bar": bar}))
+    assert R.colour_family("ZXSA00001 001", "") == (
+        "BLACK", "catalog", f"same colour code 001 is BLACK on {black} of {black + navy} product(s)")
+
+
+@pytest.mark.parametrize("bar", [0.5, 0.4, 0, -0.8, 1.01, 80, True, "0.8", "80%", None, [0.8]])
+def test_a_colour_vote_bar_out_of_range_is_refused_at_load(bar):
+    with pytest.raises(brandm.BrandError, match=r"colour_vote_bar is .* above 0\.5 and at most 1 .*, got "):
+        _config(colour_vote_bar=bar)
+
+
+@pytest.mark.parametrize("bar", [0.51, 0.8, 1, 1.0])
+def test_a_colour_vote_bar_in_range_loads(bar):
+    assert _config(colour_vote_bar=bar)["colour_vote_bar"] == bar
+
+
+@pytest.mark.parametrize("bar,named,shown", [(None, 2, "60%"), (0.8, 7, "80%"), (0.675, 6, "67.5%")])
+def test_the_why_states_the_brands_own_bar(tmp_path, bar, named, shown):
+    R = _resolver(tmp_path, _shared(named, blank=3), **({} if bar is None else {"colour_vote_bar": bar}))
+    assert R.colour_name("ZXSA00001 001") == (
+        "001", "guess", f"colour code 001: no name on {shown} of its {named + 3} catalog products (3 untitled); "
+                        "the OC has no colour description")
+
+
+def test_the_example_config_documents_the_bar_with_a_line_that_loads():
+    text = open(os.path.join(os.path.dirname(brandm.__file__), "brands", "example.yaml")).read()
+    (line,) = [x for x in text.splitlines() if x.startswith("# colour_vote_bar:")]
+    assert brandm.from_text(text + line[2:] + "\n", "example.yaml")["colour_vote_bar"] == 0.8

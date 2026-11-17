@@ -117,11 +117,15 @@ now off by Colwyn's rule of 2026-11-12.
   (`resolve.vote_key`): `{style} {fabric} {colour}` compares it inside the colour code; `{style}{fabric} {colour}`
   reads it after the style only when the reader's style has one length (`otb`: 9, Margiela and MM6), and not for
   a line whose style is another length. That join_key read by any other reader (Diesel, Lemaire and Stone Island
-  use `sheet`) has no fabric, nor has any other join_key: those vote only as "same colour code" (2+ products, 60%
-  agree). The AI title evidence (`oc/agent/titles.py`) reads codes the same way. A winner needs 60% of every
-  product its tier saw, the same fabric's included, and a product with no title colour or colour family counts
-  against it ("2 of 5, 3 blank" is no vote; the Why names the blank ones). A same fabric that disagrees is no
-  vote, never overruled by other fabrics; one holding only blanks leaves the vote to them.
+  use `sheet`) has no fabric, nor has any other join_key: those vote only as "same colour code" (2+ products that
+  clear the bar below). The AI title evidence (`oc/agent/titles.py`) reads codes the same way. A winner needs the
+  brand's `colour_vote_bar` of every product its tier saw (default 0.6, 60%), the same fabric's included, and a
+  product with no title colour or colour family counts against it ("2 of 5, 3 blank" is no vote; the Why names the
+  blank ones, and a colour name left unvoted by them states the brand's bar). A same fabric that disagrees is no
+  vote, never overruled by other fabrics; one holding only blanks leaves the vote to them. A brand whose catalog
+  gives one colour code many colours sets a higher bar, e.g. `colour_vote_bar: 0.8` (8 of 10): fewer wrong greens,
+  more cells left for a person. The bar is above 0.5 (at 0.5 two colours on half the products each would both pass)
+  and at most 1; anything else, `80` or `80%` included, is refused when the config loads.
 - Catalog: a Matrixify Products export (CSV, UTF-8) for the brand's vendors, all statuses, with variants,
   `Variant Cost`, `Variant Inventory Qty`, `Variant Country of Origin` and metafields in `my_fields`, `custom` and
   `global`. Required columns are `catalog.REQUIRED`, including `custom.product_season` (the rollback restores it)

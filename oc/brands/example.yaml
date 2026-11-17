@@ -47,6 +47,8 @@ oc_label: EX                   # the label, for a reader that serves several: ot
                                # brand-wide majority (90% of the live products with that size, at least 10)
 # heel_codes: true             # NEW titles write a heel height as the brand's H-code (Tabi Ballerina H30)
 # colour_spelling: {Antracite: Anthracite}   # a cart colour word written the brand's way on NEW titles
+# colour_vote_bar: 0.8         # the share of the live products sharing a NEW code's colour code that a colour vote's
+                               # winner needs, blanks counted against it (default 0.6); above 0.5, at most 1
                                # no season: the colleague picks the season of each order on the page (--season)
 sku_prefix:                    # per season half, the letters before the picked season's two digits:
   S/S: EXSS                    # EXSS27001, EXSS27002, ... in an S/S 27 run, after the highest existing one

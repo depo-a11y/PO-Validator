@@ -1470,8 +1470,8 @@ MUTANTS += [   # review 2026-11-16-buyer-2 F4: a vote counts every product it sa
     ("oc/resolve.py", '            tot, blank = sum(votes.values()), votes.pop("", 0)',
      '            blank, tot = votes.pop("", 0), sum(votes.values())',
      "colour vote: blank products leave the denominator ('2 of 2' where 2 of 5 fails)"),
-    ("oc/resolve.py", "                if n >= least and n / tot >= 0.6:",
-     '                if n >= least and (how == "same fabric+colour" or n / tot >= 0.6):',
+    ("oc/resolve.py", "                if n >= least and n / tot >= self.bar:",
+     '                if n >= least and (how == "same fabric+colour" or n / tot >= self.bar):',
      "colour vote: the same fabric has no share bar (1 BLACK and 1 DUST is green)"),
     ("oc/resolve.py", '(cross, 2, "same colour code")', '(cross, 1, "same colour code")',
      "colour vote: one product of another fabric or style decides"),
@@ -1484,8 +1484,8 @@ MUTANTS += [   # review 2026-11-16-buyer-2 F4: a vote counts every product it sa
      "colour vote: products with no colour at all reported as no products"),
     ("oc/resolve.py", '    return f"{n} of {tot} product(s)" + (f", {blank} blank" if blank else "")',
      '    return f"{n} of {tot} product(s)"', "colour vote: the blank products not named in the Why"),
-    ("oc/resolve.py", '        if blank:\n            why = f"colour code {colour}: no name on 60%',
-     '        if False:\n            why = f"colour code {colour}: no name on 60%',
+    ("oc/resolve.py", '        if blank:\n            why = f"colour code {colour}: no name on {self.bar',
+     '        if False:\n            why = f"colour code {colour}: no name on {self.bar',
      "colour name: a vote left short by blank products worded as names that disagree"),
 ]
 
@@ -1761,6 +1761,32 @@ MUTANTS += [   # slice 2b: a brand switch takes on the first pick, and the brand
      "    if False:\n        S.setdefault(", "page: leaving the page and coming back drops the brand picked"),
     ("pages/1_Order_confirmation_to_PO.py", '    if S.get("brand_choice"):\n        S.setdefault(',
      "    if True:\n        S.setdefault(", "page: the brand restored before one was ever picked (the first load fails)"),
+]
+
+
+MUTANTS += [   # slice 2c: the colour-vote bar is the brand's own (colour_vote_bar, default 0.6)
+    ("oc/brand.py", "    colour_vote_bar=0.6,\n", "    colour_vote_bar=0.8,\n", "bar: the default is not 60%"),
+    ("oc/brand.py", "    colour_vote_bar=0.6,\n", "", "bar: no default (the key unknown, every config refused)"),
+    ("oc/brand.py", "    if isinstance(bar, bool) or not isinstance(bar, (int, float)) or not 0.5 < bar <= 1:",
+     "    if False:", "bar: any value loads"),
+    ("oc/brand.py", "if isinstance(bar, bool) or not isinstance(bar, (int, float)) or not 0.5 < bar",
+     "if not isinstance(bar, (int, float)) or not 0.5 < bar", "bar: true loads as a bar of 1"),
+    ("oc/brand.py", "or not isinstance(bar, (int, float)) or not 0.5 < bar", "or not 0.5 < bar",
+     "bar: a text or empty bar crashes the load instead of being refused"),
+    ("oc/brand.py", "or not 0.5 < bar <= 1:", "or not 0 < bar <= 1:", "bar: 0.5 or below loads (a tie passes)"),
+    ("oc/brand.py", "or not 0.5 < bar <= 1:", "or not 0.5 <= bar <= 1:", "bar: exactly 0.5 loads (a tie passes)"),
+    ("oc/brand.py", "or not 0.5 < bar <= 1:", "or not 0.5 < bar < 1:", "bar: 1 (every product) refused"),
+    ("oc/brand.py", "or not 0.5 < bar <= 1:", "or not 0.5 < bar <= 100:", "bar: a percent (80) loads as a bar"),
+    ("oc/resolve.py", '        self.bar = brand.get("colour_vote_bar", DEFAULTS["colour_vote_bar"])',
+     '        self.bar = DEFAULTS["colour_vote_bar"]', "colour vote: the brand's bar never read (always 60%)"),
+    ("oc/resolve.py", '        self.bar = brand.get("colour_vote_bar", DEFAULTS["colour_vote_bar"])',
+     '        self.bar = brand.get("colour_vote_bar", 0.8)', "colour vote: a brand with no key gets another bar"),
+    ("oc/resolve.py", "n / tot >= self.bar:", "n / tot >= 0.6:", "colour vote: the hard-coded 60% where the bar is"),
+    ("oc/resolve.py", "n / tot >= self.bar:", "n / tot > self.bar:", "colour vote: a winner exactly at the bar refused"),
+    ("oc/resolve.py", "no name on {self.bar * 100:g}% of its", "no name on 60% of its",
+     "colour name: the Why states 60% whatever the brand's bar"),
+    ("oc/resolve.py", "no name on {self.bar * 100:g}% of its", "no name on {self.bar:.0%} of its",
+     "colour name: the Why rounds the bar to a whole percent (67.5% read 68%)"),
 ]
 
 

@@ -18,7 +18,7 @@ import collections
 import html
 import re
 
-from .brand import DEFAULT_JOIN_KEY, DERIVED, NOT_LIVE, fill_text, prefix_gender, prefix_mark, sku_prefix
+from .brand import DEFAULT_JOIN_KEY, DEFAULTS, DERIVED, NOT_LIVE, fill_text, prefix_gender, prefix_mark, sku_prefix
 from .cart import style_title
 from .util import cost_currency, iso_currency, norm_code, norm_size, sort_sizes, size_key, title_colour, slug
 
@@ -101,6 +101,7 @@ class Resolver:
         self.used_skus = set()
         self.prefixes = collections.Counter()   # (prefix, gender) -> new SKUs drafted, for the draft's check
         self.vote_key = vote_key(brand)
+        self.bar = brand.get("colour_vote_bar", DEFAULTS["colour_vote_bar"])   # the share a colour vote's winner needs
 
     # ---- siblings ---------------------------------------------------------
     def _rank(self, ps):
@@ -151,9 +152,9 @@ class Resolver:
         join_key, or none printed) gets no vote: every colour-less live code would "share" it.
 
         (value, n, tot, how, blank). Each tier counts every product it saw, a blank one (no title colour, no colour
-        family) against the winner: the winner needs >= 60% of them, in the same fabric too, so "2 of 5, 3 blank"
-        is no vote. A tier holding only blanks says nothing, and the next one is asked. A same-fabric tier whose
-        products disagree is no vote, never overruled by other fabrics.
+        family) against the winner: the winner needs the brand's colour_vote_bar of them (default 0.6, 60%), in the
+        same fabric too, so "2 of 5, 3 blank" is no vote. A tier holding only blanks says nothing, and the next one
+        is asked. A same-fabric tier whose products disagree is no vote, never overruled by other fabrics.
         """
         _, body, colour = split_code(code)
         line = self.oc.get(code)
@@ -174,7 +175,7 @@ class Resolver:
             seen += tot
             if votes:
                 v, n = votes.most_common(1)[0]
-                if n >= least and n / tot >= 0.6:
+                if n >= least and n / tot >= self.bar:
                     return v, n, tot, how, blank
                 return None, 0, tot, None, blank
         return None, 0, seen, None, seen
@@ -203,7 +204,8 @@ class Resolver:
         why = f"colour code {colour} not in the catalog" if not tot else \
             f"colour code {colour} names disagree across {tot} catalog products"
         if blank:
-            why = f"colour code {colour}: no name on 60% of its {tot} catalog products ({blank} untitled)"
+            why = f"colour code {colour}: no name on {self.bar * 100:g}% of its {tot} catalog products " \
+                f"({blank} untitled)"
         if not colour:
             why = f"{norm_code(code)} carries no colour code (join_key {self.b.get('join_key') or DEFAULT_JOIN_KEY})"
         return colour, "guess", why + "; the OC has no colour description"
