@@ -1767,6 +1767,8 @@ MUTANTS += [   # slice 2b: a brand switch takes on the first pick, and the brand
 MUTANTS += [   # slice 2c: the colour-vote bar is the brand's own (colour_vote_bar, default 0.6)
     ("oc/brand.py", "    colour_vote_bar=0.6,\n", "    colour_vote_bar=0.8,\n", "bar: the default is not 60%"),
     ("oc/brand.py", "    colour_vote_bar=0.6,\n", "", "bar: no default (the key unknown, every config refused)"),
+    ("oc/brand.py", '    bar = cfg.get("colour_vote_bar")\n', "    bar = 0.6\n",
+     "bar: the load check reads a fixed 0.6, not the config's value"),
     ("oc/brand.py", "    if isinstance(bar, bool) or not isinstance(bar, (int, float)) or not 0.5 < bar <= 1:",
      "    if False:", "bar: any value loads"),
     ("oc/brand.py", "if isinstance(bar, bool) or not isinstance(bar, (int, float)) or not 0.5 < bar",
