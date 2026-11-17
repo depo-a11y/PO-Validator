@@ -1832,6 +1832,18 @@ MUTANTS += [   # review 2026-11-17-buyer-11: a vote the brand's own bar refuses 
      "colour family: a keyword family's Why leaves out the bar's refusal"),
     ("oc/resolve.py", "no colour family for '{colour_name}'\" + note", "no colour family for '{colour_name}'\"",
      "colour family: no family, and the bar's refusal not named"),
+    ("oc/resolve.py", 'DEFAULTS["colour_vote_bar"]:\n            return ""\n',
+     'DEFAULTS["colour_vote_bar"]:\n            return "below the bar"\n',
+     "bar refusal: a refusal the brand's bar did not make worded as one"),
+    ("oc/resolve.py", '        v, n, tot, how, blank, short = self._colour_votes(code, "title_colour")',
+     '        v, n, tot, how, blank, short = self._colour_votes(code, "colour_family")',
+     "colour name: the title colour voted from colour families"),
+    ("oc/resolve.py", '        v, n, tot, how, blank, short = self._colour_votes(code, "colour_family")',
+     '        v, n, tot, how, blank, short = self._colour_votes(code, "title_colour")',
+     "colour family: voted from title colours"),
+    ("oc/resolve.py", '            v, n, tot, how, blank, _ = self._colour_votes(code, "title_colour")',
+     "            v, n, tot, how, blank, _ = None, 0, 0, None, 0, None",
+     "colour name: a cart colour its same fabric agrees with is never green"),
 ]
 
 
