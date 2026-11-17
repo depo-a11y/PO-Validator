@@ -2313,7 +2313,7 @@ MUTANTS += [   # review case 2026-11-16-buyer-10 (flagged), round 9: colourway, 
     (X, '    elif same(meta, was) or not same(meta, line):',
      '    elif False:',
      "B: custom.made_in and the body's Made in line disagreeing ignored"),
-    (X, '    stale = old_colour(body, d.get("Title (as drafted)"), title, d.get("Description (as drafted)"))',
+    (X, '    stale = old_colour(body, d.get("Title (as drafted)"), title, d.get("Description (as drafted)"), old, new)',
      '    stale = ""',
      'B: the drafted colour left elsewhere in the text written'),
     (X, '    if unknown:',
@@ -2364,6 +2364,12 @@ MUTANTS += [   # round 10 (case 2026-11-17-buyer-5): made in by the copy review 
     (X, '            + [f"{_text(bullet.group(1))} colourway" if bullet else None, body])',
      '            + [f"{_text(bullet.group(1))} colourway" if bullet else None, None])',
      'B: the drafted description not kept at draft'),
+]
+
+MUTANTS += [   # round 10b: an intro compared with the tool's own swaps undone (GM)
+    (X, '    adj = _adjective(first, item) if item else None',
+     '    adj = None',
+     'B: the intro compared without undoing the item-noun swap'),
 ]
 
 

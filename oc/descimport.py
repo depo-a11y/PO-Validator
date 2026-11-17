@@ -312,17 +312,31 @@ def _after_composition(body, li):
     return body[:comp.end()] + "\n" + li + body[comp.end():] if comp else _insert(body, li, True)
 
 
-def _parts(body, title):
-    """(the intro after its title, the list's lines, the rest) of a description, as text."""
+def _core(intro, title, item):
+    """An intro with the tool's own swaps undone: its title, and in its first sentence the article and the item noun
+    (swap_title, swap_item), so the drafted intro and the same intro after review fixed the title or the Type read
+    alike, and only a hand edit tells them apart."""
+    t = intro.replace(describe.squash(title), " ", 1)
+    head, sep, rest = t.partition(" is ")
+    if not sep:
+        return t
+    first, dot, tail = rest.partition(". ")
+    first = re.sub(r"^an? ", "", first.rstrip("."))
+    adj = _adjective(first, item) if item else None
+    return head + sep + (first if adj is None else adj) + dot + tail
+
+
+def _parts(body, title, item):
+    """(the intro, as text; the intro with the tool's swaps undone; the list's lines; the rest) of a description."""
     body = str(body or "")
     intro = INTRO.match(body)
     lines = [_text(x) for x in re.findall(r"<li>(.*?)</li>", body, re.S)]
     rest = re.sub(r"<li>.*?</li>", " ", body[intro.end():] if intro else body, flags=re.S)
-    return (_text(intro.group(1)).replace(describe.squash(title), " ", 1) if intro else None, lines,
-            _text(SKU_LINE.sub(" ", rest)))
+    text = _text(intro.group(1)) if intro else None
+    return text, (_core(text, title, item) if intro else None), lines, _text(SKU_LINE.sub(" ", rest))
 
 
-def old_colour(body, drafted, final, drafted_body):
+def old_colour(body, drafted, final, drafted_body, old_item=None, new_item=None):
     """Why the description still names a colour word the drafted title had and the final one drops, in a part the
     draft did not write so (a line typed or edited by hand, the drafted title moved out of the intro's frame), else
     ''. A part still as drafted rests on order fields review did not change (no tool or AI part rests on the title
@@ -333,9 +347,9 @@ def old_colour(body, drafted, final, drafted_body):
     gone = words(title_colour(drafted)[1] if describe.squash(drafted) else "") - words(title_colour(final)[1])
     if not gone:
         return ""
-    intro, lines, rest = _parts(body, final)
-    was_intro, was_lines, was_rest = _parts(drafted_body, drafted) if drafted_body else (None, [], None)
-    read = [x for x in (intro if intro != was_intro else None, rest if rest != was_rest else None) if x]
+    intro, core, lines, rest = _parts(body, final, new_item)
+    _, was_core, was_lines, was_rest = _parts(drafted_body, drafted, old_item) if drafted_body else (None, None, [], None)
+    read = [x for x in (intro if core != was_core else None, rest if rest != was_rest else None) if x]
     read += [x for x in lines if x not in was_lines and not re.match(r"(?:Composition:|Made in\b)", x)
              and not COLOURWAY.fullmatch(f"<li>{_e(x)}</li>")]
     for x in read:
@@ -393,7 +407,7 @@ def reconcile(body, d, row, brand):
             out.append(f"the PO's made in was cleared, and the description still says 'Made in {said}'")
         if how == "disagrees":
             out.append(f"its Made in line says '{said}', the PO's made in '{_text(made)}': make them agree")
-    stale = old_colour(body, d.get("Title (as drafted)"), title, d.get("Description (as drafted)"))
+    stale = old_colour(body, d.get("Title (as drafted)"), title, d.get("Description (as drafted)"), old, new)
     if stale:
         out.append(stale)
     return body, out

@@ -773,6 +773,40 @@ def test_the_drafted_colour_left_anywhere_else_holds_the_product(tmp_path):
             "drops: check whether it means the old colour") in check(checks)["Detail"]
 
 
+INTRO_SLATE = "<p>ACME STUDIO's Orbit Field Jacket in Slate is a waxed lightweight jacket.{}</p>\n<ul>\n" \
+    "<li>Composition: 100% Cotton</li>\n  <li>Zip fastening</li>\n</ul><br><p>SKU: X 1</p>"
+
+
+@pytest.mark.parametrize("item", ["coat", "lightweight jacket"])
+def test_an_intro_as_drafted_is_not_read_after_the_tool_swaps_its_title_and_item(item):
+    drafted = INTRO_SLATE.format(" Its slate tone suits any coat.")   # the draft's own words, from the order
+    now = drafted.replace("in Slate is a waxed lightweight jacket.", f"in Navy is a waxed {item}.")
+    assert descimport.old_colour(now, "Orbit Field Jacket in Slate", "Orbit Field Jacket in Navy", drafted,
+                                 "lightweight jacket", item) == ""
+
+
+@pytest.mark.parametrize("item", ["coat", "lightweight jacket"])
+def test_an_intro_edited_by_hand_to_name_the_dropped_colour_holds(item):
+    drafted = INTRO_SLATE.format(" Its tone suits any coat.")
+    now = INTRO_SLATE.format(" Its slate tone suits any coat.").replace(
+        "in Slate is a waxed lightweight jacket.", f"in Navy is a waxed {item}.")
+    assert "names 'slate'" in descimport.old_colour(now, "Orbit Field Jacket in Slate", "Orbit Field Jacket in Navy",
+                                                    drafted, "lightweight jacket", item)
+
+
+def test_a_type_and_title_fixed_together_leave_a_drafted_intro_sentence_alone(tmp_path):
+    def edit(ws):   # as if the draft wrote a second sentence that names the colour
+        c = desc_cell(ws, td.JACKET)
+        c.value = c.value.replace("lightweight jacket.</p>", "lightweight jacket. Its slate tone suits any coat.</p>")
+        ws.cell(c.row, poxlsx.DESCRIPTION_COLS.index("Description (as drafted)") + 1).value = c.value
+    path, _ = reviewed(tmp_path, edit)
+    po_edit(path, td.JACKET, "Title", lambda v: "Orbit Field Jacket in Navy")
+    po_edit(path, td.JACKET, "Type", lambda v: "MEN CLOTHING JACKETS BOMBER")
+    run(tmp_path, path)
+    assert by_code(tmp_path)[td.JACKET].startswith(
+        "<p>ACME STUDIO's Orbit Field Jacket in Navy is a waxed bomber jacket. Its slate tone suits any coat.</p>")
+
+
 def test_the_sheet_keeps_the_drafted_description_whole(tmp_path):
     path, _ = reviewed(tmp_path)   # the draft as written, its Descriptions sheet not edited
     sheet = poxlsx.read_descriptions(path)
