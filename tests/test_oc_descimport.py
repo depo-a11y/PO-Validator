@@ -773,6 +773,12 @@ def test_the_drafted_colour_left_anywhere_else_holds_the_product(tmp_path):
             "drops: check whether it means the old colour") in check(checks)["Detail"]
 
 
+def test_the_sheet_keeps_the_drafted_description_whole(tmp_path):
+    path, _ = reviewed(tmp_path)   # the draft as written, its Descriptions sheet not edited
+    sheet = poxlsx.read_descriptions(path)
+    assert sheet and all(d["Description (as drafted)"] == d["Description"] for d in sheet)
+
+
 def test_a_drafted_line_naming_the_old_colour_is_not_held_when_the_title_colour_is_fixed(tmp_path):
     def edit(ws):   # as if the draft wrote a line from the order's own words that names the colour
         c = desc_cell(ws, td.JACKET)
