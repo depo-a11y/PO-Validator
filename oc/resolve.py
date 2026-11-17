@@ -197,6 +197,8 @@ class Resolver:
 
     def colour_name(self, code):
         _, body, colour = split_code(code)
+        v, n, tot, how, blank, short = self._colour_votes(code, "title_colour")
+        refused = self.bar_refusal(how, colour, short and f"titled '{short}'", n, tot, blank)
         row = self.cart_row(code)
         if row and row["colour"]:
             name = tidy_colour(row["colour"])
@@ -204,12 +206,11 @@ class Resolver:
             if odd:
                 return name, "guess", self.cart_why(row, f"Color Description '{row['colour']}' carries "
                                                          f"unexpected character(s) {' '.join(odd)}; retype it")
-            v, n, tot, how, blank, _ = self._colour_votes(code, "title_colour")
             if v and how == "same fabric+colour" and v.casefold() == name.casefold():
                 return v, "catalog", (f"{how} {colour} titled '{v}' on {share(n, tot, blank)}; "
                                       + self.cart_why(row, "Color Description agrees"))
-            return name, "cart", self.cart_why(row, f"Color Description '{row['colour']}'")
-        v, n, tot, how, blank, short = self._colour_votes(code, "title_colour")
+            return name, "cart", self.cart_why(row, f"Color Description '{row['colour']}'") + (
+                f"; {refused}" if refused else "")
         if v:
             return v, "catalog", f"{how} {colour} titled '{v}' on {share(n, tot, blank)}"
         why = f"colour code {colour} not in the catalog" if not tot else \
@@ -217,7 +218,6 @@ class Resolver:
         if blank:
             why = f"colour code {colour}: no name on {self.bar * 100:g}% of its {tot} catalog products " \
                 f"({blank} untitled)"
-        refused = self.bar_refusal(how, colour, short and f"titled '{short}'", n, tot, blank)
         if refused:
             why = refused
         if not colour:
@@ -241,7 +241,8 @@ class Resolver:
                 self.cart_why(row, f"colour '{colour_name}' agrees")
         if row is not None and fam:
             other = f"; other fabrics' {colour} is {v} in the catalog" if v and v != fam else ""
-            return fam, "cart", self.cart_why(row, f"colour '{colour_name}' matches the {fam} keyword list{other}")
+            return fam, "cart", self.cart_why(row, f"colour '{colour_name}' matches the {fam} keyword list{other}") \
+                + note
         if v:
             return v, "catalog", f"{how} {colour} is {v} on {share(n, tot, blank)}"
         if fam:

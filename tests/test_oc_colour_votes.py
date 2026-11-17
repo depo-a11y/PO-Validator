@@ -238,9 +238,9 @@ def test_finalize_fails_a_new_title_that_lost_its_colour_words(catalog_path, tmp
 
 # ---- the bar is the brand's own: colour_vote_bar, 0.6 unless the config says (slice 2c) ---------------------------
 def _config(**kw):
-    """A brand config loaded as the page loads one, with the colour code after the space."""
+    """A brand config loaded as the page loads one, with the colour code after the space unless kw says."""
     return brandm.from_mapping(dict({k: v for k, v in BRAND.items() if not k.startswith("_")},
-                                    join_key="{style} {colour}", **kw), "test config")
+                                    **{"join_key": "{style} {colour}", **kw}), "test config")
 
 
 def _shared(black, navy=0, blank=0):
@@ -380,3 +380,57 @@ def test_a_cart_colour_its_same_fabric_agrees_with_is_green(tmp_path, desc, want
     assert (name, src) == want
     assert why == ("same fabric+colour ZF 09 titled 'Black' on 1 of 1 product(s); cart.xlsx row 7: Color Description "
                    "agrees" if src == "catalog" else f"cart.xlsx row 7: Color Description '{desc}'")
+
+
+# ---- a cart row's Why names the brand's bar too; a bar under 60% that refuses says so (review 2026-11-17-buyer-12) --
+def _same_fabric_live():
+    """7 BLACK and 3 NAVY products of the same fabric+colour ZF 09 as the NEW code ZXRO000001 ZF 09."""
+    navy = [_live(str(40 + i), f"ZXRO00001{i} ZF 09", title=f"Field Jacket {40 + i} in Navy", colour="NAVY")
+            for i in range(3)]
+    return [_live(str(20 + i), f"ZXRO00000{2 + i} ZF 09") for i in range(7)] + navy
+
+
+def _with_cart(tmp_path, code, live, join_key, **kw):
+    cart = dict(label="cart.xlsx", rows={resolve.norm_code(code): dict(colour="Black", row=7)})
+    return resolve.Resolver(_config(**kw, **({} if join_key is None else {"join_key": join_key})),
+                            catm.load(write_catalog(tmp_path, live)), past_po(tmp_path), base._tags(), cart=cart)
+
+
+@pytest.mark.parametrize("bar", [None, 0.8])
+def test_a_cart_colour_name_says_when_the_brands_bar_refused_its_same_fabric(tmp_path, bar):
+    code = "ZXRO000001 ZF 09"
+    R = _with_cart(tmp_path, code, _same_fabric_live(), "{style} {fabric} {colour}",
+                   **({} if bar is None else {"colour_vote_bar": bar}))
+    vote = "same fabric+colour ZF 09 titled 'Black' on 7 of 10 product(s)"
+    agrees = ("Black", "catalog", f"{vote}; cart.xlsx row 7: Color Description agrees")
+    refused = ("Black", "cart", f"cart.xlsx row 7: Color Description 'Black'; {vote}, below the 80% this brand's "
+                                "colour vote needs")
+    assert R.colour_name(code) == (agrees if bar is None else refused)
+
+
+@pytest.mark.parametrize("tier", ["same colour code", "same fabric+colour"])
+@pytest.mark.parametrize("bar", [None, 0.8])
+def test_a_cart_colour_family_says_when_the_brands_bar_refused_the_catalog(tmp_path, tier, bar):
+    same = tier == "same fabric+colour"
+    code = "ZXRO000001 ZF 09" if same else "ZXSA00001 001"
+    kw = {} if bar is None else {"colour_vote_bar": bar}
+    R = _with_cart(tmp_path, code, _same_fabric_live() if same else _shared(7, navy=3),
+                   "{style} {fabric} {colour}" if same else None, **kw)
+    vote = f"{tier} {'ZF 09' if same else '001'} is BLACK on 7 of 10 product(s)"
+    if bar is None:
+        want = ("BLACK", "catalog", vote) if same else (
+            "BLACK", "catalog", f"{vote}; cart.xlsx row 7: colour 'Black' agrees")
+    else:
+        want = ("BLACK", "cart", "cart.xlsx row 7: colour 'Black' matches the BLACK keyword list; "
+                                 f"{vote}, below the 80% this brand's colour vote needs")
+    assert R.colour_family(code, "Black") == want
+
+
+def test_a_bar_under_sixty_percent_that_refuses_a_vote_says_so(tmp_path):
+    R = _resolver(tmp_path, _shared(2, navy=1, blank=1), colour_vote_bar=0.55)
+    share = "2 of 4 product(s), 1 blank"
+    assert R.colour_name("ZXSA00001 001") == (
+        "001", "guess", _bar_why("same colour code", "001", "titled 'Black'", share, "55%")
+        + "; the OC has no colour description")
+    assert R.colour_family("ZXSA00001 001", "001") == (
+        "", "guess", "no colour family for '001'; " + _bar_why("same colour code", "001", "is BLACK", share, "55%"))

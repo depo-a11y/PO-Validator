@@ -1841,9 +1841,22 @@ MUTANTS += [   # review 2026-11-17-buyer-11: a vote the brand's own bar refuses 
     ("oc/resolve.py", '        v, n, tot, how, blank, short = self._colour_votes(code, "colour_family")',
      '        v, n, tot, how, blank, short = self._colour_votes(code, "title_colour")',
      "colour family: voted from title colours"),
-    ("oc/resolve.py", '            v, n, tot, how, blank, _ = self._colour_votes(code, "title_colour")',
-     "            v, n, tot, how, blank, _ = None, 0, 0, None, 0, None",
-     "colour name: a cart colour its same fabric agrees with is never green"),
+    ("oc/resolve.py", '            if v and how == "same fabric+colour" and v.casefold() == name.casefold():',
+     "            if False:", "colour name: a cart colour its same fabric agrees with is never green"),
+]
+
+
+MUTANTS += [   # review 2026-11-17-buyer-12: a cart row's Why names the brand's bar too (F1); a bar under 60% that
+    # refuses a vote says so (F2)
+    ("oc/resolve.py", """Color Description '{row['colour']}'") + (\n                f"; {refused}" if refused else "")""",
+     """Color Description '{row['colour']}'") + (\n                "")""",
+     "colour name: a cart colour's Why leaves out the bar's refusal"),
+    ("oc/resolve.py", 'keyword list{other}") \\\n                + note', 'keyword list{other}")',
+     "colour family: a cart family's Why leaves out the bar's refusal"),
+    ("oc/resolve.py", '        refused = self.bar_refusal(how, colour, short and f"titled \'{short}\'", n, tot, blank)\n',
+     '        refused = ""\n', "colour name: no refusal wording, cart or not"),
+    ("oc/resolve.py", 'if said is None or self.bar == DEFAULTS["colour_vote_bar"]:',
+     'if said is None or self.bar <= DEFAULTS["colour_vote_bar"]:', "bar refusal: a bar under 60% never named"),
 ]
 
 
