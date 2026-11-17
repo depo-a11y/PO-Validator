@@ -808,8 +808,8 @@ def _cfg(tmp_path):
 def test_the_cli_flag_says_when_there_is_no_key(tmp_path, no_key, monkeypatch, capsys):
     _oc(monkeypatch)
     out, plain = tmp_path / "d.xlsx", tmp_path / "p.xlsx"
-    args = ["draft", "--oc", "oc.pdf", "--catalog", write_catalog(tmp_path), "--brand", "x", "--brand-config",
-            _cfg(tmp_path)]
+    args = ["draft", "--season", "S/S 27", "--oc", "oc.pdf", "--catalog", write_catalog(tmp_path), "--brand", "x",
+            "--brand-config", _cfg(tmp_path)]
     cli.main(args + ["--out", str(out), "--ai-describe"])
     text = capsys.readouterr().out
     assert "AI description drafting is off: no ANTHROPIC_API_KEY" in text and job.CHECK not in text
@@ -821,8 +821,8 @@ def test_the_cli_flag_drafts_with_a_key(tmp_path, key, monkeypatch, capsys):
     _oc(monkeypatch)
     fake = Fake()
     monkeypatch.setattr(ai, "make_client", fake.factory)
-    cli.main(["draft", "--oc", "oc.pdf", "--catalog", write_catalog(tmp_path), "--brand", "x", "--brand-config",
-              _cfg(tmp_path), "--out", str(tmp_path / "d.xlsx"), "--ai-describe"])
+    cli.main(["draft", "--season", "S/S 27", "--oc", "oc.pdf", "--catalog", write_catalog(tmp_path), "--brand", "x",
+              "--brand-config", _cfg(tmp_path), "--out", str(tmp_path / "d.xlsx"), "--ai-describe"])
     assert len(fake.calls) == 1 and f"[INFO] {job.CHECK}" in capsys.readouterr().out
 
 
