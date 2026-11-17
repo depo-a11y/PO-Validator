@@ -151,16 +151,18 @@ class Resolver:
         mean different colours on different fabrics, its T-codes do not. A code with no colour code (a colour-less
         join_key, or none printed) gets no vote: every colour-less live code would "share" it.
 
-        (value, n, tot, how, blank). Each tier counts every product it saw, a blank one (no title colour, no colour
-        family) against the winner: the winner needs the brand's colour_vote_bar of them (default 0.6, 60%), in the
-        same fabric too, so "2 of 5, 3 blank" is no vote. A tier holding only blanks says nothing, and the next one
-        is asked. A same-fabric tier whose products disagree is no vote, never overruled by other fabrics.
+        (value, n, tot, how, blank, short). Each tier counts every product it saw, a blank one (no title colour, no
+        colour family) against the winner: the winner needs the brand's colour_vote_bar of them (default 0.6, 60%),
+        in the same fabric too, so "2 of 5, 3 blank" is no vote. A tier holding only blanks says nothing, and the next
+        one is asked. A same-fabric tier whose products disagree is no vote, never overruled by other fabrics. When
+        the bar alone refuses a tier's leader, `short` is that leader and n and how are its (bar_refusal words it);
+        otherwise short is None.
         """
         _, body, colour = split_code(code)
         line = self.oc.get(code)
         colour, fabric = self.vote_key(body, colour, line["style"] if line else None)
         if not colour:
-            return None, 0, 0, None, 0
+            return None, 0, 0, None, 0, None
         same, cross = collections.Counter(), collections.Counter()   # value -> products, "" -> blank ones
         for c, ps in self.cat.by_code.items():
             cb, _, cc = c.partition(" ")
@@ -176,9 +178,18 @@ class Resolver:
             if votes:
                 v, n = votes.most_common(1)[0]
                 if n >= least and n / tot >= self.bar:
-                    return v, n, tot, how, blank
-                return None, 0, tot, None, blank
-        return None, 0, seen, None, seen
+                    return v, n, tot, how, blank, None
+                return (None, n, tot, how, blank, v) if n >= least else (None, 0, tot, None, blank, None)
+        return None, 0, seen, None, seen, None
+
+    def bar_refusal(self, how, colour, said, n, tot, blank):
+        """The Why of a vote a brand's own colour_vote_bar refused, e.g. "same colour code 001 titled 'Black' on 7 of
+        10 product(s), below the 80% this brand's colour vote needs" (said: what the leader says; None when the bar
+        refused nothing). "" at the default bar, whose refusals keep the wording they had before it was a config key."""
+        if said is None or self.bar == DEFAULTS["colour_vote_bar"]:
+            return ""
+        return f"{how} {colour} {said} on {share(n, tot, blank)}, below the {self.bar * 100:g}% this brand's colour " \
+            "vote needs"
 
     def same_fabric(self, fabric, body, colour):
         """Whether a code (its body and colour code) has this fabric, as vote_key reads it; never for a fabric of None."""
@@ -193,12 +204,12 @@ class Resolver:
             if odd:
                 return name, "guess", self.cart_why(row, f"Color Description '{row['colour']}' carries "
                                                          f"unexpected character(s) {' '.join(odd)}; retype it")
-            v, n, tot, how, blank = self._colour_votes(code, "title_colour")
+            v, n, tot, how, blank, _ = self._colour_votes(code, "title_colour")
             if v and how == "same fabric+colour" and v.casefold() == name.casefold():
                 return v, "catalog", (f"{how} {colour} titled '{v}' on {share(n, tot, blank)}; "
                                       + self.cart_why(row, "Color Description agrees"))
             return name, "cart", self.cart_why(row, f"Color Description '{row['colour']}'")
-        v, n, tot, how, blank = self._colour_votes(code, "title_colour")
+        v, n, tot, how, blank, short = self._colour_votes(code, "title_colour")
         if v:
             return v, "catalog", f"{how} {colour} titled '{v}' on {share(n, tot, blank)}"
         why = f"colour code {colour} not in the catalog" if not tot else \
@@ -206,6 +217,9 @@ class Resolver:
         if blank:
             why = f"colour code {colour}: no name on {self.bar * 100:g}% of its {tot} catalog products " \
                 f"({blank} untitled)"
+        refused = self.bar_refusal(how, colour, short and f"titled '{short}'", n, tot, blank)
+        if refused:
+            why = refused
         if not colour:
             why = f"{norm_code(code)} carries no colour code (join_key {self.b.get('join_key') or DEFAULT_JOIN_KEY})"
         return colour, "guess", why + "; the OC has no colour description"
@@ -215,7 +229,9 @@ class Resolver:
         fabric's colour). With a cart row, its colour description through the brand
         keywords comes next, ahead of other fabrics' use of the colour code."""
         _, _, colour = split_code(code)
-        v, n, tot, how, blank = self._colour_votes(code, "colour_family")
+        v, n, tot, how, blank, short = self._colour_votes(code, "colour_family")
+        refused = self.bar_refusal(how, colour, short and f"is {short}", n, tot, blank)
+        note = f"; {refused}" if refused else ""
         row = self.cart_row(code)
         if v and (how == "same fabric+colour" or row is None):
             return v, "catalog", f"{how} {colour} is {v} on {share(n, tot, blank)}"
@@ -229,8 +245,8 @@ class Resolver:
         if v:
             return v, "catalog", f"{how} {colour} is {v} on {share(n, tot, blank)}"
         if fam:
-            return fam, "rule", f"'{colour_name}' matches the {fam} keyword list"
-        return "", "guess", f"no colour family for '{colour_name}'"
+            return fam, "rule", f"'{colour_name}' matches the {fam} keyword list" + note
+        return "", "guess", f"no colour family for '{colour_name}'" + note
 
     def keyword_family(self, colour_name):
         """Family whose keyword appears earliest in the name, so 'Black/Camel' is

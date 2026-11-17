@@ -293,8 +293,10 @@ def test_a_colour_vote_bar_in_range_loads(bar):
     assert _config(colour_vote_bar=bar)["colour_vote_bar"] == bar
 
 
-@pytest.mark.parametrize("bar,named,shown", [(None, 2, "60%"), (0.8, 7, "80%"), (0.675, 6, "67.5%")])
+@pytest.mark.parametrize("bar,named,shown", [(None, 2, "60%"), (0.8, 1, "80%"), (0.675, 1, "67.5%")])
 def test_the_why_states_the_brands_own_bar(tmp_path, bar, named, shown):
+    """Blank products leave no name a vote: at the default bar 2 named of 5, at a brand's own bar one named product
+    (another style's one product never decides), so it is the blanks, not the bar, that the Why names."""
     R = _resolver(tmp_path, _shared(named, blank=3), **({} if bar is None else {"colour_vote_bar": bar}))
     assert R.colour_name("ZXSA00001 001") == (
         "001", "guess", f"colour code 001: no name on {shown} of its {named + 3} catalog products (3 untitled); "
@@ -305,3 +307,60 @@ def test_the_example_config_documents_the_bar_with_a_line_that_loads():
     text = open(os.path.join(os.path.dirname(brandm.__file__), "brands", "example.yaml")).read()
     (line,) = [x for x in text.splitlines() if x.startswith("# colour_vote_bar:")]
     assert brandm.from_text(text + line[2:] + "\n", "example.yaml")["colour_vote_bar"] == 0.8
+
+
+# ---- a vote the brand's own bar refuses says so (review 2026-11-17-buyer-11 F1, F4) --------------------------------
+def _bar_why(how, colour, said, share, shown):
+    return f"{how} {colour} {said} on {share}, below the {shown} this brand's colour vote needs"
+
+
+@pytest.mark.parametrize("bar,shown", [(0.8, "80%"), (0.675, "67.5%")])
+@pytest.mark.parametrize("blank,share", [(0, "6 of 9 product(s)"), (2, "6 of 9 product(s), 2 blank")])
+def test_a_vote_the_brands_bar_refuses_names_the_share_and_the_bar(tmp_path, bar, shown, blank, share):
+    R = _resolver(tmp_path, _shared(6, navy=3 - blank, blank=blank), colour_vote_bar=bar)
+    title = _bar_why("same colour code", "001", "titled 'Black'", share, shown)
+    family = _bar_why("same colour code", "001", "is BLACK", share, shown)
+    assert R.colour_name("ZXSA00001 001") == ("001", "guess", title + "; the OC has no colour description")
+    assert R.colour_family("ZXSA00001 001", "001") == ("", "guess", f"no colour family for '001'; {family}")
+    assert R.colour_family("ZXSA00001 001", "Black") == (
+        "BLACK", "rule", f"'Black' matches the BLACK keyword list; {family}")
+
+
+def test_at_the_default_bar_a_refused_vote_keeps_its_wording(tmp_path):
+    R = _resolver(tmp_path, _shared(5, navy=4))
+    assert R.colour_name("ZXSA00001 001") == (
+        "001", "guess", "colour code 001 names disagree across 9 catalog products; the OC has no colour description")
+    assert R.colour_family("ZXSA00001 001", "001") == ("", "guess", "no colour family for '001'")
+    assert R.colour_family("ZXSA00001 001", "Black") == ("BLACK", "rule", "'Black' matches the BLACK keyword list")
+
+
+def test_a_vote_left_to_one_product_never_blames_the_bar(tmp_path):
+    R = _resolver(tmp_path, _shared(1), colour_vote_bar=0.8)
+    assert R.colour_name("ZXSA00001 001") == (
+        "001", "guess", "colour code 001 names disagree across 1 catalog products; the OC has no colour description")
+    assert R.colour_family("ZXSA00001 001", "001") == ("", "guess", "no colour family for '001'")
+
+
+@pytest.mark.parametrize("bar,voted", [(None, True), (0.8, False)])
+def test_the_same_fabric_tier_needs_the_brands_bar_too(tmp_path, bar, voted):
+    navy = [_live(str(40 + i), f"ZXRO00001{i} ZF 09", title=f"Field Jacket {40 + i} in Navy", colour="NAVY")
+            for i in range(3)]
+    live = [_live(str(20 + i), f"ZXRO00000{2 + i} ZF 09") for i in range(7)] + navy
+    line = _line(1, "ZXRO000001", "ZF", "09", "JACKET", {"M": 1}, 100.0)
+    review = _draft(tmp_path, "{style} {fabric} {colour}", line, live,
+                    **({} if bar is None else {"colour_vote_bar": bar}))
+    fam, _ = _colour(review, "ZXRO000001 ZF 09")
+    if voted:
+        assert (fam["Value"], fam["Colour"]) == ("BLACK", resolve.GREEN)
+        assert fam["Why"] == "same fabric+colour ZF 09 is BLACK on 7 of 10 product(s)"
+    else:
+        assert (fam["Value"], fam["Colour"]) == ("", resolve.RED)
+        assert fam["Why"].endswith(_bar_why("same fabric+colour", "ZF 09", "is BLACK", "7 of 10 product(s)", "80%"))
+
+
+@pytest.mark.parametrize("bar,voted", [(None, False), (0.55, True)])
+def test_a_bar_below_sixty_percent_accepts_what_sixty_refuses(tmp_path, bar, voted):
+    R = _resolver(tmp_path, _shared(4, navy=3), **({} if bar is None else {"colour_vote_bar": bar}))
+    want = ("BLACK", "catalog", "same colour code 001 is BLACK on 4 of 7 product(s)") if voted else (
+        "", "guess", "no colour family for '001'")
+    assert R.colour_family("ZXSA00001 001", "001") == want
