@@ -2406,15 +2406,24 @@ MUTANTS += [   # round 10d (case 2026-11-18-buyer-2): off-template code-only bod
     (X, '    unread = values is None and "made in" in slots   # held by the one reason above, no second',
      '    unread = values is None',
      'B: made in left unread when the template has no made in slot'),
-    (X, '        hit = [g for g in sorted(gone) if any(w == g or ("-" not in g and g in w.split("-")) for w in said)]',
-     '        hit = [g for g in sorted(gone) if any(("-" not in g and g in w.split("-")) for w in said)]',
+    (X, '        hit = [g for g in sorted(whole | loose | strict) if any(w == g or (g in loose and g in w.split("-")) for w in said)]',
+     '        hit = [g for g in sorted(whole | loose | strict) if any((g in loose and g in w.split("-")) for w in said)]',
      "B: a dropped hyphen-compound colour not matched whole ('Off-white piping')"),
-    (X, '        hit = [g for g in sorted(gone) if any(w == g or ("-" not in g and g in w.split("-")) for w in said)]',
-     '        hit = [g for g in sorted(gone) if any(w == g for w in said)]',
+    (X, '        hit = [g for g in sorted(whole | loose | strict) if any(w == g or (g in loose and g in w.split("-")) for w in said)]',
+     '        hit = [g for g in sorted(whole | loose | strict) if any(w == g for w in said)]',
      "B: a dropped single colour word not matched as part of a compound ('Slate-tone trims')"),
     (X, '            if not set(t.split("-")) <= parts}   # \'Off-White\' respelt \'Off White\' is not gone',
      '            if True}',
      'B: a colour compound respelt in the final title read as gone'),
+]
+
+MUTANTS += [   # round 10e: colour words matched whole, loose or strict (GM)
+    (X, '    strict = {p for g in whole for p in g.split("-") if p not in parts and len(p) >= 3}',
+     '    strict = set()',
+     "B: a gone compound's dropped part not read as a whole word ('Off white piping')"),
+    (X, '        hit = [g for g in sorted(whole | loose | strict) if any(w == g or (g in loose and g in w.split("-")) for w in said)]',
+     '        hit = [g for g in sorted(whole | loose | strict) if any(w == g or (g not in whole and g in w.split("-")) for w in said)]',
+     "B: a gone compound's part read as a hyphen part too ('Zip-off hood')"),
 ]
 
 

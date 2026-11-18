@@ -903,24 +903,55 @@ def test_a_dropped_colour_word_in_a_hyphen_compound_holds(line, held):
     assert ("names 'slate'" in got) == held
 
 
+OW, TT, BW = ("Loop Coat in Off-White", "Loop Coat in White"), ("Loop Coat in Two-Tone Black", "Loop Coat in Black"), \
+    ("Loop Coat in Black-White", "Loop Coat in Black")
+SN = ("Loop Coat in Slate", "Loop Coat in Navy")
+
+
 @pytest.mark.parametrize("drafted,final,line,held", [
-    ("Loop Coat in Off-White", "Loop Coat in White", "Zip-off hood", False),   # 'off' is no colour of its own
-    ("Loop Coat in Two-Tone Black", "Loop Coat in Black", "Two-way zip", False),
-    ("Loop Coat in Two-Tone Black", "Loop Coat in Black", "Gold-tone hardware", False),
-    ("Loop Coat in Off-White", "Loop Coat in White", "Off-white piping", True),   # the compound whole
-    ("Loop Coat in Two-Tone Black", "Loop Coat in Black", "Two-tone piping", True),
-    ("Loop Coat in Slate", "Loop Coat in Navy", "Slate-tone trims", True),   # a single word as one part
-    ("Loop Coat in Slate", "Loop Coat in Navy", "Blue-slate piping", True),
-    ("Loop Coat in Slate", "Loop Coat in Navy", "Slates", False),   # a word character blocks
+    (*OW, "Off-white piping", True),   # a gone compound, whole
+    (*OW, "Off white piping", True),   # a part the final title drops, as a whole word
+    (*OW, "OFF WHITE piping", True),
+    (*OW, "Zip-off hood", False),   # never as a hyphen part
+    (*TT, "Two-tone piping", True),
+    (*TT, "Two tone piping", True),
+    (*TT, "Two-way zip", False),
+    (*TT, "Gold-tone hardware", False),
+    (*BW, "White piping", True),
+    (*SN, "Slate-tone trims", True),   # a gone single word, also as one hyphen part
+    (*SN, "Blue-slate piping", True),
+    (*SN, "Slate's trims", True),
+    (*SN, "Slates", False),   # a word character blocks
+    (*SN, "Slate2 trims", False),
+    (*SN, "slate_trims", False),
+    ("Loop Coat in Red", "Loop Coat in Navy", "Red piping", True),
+    ("Loop Coat in Black/Red", "Loop Coat in Black", "Red piping", True),
+    ("Loop Coat in Écru", "Loop Coat in Navy", "Écru-toned trims", True),
     ("Loop Coat in Off-White", "Loop Coat in Off White", "Off-white piping", False),   # respelt, not gone
-    # Accepted residue: 'Off White' written with a space leaves 'off' gone on its own, so this holds (and never writes)
+    # Accepted residues, held and never written: 'Off White' with a space, dropped, leaves 'off' gone on its own;
+    # a gone compound's part on its own ('two') holds, as 943e9ec held it.
     ("Loop Coat in Off White", "Loop Coat in White", "Zip-off hood", True),
+    (*TT, "Two front pockets", True),
 ])
 def test_a_dropped_colour_is_read_as_the_title_writes_it(drafted, final, line, held):
     was = (f"<p>ACME STUDIO's {drafted} is a coat.</p>\n<ul>\n<li>Composition: 100% Wool</li>\n"
            "  <li>Zip fastening</li>\n</ul><br><p>SKU: X 1</p>")
     now = was.replace(drafted, final).replace("  <li>Zip fastening</li>", f"  <li>{line}</li>")
     assert bool(descimport.old_colour(now, drafted, final, was)) == held
+
+
+@pytest.mark.parametrize("drafted,final,line", [
+    # Every case the word-by-word rule (943e9ec) held: a gone colour word of three letters or more, standing alone
+    (*OW, "Off white piping"), (*OW, "OFF WHITE piping"), (*TT, "Two tone piping"), (*TT, "Two front pockets"),
+    (*BW, "White piping"), (*SN, "Slate trims"), (*SN, "Zip fastening in slate tone"), (*SN, "Slate's trims"),
+    ("Loop Coat in Red", "Loop Coat in Navy", "Red piping"), ("Loop Coat in Black/Red", "Loop Coat in Black", "Red piping"),
+    ("Loop Coat in Off White", "Loop Coat in White", "Off piping"),
+])
+def test_every_case_the_word_by_word_rule_held_still_holds(drafted, final, line):
+    was = (f"<p>ACME STUDIO's {drafted} is a coat.</p>\n<ul>\n<li>Composition: 100% Wool</li>\n"
+           "  <li>Zip fastening</li>\n</ul><br><p>SKU: X 1</p>")
+    now = was.replace(drafted, final).replace("  <li>Zip fastening</li>", f"  <li>{line}</li>")
+    assert descimport.old_colour(now, drafted, final, was)
 
 
 def test_the_sheet_keeps_the_drafted_description_whole(tmp_path):

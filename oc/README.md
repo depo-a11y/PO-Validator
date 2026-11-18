@@ -628,9 +628,14 @@ a raw-code title has, or a red title) and the final title gives colour words, th
 right after the Composition line; one the draft wrote and the person removed stays out. A part the draft did not
 write so (a line typed or edited by hand, the drafted title moved out of the intro's frame) that still names a colour
 word the drafted title had and the final one drops holds the description back, with a message that asks for a check,
-not a deletion: a colour word can be a material. Colour words are read as the title writes them: a hyphen compound
-("Two-Tone", "Off-White") is gone whole and matches only a whole word, never a part ("Two-way zip" stays); a single
-word also matches as one part of a hyphen compound ("Slate-tone trims"). Lines still as drafted rest on order fields review did not change (no
+not a deletion: a colour word can be a material. The colour is read as the title writes it, and a colour gone from
+the title is matched three ways: a hyphen compound ("Off-White") matches a word equal to it ("Off-white piping"); a
+single word ("Slate") matches a word equal to it or one hyphen part of a word ("Slate-tone trims"); a part of a gone
+compound that the final title does not keep, of three letters or more, matches only a whole word with no hyphen
+("Off white piping", "Two tone piping"), never a hyphen part ("Zip-off hood", "Two-way zip" and "Gold-tone hardware"
+stay). A word character always blocks ("Slates"), and a compound only respelt in the final title ("Off White") is not
+gone. Two things still hold and never write: "Off White" with a space, dropped, leaves "off" on its own, so "Zip-off
+hood" holds; and a gone compound's part on its own holds ("Two front pockets" after "Two-Tone Black" becomes "Black"). Lines still as drafted rest on order fields review did not change (no
 tool or AI part rests on the title but the colourway bullet: an AI claim's field is never the title), and the
 Composition and Made in lines come from the PO, so neither is read ("Gold hardware", "100% Camel Hair").
 

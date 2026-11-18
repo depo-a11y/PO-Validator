@@ -346,10 +346,18 @@ def old_colour(body, drafted, final, drafted_body, old_item=None, new_item=None)
     ''. A part still as drafted rests on order fields review did not change (no tool or AI part rests on the title
     but the colourway bullet, which colourway handles), and the Composition and Made in lines come from the PO, so
     neither is read: 'Gold hardware' and '100% Camel Hair' stay true whatever the title's colour. A colour word can
-    be a material, so the message asks for a check, never for the line to go. The colour is read in tokens as the
-    title writes them: a hyphen compound ('Two-Tone', 'Off-White') is gone whole and matches a whole word, never a
-    part ('Two-way zip', 'Zip-off hood' stay); a single word also matches as one part of a hyphen compound ('Slate-tone
-    trims'); a word character always blocks ('Slates')."""
+    be a material, so the message asks for a check, never for the line to go.
+
+    The colour is read as the title writes it. A colour gone from the title is matched three ways:
+    - a hyphen compound ('Off-White', 'Two-Tone') matches a word that equals it ('off-white piping');
+    - a single word ('Slate') matches a word that equals it, or one hyphen part of a word ('Slate-tone trims');
+    - each part of a gone compound that the final title does not keep, of three letters or more ('off', 'two',
+      'tone'), matches only a whole word with no hyphen ('Off white piping', 'Two tone piping'), never a hyphen
+      part, so 'Zip-off hood', 'Two-way zip' and 'Gold-tone hardware' stay.
+    A word character always blocks ('Slates', 'slate_trims'). A compound only respelt in the final title ('Off-White'
+    as 'Off White') is not gone. What this still holds, and never writes: 'Off White' written with a space, then
+    dropped, leaves 'off' gone on its own ('Zip-off hood' holds); a gone compound's part on its own ('Two front
+    pockets' after 'Two-Tone Black' becomes 'Black')."""
     tokens = lambda c: {t.casefold() for t in re.findall(r"[^\W\d_]+(?:-[^\W\d_]+)*", c or "")
                         if "-" in t or len(t) >= 3}   # as the title writes them: 'two-tone' whole, never 'two'
     now = tokens(title_colour(final)[1])
@@ -358,6 +366,9 @@ def old_colour(body, drafted, final, drafted_body, old_item=None, new_item=None)
             if not set(t.split("-")) <= parts}   # 'Off-White' respelt 'Off White' is not gone
     if not gone:
         return ""
+    whole = {g for g in gone if "-" in g}
+    loose = gone - whole
+    strict = {p for g in whole for p in g.split("-") if p not in parts and len(p) >= 3}
     intro, core, lines, rest = _parts(body, final, new_item)
     _, was_core, was_lines, was_rest = _parts(drafted_body, drafted, old_item) if drafted_body else (None, None, [], None)
     read = [x for x in (intro if core != was_core else None, rest if rest != was_rest else None) if x]
@@ -365,7 +376,7 @@ def old_colour(body, drafted, final, drafted_body, old_item=None, new_item=None)
              and not COLOURWAY.fullmatch(f"<li>{_e(x)}</li>")]
     for x in read:
         said = [w.casefold() for w in re.findall(r"\w+(?:-\w+)*", x.replace(describe.squash(final), " "))]
-        hit = [g for g in sorted(gone) if any(w == g or ("-" not in g and g in w.split("-")) for w in said)]
+        hit = [g for g in sorted(whole | loose | strict) if any(w == g or (g in loose and g in w.split("-")) for w in said)]
         if hit:
             return (f"its '{x}' names '{hit[0]}', a colour word of the drafted title that the final title drops: "
                     "check whether it means the old colour")
