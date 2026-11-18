@@ -940,6 +940,25 @@ def test_a_dropped_colour_is_read_as_the_title_writes_it(drafted, final, line, h
     assert bool(descimport.old_colour(now, drafted, final, was)) == held
 
 
+@pytest.mark.parametrize("drafted,final,line,held", [
+    # the parts the final title keeps are its compounds' parts too: a split or joined respelling drops no colour
+    ("Loop Coat in Black Grey", "Loop Coat in Black-Grey", "Black piping", False),
+    ("Loop Coat in Off White", "Loop Coat in Off-White", "Off white piping", False),
+    # a gone compound's part the final title keeps is no stale word
+    ("Loop Coat in Off-White", "Loop Coat in White", "White piping", False),
+    ("Loop Coat in Navy-Blue", "Loop Coat in Navy", "Navy piping", False),
+    ("Loop Coat in Navy-Blue", "Loop Coat in Navy", "Blue piping", True),   # the part it drops
+    # a dropped part of fewer than three letters is not read on its own
+    ("Loop Coat in Ox-Blood", "Loop Coat in Blood", "Ox hide patch", False),
+    ("Loop Coat in Ox-Blood", "Loop Coat in Blood", "Ox-blood piping", True),   # the compound whole still is
+])
+def test_the_final_titles_colour_parts_and_the_three_letter_floor_decide_a_compounds_parts(drafted, final, line, held):
+    was = (f"<p>ACME STUDIO's {drafted} is a coat.</p>\n<ul>\n<li>Composition: 100% Wool</li>\n"
+           "  <li>Zip fastening</li>\n</ul><br><p>SKU: X 1</p>")
+    now = was.replace(drafted, final).replace("  <li>Zip fastening</li>", f"  <li>{line}</li>")
+    assert bool(descimport.old_colour(now, drafted, final, was)) == held
+
+
 @pytest.mark.parametrize("drafted,final,line", [
     # Every case the word-by-word rule (943e9ec) held: a gone colour word of three letters or more, standing alone
     (*OW, "Off white piping"), (*OW, "OFF WHITE piping"), (*TT, "Two tone piping"), (*TT, "Two front pockets"),

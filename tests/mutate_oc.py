@@ -2426,6 +2426,18 @@ MUTANTS += [   # round 10e: colour words matched whole, loose or strict (GM)
      "B: a gone compound's part read as a hyphen part too ('Zip-off hood')"),
 ]
 
+MUTANTS += [   # round 10f C (case 2026-11-18-buyer-3): old_colour's parts, kept parts and three-letter floor
+    (X, '    parts = {x for t in now for x in t.split("-")}',
+     '    parts = set(now)',
+     "B: the final title's colour parts read as whole tokens only (a respelt compound's colour gone)"),
+    (X, '    strict = {p for g in whole for p in g.split("-") if p not in parts and len(p) >= 3}',
+     '    strict = {p for g in whole for p in g.split("-") if len(p) >= 3}',
+     "B: a gone compound's part the final title keeps read as stale ('White piping')"),
+    (X, '    strict = {p for g in whole for p in g.split("-") if p not in parts and len(p) >= 3}',
+     '    strict = {p for g in whole for p in g.split("-") if p not in parts}',
+     "B: a gone compound's part under three letters read on its own ('Ox hide patch')"),
+]
+
 
 def digest(p):
     return hashlib.md5(p.read_bytes()).hexdigest()
