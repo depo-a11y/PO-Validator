@@ -496,11 +496,18 @@ def problems(body, title, code, vendor, ptype, brand=None):
     return out
 
 
+def title_key(row):
+    """A product's key: its Title as finalize groups PU-new's create rows (finalize._s: the text, stripped), so the
+    import never merges two products PU-new creates apart."""
+    v = row.get("Title")
+    return "" if blank(v) else str(v).strip()
+
+
 def _products(new_rows):
-    """[(first PO row of each NEW product)] in PU-new's order: a product is a Title."""
+    """[(first PO row of each NEW product)] in PU-new's order: a product is a Title, keyed as finalize keys it."""
     seen, out = set(), []
     for r in new_rows:
-        t = describe.squash(r.get("Title"))
+        t = title_key(r)
         if t not in seen:
             seen.add(t)
             out.append(r)
@@ -513,11 +520,24 @@ def _nfc(row):
     return {k: unicodedata.normalize("NFC", v) if isinstance(v, str) else v for k, v in row.items()}
 
 
+def _nfc_deep(v):
+    """A copy of a brand config with every string in it, nested in dicts and lists too, in NFC."""
+    if isinstance(v, str):
+        return unicodedata.normalize("NFC", v)
+    if isinstance(v, dict):
+        return {_nfc_deep(k): _nfc_deep(x) for k, x in v.items()}
+    if isinstance(v, (list, tuple)):
+        return type(v)(_nfc_deep(x) for x in v)
+    return v
+
+
 def build(po_path, new_rows, brand, out_prefix):
-    """(checks, writers) for the description import of the NEW products in `new_rows` (finalize's PO rows). Both the
-    Descriptions rows and the PO rows are read as NFC copies; finalize's own rows are left as they are."""
+    """(checks, writers) for the description import of the NEW products in `new_rows` (finalize's PO rows). The
+    Descriptions rows, the PO rows and the brand config are read as NFC copies; finalize's own rows and brand are left
+    as they are. Products are grouped on finalize's own Title key before the copies are taken."""
     if hold_row(brand):
         return [], []
+    brand = _nfc_deep(brand)
     sheet = read_descriptions(po_path)
     if sheet is None:
         return [dict(Check=CHECK, Result="INFO", Detail="this PO has no Descriptions sheet (a PO not drafted by the "
@@ -533,7 +553,7 @@ def build(po_path, new_rows, brand, out_prefix):
         by_sku.setdefault(describe.squash(d.get("Variant SKU")), d)
         by_code.setdefault(norm_code(d.get("Manufacture code")), []).append(d)
     written, held = [], []
-    for r in _products([_nfc(r) for r in new_rows]):
+    for r in [_nfc(r) for r in _products(new_rows)]:
         sku, code, title = describe.squash(r.get("Variant SKU")), norm_code(r.get(CODE)), describe.squash(r.get("Title"))
         d = by_sku.get(sku) or (by_code.get(code, [None])[0] if len(by_code.get(code, [])) == 1 else None)
         if d is None or not describe.squash(d.get("Description")):

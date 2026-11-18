@@ -3,6 +3,7 @@ An invented brand, codes and titles; no real order data, no network."""
 import json
 import re
 import types
+import unicodedata
 
 import openpyxl
 import pandas as pd
@@ -1015,6 +1016,56 @@ def test_a_po_value_retyped_only_in_the_other_unicode_form_reads_as_unchanged(tm
     run(tmp_path, path)
     jacket = by_code(tmp_path)[td.JACKET]   # written: no change, so no swap and no stale bullet
     assert f"<li>Composition: {LAME}</li>" in jacket and "  <li>Lam\u00e9 lining</li>" in jacket
+
+
+def test_a_brand_template_typed_in_the_other_unicode_form_still_reads_an_untouched_po(tmp_path):
+    tpl = "<p>Composicio\u0301n: {composition}</p> <p>Made in {made_in}</p> <p>SKU: {code}</p>"   # a combining accent
+    assert tpl != unicodedata.normalize("NFC", tpl)
+    brand = dict(BRAND, body_html=tpl)
+    path, _ = reviewed(tmp_path, brand=brand)
+    checks = run(tmp_path, path, brand)
+    assert td.JACKET in by_code(tmp_path), check(checks)["Detail"]   # written: the PO was not touched
+
+
+def test_two_products_whose_titles_differ_only_in_unicode_form_stay_two(tmp_path):
+    path, _ = reviewed(tmp_path)
+    po_edit(path, td.LOAFER, "Title", lambda v: "Mesa Loafer in Ros\u00e9")
+    po_edit(path, td.TOTE, "Title", lambda v: NFD("Mesa Loafer in Ros\u00e9"))
+    for code in (td.LOAFER, td.TOTE):
+        po_edit(path, code, "Body HTML", lambda v: v.replace("Composition: -", "Composition: 100% Leather"))
+    checks = run(tmp_path, path)
+    assert not [c for c in checks if c["Result"] == "FAIL"]   # PU-new creates both
+    detail = check(checks)["Detail"]
+    assert "of 4 NEW products" in detail
+    written, held = set(by_code(tmp_path)), detail.split("held back", 1)[-1]
+    assert all(code in written or f"{code} '" in held for code in (td.JACKET, td.LOAFER, td.TOTE, td.SHIRT))
+
+
+@pytest.mark.parametrize("title", ["Loop Coat in Black", "  Loop Coat in Black ", "Loop  Coat in Black", None, 12])
+def test_the_import_keys_a_product_on_finalizes_title_key(title):
+    assert descimport.title_key({"Title": title}) == finalize._s(title)
+
+
+def test_every_source_table_finalize_compares_against_is_in_one_unicode_form():
+    def strings(v):
+        if isinstance(v, str):
+            yield v
+        elif isinstance(v, dict):
+            for k, x in v.items():
+                yield from strings(k)
+                yield from strings(x)
+        elif isinstance(v, (list, tuple, set, frozenset)):
+            for x in v:
+                yield from strings(x)
+        elif hasattr(v, "pattern"):
+            yield v.pattern
+    tables = [describe.ITEMS, describe.PARTS, describe.COUNTRIES, describe.COUNTRY_NAMES, describe.PLACEHOLDERS,
+              describe.ITEM_KINDS, describe.TITLE_KINDS, describe.GENDER_WORDS, describe.SEASON_WORDS,
+              describe.ONE_MATERIAL, describe.SECTION, descimport.INTRO, descimport.COMPOSITION, descimport.MADE_IN_LINE,
+              descimport.SKU_LINE, descimport.MADE_IN_DASH, descimport.PLACEHOLDER, descimport.COLOURWAY,
+              descimport.TEMPLATE_TOKEN]
+    odd = [x for t in tables for x in strings(t) if x != unicodedata.normalize("NFC", x)]
+    assert odd == []
 
 
 def test_the_sheet_keeps_the_drafted_description_whole(tmp_path):
