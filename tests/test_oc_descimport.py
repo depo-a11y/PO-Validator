@@ -1,5 +1,7 @@
 """The separate description import finalize writes beside PU-new (oc/descimport.py; Colwyn, 2026-11-16, option B).
 An invented brand, codes and titles; no real order data, no network."""
+import importlib
+import importlib.util
 import json
 import re
 import types
@@ -1046,25 +1048,81 @@ def test_the_import_keys_a_product_on_finalizes_title_key(title):
     assert descimport.title_key({"Title": title}) == finalize._s(title)
 
 
+@pytest.mark.parametrize("sku", [unicodedata.normalize("NFD", "ZQ9001-É"), "ZQ9  001", "  ZQ9001 ", 90017, "ZQ9001"],
+                         ids=["decomposed letter", "double space inside", "spaces around", "int", "plain"])
+def test_the_import_writes_a_sku_as_pu_new_mints_it(sku):
+    assert descimport.sku_key({"Variant SKU": sku}) == finalize._s(sku)
+
+
+@pytest.mark.parametrize("edit", [lambda v: v + unicodedata.normalize("NFD", "-É"), lambda v: v[:4] + "  " + v[4:]],
+                         ids=["decomposed letter", "double space inside"])
+def test_every_sku_the_import_writes_is_one_pu_new_creates(tmp_path, edit):
+    path, _ = reviewed(tmp_path)
+    po_edit(path, td.JACKET, "Variant SKU", edit)
+    run(tmp_path, path)
+    ws = openpyxl.load_workbook(tmp_path / "run-PU-new.xlsx")["Products"]
+    col = [c.value for c in ws[1]].index("Variant SKU")
+    created = {r[col] for r in ws.iter_rows(min_row=2, values_only=True)}
+    assert td.JACKET in by_code(tmp_path)
+    assert {r[0] for r in imported(tmp_path)[2]} <= created
+
+
+def _strings(v):
+    if isinstance(v, str):
+        yield v
+    elif isinstance(v, dict):
+        for k, x in v.items():
+            yield from _strings(k)
+            yield from _strings(x)
+    elif isinstance(v, (list, tuple, set, frozenset)):
+        for x in v:
+            yield from _strings(x)
+    elif hasattr(v, "pattern"):
+        yield v.pattern
+
+
+def _module(name):
+    try:
+        return importlib.util.find_spec(name)
+    except (ImportError, ValueError):
+        return None
+
+
+def _reached(fn):
+    """{(module, name): value} for every module-level value of the oc package `fn` can read, and the defaults of every
+    oc function it can call: the names each code object holds, looked up in its function's globals, the oc modules
+    those hold and the oc modules it imports inside a function (stale_bullets imports oc/agent/describe.py there)."""
+    seen, out, todo = set(), {}, [fn]
+    while todo:
+        f = todo.pop()
+        if f in seen:
+            continue
+        seen.add(f)
+        out[f.__module__, f.__qualname__ + " defaults"] = ((f.__defaults__ or ())
+                                                           + tuple((f.__kwdefaults__ or {}).values()))
+        names, codes = set(), [f.__code__]
+        while codes:
+            c = codes.pop()
+            names |= set(c.co_names)
+            codes += [k for k in c.co_consts if isinstance(k, types.CodeType)]
+        pkgs = [f.__module__.rsplit(".", i)[0] for i in range(1, f.__module__.count(".") + 1)]
+        mods = [m for m in f.__globals__.values() if isinstance(m, types.ModuleType)]
+        mods += [importlib.import_module(f"{p}.{n}") for n in names for p in pkgs if _module(f"{p}.{n}")]
+        for ns in [f.__globals__] + [vars(m) for m in mods if m.__name__.split(".")[0] == "oc"]:
+            for n in names & ns.keys():
+                v = ns[n]
+                if isinstance(v, types.FunctionType) and v.__module__.split(".")[0] == "oc":
+                    todo.append(v)
+                elif not isinstance(v, (types.ModuleType, type)) and not callable(v):
+                    out[ns["__name__"], n] = v
+    return out
+
+
 def test_every_source_table_finalize_compares_against_is_in_one_unicode_form():
-    def strings(v):
-        if isinstance(v, str):
-            yield v
-        elif isinstance(v, dict):
-            for k, x in v.items():
-                yield from strings(k)
-                yield from strings(x)
-        elif isinstance(v, (list, tuple, set, frozenset)):
-            for x in v:
-                yield from strings(x)
-        elif hasattr(v, "pattern"):
-            yield v.pattern
-    tables = [describe.ITEMS, describe.PARTS, describe.COUNTRIES, describe.COUNTRY_NAMES, describe.PLACEHOLDERS,
-              describe.ITEM_KINDS, describe.TITLE_KINDS, describe.GENDER_WORDS, describe.SEASON_WORDS,
-              describe.ONE_MATERIAL, describe.SECTION, descimport.INTRO, descimport.COMPOSITION, descimport.MADE_IN_LINE,
-              descimport.SKU_LINE, descimport.MADE_IN_DASH, descimport.PLACEHOLDER, descimport.COLOURWAY,
-              descimport.TEMPLATE_TOKEN]
-    odd = [x for t in tables for x in strings(t) if x != unicodedata.normalize("NFC", x)]
+    tables = _reached(descimport.build)
+    assert {("oc.agent.describe", "GENERIC"), ("oc.agent.describe", "NEGATORS"), ("oc.describe", "COUNTRY_NAMES"),
+            ("oc.describe", "ITEMS"), ("oc.descimport", "TEMPLATE_TOKEN")} <= tables.keys()
+    odd = [(k, x) for k, t in tables.items() for x in _strings(t) if x != unicodedata.normalize("NFC", x)]
     assert odd == []
 
 

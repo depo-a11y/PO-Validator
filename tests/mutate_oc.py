@@ -2139,8 +2139,8 @@ MUTANTS += [   # option B (Colwyn, 2026-11-16): the template stays, the descript
     (X, 'COLUMNS = ["Variant SKU", "Command", "Body HTML"]', 'COLUMNS = ["Variant SKU", "Body HTML", "Command"]',
      "B: the import's columns out of order"),
     (X, "    if hold_row(brand):\n        return [], []", "    if False:\n        return [], []", "B: a held config writing the file"),
-    (X, '    for r in [_nfc(r) for r in _products(new_rows)]:',
-     '    for r in [_nfc(r) for r in new_rows]:',
+    (X, '    for raw in _products(new_rows):',
+     '    for raw in new_rows:',
      'B: one import row per size, not per product'),
     (X, '    body, _ = swap_title(body, d.get("Title (as drafted)"), title, vendor)',
      '    body, _ = body, False', "B: the final Title not swapped"),
@@ -2453,8 +2453,8 @@ MUTANTS += [   # round 10g: the rows build compares read in one Unicode form (GM
     (X, '    sheet = [_nfc(d) for d in sheet]',
      '    sheet = [dict(d) for d in sheet]',
      'B: the Descriptions row not read in one Unicode form'),
-    (X, '    for r in [_nfc(r) for r in _products(new_rows)]:',
-     '    for r in [dict(r) for r in _products(new_rows)]:',
+    (X, '        r = _nfc(raw)',
+     '        r = dict(raw)',
      'B: the PO row not read in one Unicode form'),
 ]
 
@@ -2462,9 +2462,19 @@ MUTANTS += [   # round 10h (re-check 2026-11-18-buyer-4): the brand read in NFC;
     (X, '    brand = _nfc_deep(brand)',
      '    brand = brand',
      'B: the brand config not read in one Unicode form'),
-    (X, '    for r in [_nfc(r) for r in _products(new_rows)]:',
-     '    for r in _products([_nfc(r) for r in new_rows]):',
+    (X, '    for raw in _products(new_rows):',
+     '    for raw in _products([_nfc(x) for x in new_rows]):',
      "B: products grouped on the NFC title, not finalize's key"),
+]
+
+
+MUTANTS += [   # round 10i: the import's Variant SKU written as PU-new mints it (GM)
+    (X, '        written.append({"Variant SKU": sku_key(raw), ',
+     '        written.append({"Variant SKU": sku_key(r), ',
+     "B: the import writes the NFC copy's SKU"),
+    (X, '        written.append({"Variant SKU": sku_key(raw), ',
+     '        written.append({"Variant SKU": describe.squash(raw.get("Variant SKU")), ',
+     'B: the import writes the squashed SKU'),
 ]
 
 

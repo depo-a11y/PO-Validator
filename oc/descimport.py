@@ -503,6 +503,13 @@ def title_key(row):
     return "" if blank(v) else str(v).strip()
 
 
+def sku_key(row):
+    """A variant's Variant SKU as PU-new mints it (finalize._s: the text, stripped), the one key Matrixify joins the
+    import on, so it is written from finalize's own row, never from a copy read for comparing."""
+    v = row.get("Variant SKU")
+    return "" if blank(v) else str(v).strip()
+
+
 def _products(new_rows):
     """[(first PO row of each NEW product)] in PU-new's order: a product is a Title, keyed as finalize keys it."""
     seen, out = set(), []
@@ -533,8 +540,9 @@ def _nfc_deep(v):
 
 def build(po_path, new_rows, brand, out_prefix):
     """(checks, writers) for the description import of the NEW products in `new_rows` (finalize's PO rows). The
-    Descriptions rows, the PO rows and the brand config are read as NFC copies; finalize's own rows and brand are left
-    as they are. Products are grouped on finalize's own Title key before the copies are taken."""
+    Descriptions rows, the PO rows and the brand config are compared as NFC copies; finalize's own rows and brand are
+    left as they are. Products are grouped on finalize's own Title key before the copies are taken, and each row's
+    Variant SKU is written from finalize's own row as PU-new mints it (sku_key), never from its copy."""
     if hold_row(brand):
         return [], []
     brand = _nfc_deep(brand)
@@ -553,7 +561,8 @@ def build(po_path, new_rows, brand, out_prefix):
         by_sku.setdefault(describe.squash(d.get("Variant SKU")), d)
         by_code.setdefault(norm_code(d.get("Manufacture code")), []).append(d)
     written, held = [], []
-    for r in [_nfc(r) for r in _products(new_rows)]:
+    for raw in _products(new_rows):
+        r = _nfc(raw)
         sku, code, title = describe.squash(r.get("Variant SKU")), norm_code(r.get(CODE)), describe.squash(r.get("Title"))
         d = by_sku.get(sku) or (by_code.get(code, [None])[0] if len(by_code.get(code, [])) == 1 else None)
         if d is None or not describe.squash(d.get("Description")):
@@ -564,7 +573,7 @@ def build(po_path, new_rows, brand, out_prefix):
         if why:
             held.append((code, title, "; ".join(why)))
             continue
-        written.append({"Variant SKU": sku, "Command": COMMAND, "Body HTML": body})
+        written.append({"Variant SKU": sku_key(raw), "Command": COMMAND, "Body HTML": body})
     total = len(written) + len(held)
     detail = (f"{len(written)} of {total} NEW products written to {FILE} (sheet {SHEET}, columns "
               f"{', '.join(COLUMNS)}), Command UPDATE: a row fails rather than creating a product if the file is "

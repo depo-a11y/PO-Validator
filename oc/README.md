@@ -603,7 +603,9 @@ nothing.
 
 `finalize` writes `<out-prefix>PU-description.xlsx` beside PU-new, in the slot of the hand-made
 "<Brand> Description.xlsx": sheet `Products`, columns `Variant SKU`, `Command`, `Body HTML` and no other (a blank cell
-clears a field in Matrixify). One row per NEW product, keyed on the Variant SKU of its first variant as PU-new has it.
+clears a field in Matrixify). One row per NEW product, keyed on the Variant SKU of its first variant as PU-new has it:
+written from the PO row exactly as PU-new writes it (stripped), never from the copy read for comparing, so a SKU with
+a combining accent or a double space inside is the SKU PU-new creates.
 **Command is UPDATE on every row**, the one change from the hand sheets, which carry no Command: Matrixify reads that
 as MERGE, and MERGE creates a new product when the SKU is not found, where UPDATE fails the row. **Import order:**
 PU-new, then PU-merge and PU-merge-new-sizes, then PU-description once the products exist.
