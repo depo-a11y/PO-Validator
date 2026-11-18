@@ -635,7 +635,8 @@ compound that the final title does not keep, of three letters or more, matches o
 ("Off white piping", "Two tone piping"), never a hyphen part ("Zip-off hood", "Two-way zip" and "Gold-tone hardware"
 stay). A word character always blocks ("Slates"), and a compound only respelt in the final title ("Off White") is not
 gone. Two things still hold and never write: "Off White" with a space, dropped, leaves "off" on its own, so "Zip-off
-hood" holds; and a gone compound's part on its own holds ("Two front pockets" after "Two-Tone Black" becomes "Black"). Lines still as drafted rest on order fields review did not change (no
+hood" holds; and a gone compound's part on its own holds ("Two front pockets" after "Two-Tone Black" becomes "Black").
+Titles and text are read in one Unicode form (NFC), so "Rosé" typed with a combining accent is the same word. Lines still as drafted rest on order fields review did not change (no
 tool or AI part rests on the title but the colourway bullet: an AI claim's field is never the title), and the
 Composition and Made in lines come from the PO, so neither is read ("Gold hardware", "100% Camel Hair").
 

@@ -960,6 +960,17 @@ def test_the_final_titles_colour_parts_and_the_three_letter_floor_decide_a_compo
 
 
 @pytest.mark.parametrize("drafted,final,line", [
+    ("Loop Coat in Rose\u0301", "Loop Coat in Navy", "Ros\u00e9 piping"),   # a decomposed title, a composed hand line
+    ("Loop Coat in Ros\u00e9", "Loop Coat in Navy", "Rose\u0301 piping"),   # and the other way round
+])
+def test_a_colour_in_either_unicode_form_is_one_word(drafted, final, line):
+    was = (f"<p>ACME STUDIO's {drafted} is a coat.</p>\n<ul>\n<li>Composition: 100% Wool</li>\n"
+           "  <li>Zip fastening</li>\n</ul><br><p>SKU: X 1</p>")
+    now = was.replace(drafted, final).replace("  <li>Zip fastening</li>", f"  <li>{line}</li>")
+    assert "names 'ros\u00e9'" in descimport.old_colour(now, drafted, final, was)
+
+
+@pytest.mark.parametrize("drafted,final,line", [
     # Every case the word-by-word rule (943e9ec) held: a gone colour word of three letters or more, standing alone
     (*OW, "Off white piping"), (*OW, "OFF WHITE piping"), (*TT, "Two tone piping"), (*TT, "Two front pockets"),
     (*BW, "White piping"), (*SN, "Slate trims"), (*SN, "Zip fastening in slate tone"), (*SN, "Slate's trims"),

@@ -2391,8 +2391,8 @@ MUTANTS += [   # round 10c (case 2026-11-17-buyer-13): template slots, _core's s
     (X, '    first = re.sub(r"^an? ", "", first.rstrip("."))',
      '    first = re.sub(r"^an? ", "", first)',
      "B: the intro's full stop not undone (a one-sentence intro)"),
-    (X, '        said = [w.casefold() for w in re.findall(r"\\w+(?:-\\w+)*", x.replace(describe.squash(final), " "))]',
-     '        said = [w.casefold() for w in re.findall(r"(?<![\\w-])\\w+(?![\\w-])", x.replace(describe.squash(final), " "))]',
+    (X, '        said = [w.casefold() for w in re.findall(r"\\w+(?:-\\w+)*", nfc(x).replace(nfc(describe.squash(final)), " "))]',
+     '        said = [w.casefold() for w in re.findall(r"(?<![\\w-])\\w+(?![\\w-])", nfc(x).replace(nfc(describe.squash(final)), " "))]',
      'B: a dropped colour word beside a hyphen not read (the hyphen guard back)'),
 ]
 
@@ -2436,6 +2436,15 @@ MUTANTS += [   # round 10f C (case 2026-11-18-buyer-3): old_colour's parts, kept
     (X, '    strict = {p for g in whole for p in g.split("-") if p not in parts and len(p) >= 3}',
      '    strict = {p for g in whole for p in g.split("-") if p not in parts}',
      "B: a gone compound's part under three letters read on its own ('Ox hide patch')"),
+]
+
+MUTANTS += [   # round 10f D (case 2026-11-18-buyer-3): one Unicode form before matching
+    (X, '    tokens = lambda c: {t.casefold() for t in re.findall(r"[^\\W\\d_]+(?:-[^\\W\\d_]+)*", nfc(c))',
+     '    tokens = lambda c: {t.casefold() for t in re.findall(r"[^\\W\\d_]+(?:-[^\\W\\d_]+)*", c or "")',
+     "B: the title's colour not read in one Unicode form (NFC)"),
+    (X, '        said = [w.casefold() for w in re.findall(r"\\w+(?:-\\w+)*", nfc(x).replace(nfc(describe.squash(final)), " "))]',
+     '        said = [w.casefold() for w in re.findall(r"\\w+(?:-\\w+)*", x.replace(describe.squash(final), " "))]',
+     'B: the text read not in one Unicode form (NFC)'),
 ]
 
 

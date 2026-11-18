@@ -40,6 +40,7 @@ named in a WARN, and never stops the upload files. A config on hold writes nothi
 """
 import html
 import re
+import unicodedata
 
 from . import describe
 from .brand import hold_row
@@ -357,8 +358,10 @@ def old_colour(body, drafted, final, drafted_body, old_item=None, new_item=None)
     A word character always blocks ('Slates', 'slate_trims'). A compound only respelt in the final title ('Off-White'
     as 'Off White') is not gone. What this still holds, and never writes: 'Off White' written with a space, then
     dropped, leaves 'off' gone on its own ('Zip-off hood' holds); a gone compound's part on its own ('Two front
-    pockets' after 'Two-Tone Black' becomes 'Black')."""
-    tokens = lambda c: {t.casefold() for t in re.findall(r"[^\W\d_]+(?:-[^\W\d_]+)*", c or "")
+    pockets' after 'Two-Tone Black' becomes 'Black'). Titles and text are read in one Unicode form (NFC), so a
+    composed 'Rosé' and one spelt with a combining accent are the same word."""
+    nfc = lambda t: unicodedata.normalize("NFC", t or "")
+    tokens = lambda c: {t.casefold() for t in re.findall(r"[^\W\d_]+(?:-[^\W\d_]+)*", nfc(c))
                         if "-" in t or len(t) >= 3}   # as the title writes them: 'two-tone' whole, never 'two'
     now = tokens(title_colour(final)[1])
     parts = {x for t in now for x in t.split("-")}
@@ -375,7 +378,7 @@ def old_colour(body, drafted, final, drafted_body, old_item=None, new_item=None)
     read += [x for x in lines if x not in was_lines and not re.match(r"(?:Composition:|Made in\b)", x)
              and not COLOURWAY.fullmatch(f"<li>{_e(x)}</li>")]
     for x in read:
-        said = [w.casefold() for w in re.findall(r"\w+(?:-\w+)*", x.replace(describe.squash(final), " "))]
+        said = [w.casefold() for w in re.findall(r"\w+(?:-\w+)*", nfc(x).replace(nfc(describe.squash(final)), " "))]
         hit = [g for g in sorted(whole | loose | strict) if any(w == g or (g in loose and g in w.split("-")) for w in said)]
         if hit:
             return (f"its '{x}' names '{hit[0]}', a colour word of the drafted title that the final title drops: "
