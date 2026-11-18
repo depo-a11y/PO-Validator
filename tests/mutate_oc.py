@@ -2139,7 +2139,8 @@ MUTANTS += [   # option B (Colwyn, 2026-11-16): the template stays, the descript
     (X, 'COLUMNS = ["Variant SKU", "Command", "Body HTML"]', 'COLUMNS = ["Variant SKU", "Body HTML", "Command"]',
      "B: the import's columns out of order"),
     (X, "    if hold_row(brand):\n        return [], []", "    if False:\n        return [], []", "B: a held config writing the file"),
-    (X, "    for r in _products(new_rows):", "    for r in new_rows:", "B: one import row per size, not per product"),
+    (X, "    for r in _products([_nfc(r) for r in new_rows]):", "    for r in [_nfc(r) for r in new_rows]:",
+     "B: one import row per size, not per product"),
     (X, '    body, _ = swap_title(body, d.get("Title (as drafted)"), title, vendor)',
      '    body, _ = body, False', "B: the final Title not swapped"),
     (X, '        if why:\n            held.append((code, title, "; ".join(why)))',
@@ -2445,6 +2446,15 @@ MUTANTS += [   # round 10f D (case 2026-11-18-buyer-3): one Unicode form before 
     (X, '        said = [w.casefold() for w in re.findall(r"\\w+(?:-\\w+)*", nfc(x).replace(nfc(describe.squash(final)), " "))]',
      '        said = [w.casefold() for w in re.findall(r"\\w+(?:-\\w+)*", x.replace(describe.squash(final), " "))]',
      'B: the text read not in one Unicode form (NFC)'),
+]
+
+MUTANTS += [   # round 10g: the rows build compares read in one Unicode form (GM)
+    (X, '    sheet = [_nfc(d) for d in sheet]',
+     '    sheet = [dict(d) for d in sheet]',
+     'B: the Descriptions row not read in one Unicode form'),
+    (X, '    for r in _products([_nfc(r) for r in new_rows]):',
+     '    for r in _products([dict(r) for r in new_rows]):',
+     'B: the PO row not read in one Unicode form'),
 ]
 
 

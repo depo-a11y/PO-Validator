@@ -984,6 +984,39 @@ def test_every_case_the_word_by_word_rule_held_still_holds(drafted, final, line)
     assert descimport.old_colour(now, drafted, final, was)
 
 
+LAME = "Shell: 100% Cotton - Lining: 100% Lam\u00e9"   # composed; .replace("\u00e9", "e\u0301") decomposes it
+NFD = lambda t: t.replace("\u00e9", "e\u0301")
+
+
+def lame_draft(comp, bullet):
+    """A Descriptions-sheet edit: the jacket drafted with composition `comp` and its part bullet typed as `bullet`."""
+    def edit(ws):
+        c = desc_cell(ws, td.JACKET)
+        c.value = re.sub(r"<li>Composition: [^<]*</li>", f"<li>Composition: {comp}</li>", c.value).replace(
+            "  <li>Cupro lining</li>", f"  <li>{bullet}</li>")
+        for name, value in (("Composition (as drafted)", comp), ("PO composition (as drafted)", LAME)):
+            ws.cell(c.row, poxlsx.DESCRIPTION_COLS.index(name) + 1).value = value
+    return edit
+
+
+@pytest.mark.parametrize("comp,bullet", [(LAME, NFD("Lam\u00e9 lining")), (NFD(LAME), "Lam\u00e9 lining")])
+def test_a_stale_part_bullet_retyped_in_the_other_unicode_form_is_held(tmp_path, comp, bullet):
+    path, _ = reviewed(tmp_path, lame_draft(comp, bullet))
+    po_edit(path, td.JACKET, "Body HTML", lambda v: v.replace("Composition: Shell: 100% Cotton", "Composition: 100% Wool"))
+    checks = run(tmp_path, path)
+    assert td.JACKET not in by_code(tmp_path)
+    assert ("its bullet 'Lam\u00e9 lining' comes from the drafted composition, which changed"
+            in check(checks)["Detail"])
+
+
+def test_a_po_value_retyped_only_in_the_other_unicode_form_reads_as_unchanged(tmp_path):
+    path, _ = reviewed(tmp_path, lame_draft(LAME, "Lam\u00e9 lining"))
+    po_edit(path, td.JACKET, "Body HTML", lambda v: v.replace("Composition: Shell: 100% Cotton", f"Composition: {NFD(LAME)}"))
+    run(tmp_path, path)
+    jacket = by_code(tmp_path)[td.JACKET]   # written: no change, so no swap and no stale bullet
+    assert f"<li>Composition: {LAME}</li>" in jacket and "  <li>Lam\u00e9 lining</li>" in jacket
+
+
 def test_the_sheet_keeps_the_drafted_description_whole(tmp_path):
     path, _ = reviewed(tmp_path)   # the draft as written, its Descriptions sheet not edited
     sheet = poxlsx.read_descriptions(path)

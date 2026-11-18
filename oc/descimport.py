@@ -507,14 +507,22 @@ def _products(new_rows):
     return out
 
 
+def _nfc(row):
+    """A copy of a Descriptions or PO row with every string value in one Unicode form (NFC), so a retype with a
+    combining accent and the composed letter read as the same text in every comparison below."""
+    return {k: unicodedata.normalize("NFC", v) if isinstance(v, str) else v for k, v in row.items()}
+
+
 def build(po_path, new_rows, brand, out_prefix):
-    """(checks, writers) for the description import of the NEW products in `new_rows` (finalize's PO rows)."""
+    """(checks, writers) for the description import of the NEW products in `new_rows` (finalize's PO rows). Both the
+    Descriptions rows and the PO rows are read as NFC copies; finalize's own rows are left as they are."""
     if hold_row(brand):
         return [], []
     sheet = read_descriptions(po_path)
     if sheet is None:
         return [dict(Check=CHECK, Result="INFO", Detail="this PO has no Descriptions sheet (a PO not drafted by the "
                                                         "tool), so no description import is written")], []
+    sheet = [_nfc(d) for d in sheet]
     missing = [c for c in AS_DRAFTED if sheet and c not in sheet[0]]
     if missing:
         return [dict(Check=CHECK, Result="WARN", Detail=f"no description import is written: this PO's Descriptions "
@@ -525,7 +533,7 @@ def build(po_path, new_rows, brand, out_prefix):
         by_sku.setdefault(describe.squash(d.get("Variant SKU")), d)
         by_code.setdefault(norm_code(d.get("Manufacture code")), []).append(d)
     written, held = [], []
-    for r in _products(new_rows):
+    for r in _products([_nfc(r) for r in new_rows]):
         sku, code, title = describe.squash(r.get("Variant SKU")), norm_code(r.get(CODE)), describe.squash(r.get("Title"))
         d = by_sku.get(sku) or (by_code.get(code, [None])[0] if len(by_code.get(code, [])) == 1 else None)
         if d is None or not describe.squash(d.get("Description")):
