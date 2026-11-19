@@ -1020,6 +1020,32 @@ def test_a_po_value_retyped_only_in_the_other_unicode_form_reads_as_unchanged(tm
     assert f"<li>Composition: {LAME}</li>" in jacket and "  <li>Lam\u00e9 lining</li>" in jacket
 
 
+@pytest.mark.parametrize("bullet", ["Lam&eacute; lining", "Lam&#233; lining", "Lame&#769; lining"],
+                         ids=["named entity", "composed letter's number", "combining mark's number"])
+def test_a_stale_part_bullet_written_as_an_entity_is_held(tmp_path, bullet):
+    path, _ = reviewed(tmp_path, lame_draft(LAME, bullet))
+    po_edit(path, td.JACKET, "Body HTML", lambda v: v.replace("Composition: Shell: 100% Cotton", "Composition: 100% Wool"))
+    checks = run(tmp_path, path)
+    assert td.JACKET not in by_code(tmp_path)
+    assert ("its bullet 'Lam\u00e9 lining' comes from the drafted composition, which changed"
+            in check(checks)["Detail"])
+
+
+def test_an_entity_decoded_by_describe_reads_in_one_unicode_form():
+    assert describe.part_bullets("Shell: 100% Cotton - Lining: 100% Lame&#769;") == [("Lam\u00e9 lining", "lining")]
+    assert describe.composition_problem("100% Ve&#769;r") == describe.composition_problem("100% V&#233;r") == ""
+
+
+def test_a_brand_country_name_keyed_in_the_other_unicode_form_still_names_the_country(tmp_path):
+    key = unicodedata.normalize("NFD", "ITALI\u00cb")   # a combining diaeresis
+    assert key != "ITALI\u00cb"
+    brand = dict(BRAND, country_names=dict(BRAND.get("country_names") or {}, **{key: "Italy"}))
+    path, _ = reviewed(tmp_path, brand=brand)
+    po_edit(path, td.JACKET, poxlsx.MADE_IN, lambda v: "ITALI\u00cb")
+    checks = run(tmp_path, path, brand)
+    assert "<li>Made in Italy</li>" in by_code(tmp_path).get(td.JACKET, ""), check(checks)["Detail"]
+
+
 def test_a_brand_template_typed_in_the_other_unicode_form_still_reads_an_untouched_po(tmp_path):
     tpl = "<p>Composicio\u0301n: {composition}</p> <p>Made in {made_in}</p> <p>SKU: {code}</p>"   # a combining accent
     assert tpl != unicodedata.normalize("NFC", tpl)

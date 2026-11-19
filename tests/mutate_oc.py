@@ -2478,6 +2478,22 @@ MUTANTS += [   # round 10i: the import's Variant SKU written as PU-new mints it 
 ]
 
 
+MUTANTS += [   # round 10j (re-check 2026-11-19-buyer-1): entities decoded after the NFC copy; brand keys in NFC (GM)
+    (X, '    return unicodedata.normalize("NFC", describe.squash(html.unescape(TAGS.sub(" ", fragment or ""))))',
+     '    return describe.squash(html.unescape(TAGS.sub(" ", fragment or "")))',
+     "B: text decoded after the NFC copy, not normalised again"),
+    (X, '        return {_nfc_deep(k): _nfc_deep(x) for k, x in v.items()}',
+     '        return {k: _nfc_deep(x) for k, x in v.items()}',
+     "B: brand config keys not read in one Unicode form"),
+    (D, '    raw = unicodedata.normalize("NFC", html.unescape(str(text if text is not None else "")))',
+     '    raw = html.unescape(str(text if text is not None else ""))',
+     "describe: a composition judged decoded, not normalised"),
+    (D, '    t = unicodedata.normalize("NFC", squash(html.unescape(str(value or ""))))',
+     '    t = squash(html.unescape(str(value or "")))',
+     "describe: part bullets decoded, not normalised"),
+]
+
+
 def digest(p):
     return hashlib.md5(p.read_bytes()).hexdigest()
 

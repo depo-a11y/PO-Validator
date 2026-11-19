@@ -41,6 +41,7 @@ Descriptions sheet, and finalize turns into the separate description import (oc/
 """
 import html
 import re
+import unicodedata
 
 from .resolve import AI_DRAFT, COLOUR, RANK, RED, TOOL_DRAFT
 from .util import title_colour
@@ -329,7 +330,7 @@ def house_case(text):
 
 def composition_problem(text):
     """Why a composition value cannot be written as the Composition line, else ''."""
-    raw = html.unescape(str(text if text is not None else ""))
+    raw = unicodedata.normalize("NFC", html.unescape(str(text if text is not None else "")))
     t = squash(raw)
     if t.casefold() in PLACEHOLDERS:
         return "is blank or a placeholder"
@@ -422,7 +423,7 @@ def title_kind(title):
 def part_bullets(value):
     """[(bullet, part)] for the labelled parts of a composition given as one material: 'Lining: 100% Cupro' ->
     'Cupro lining'; adidas 'U:LE L:TE S:RU' -> 'Leather upper', 'Textile lining', 'Rubber sole'."""
-    t = squash(html.unescape(str(value or "")))
+    t = unicodedata.normalize("NFC", squash(html.unescape(str(value or ""))))
     out = {}
     m = ADIDAS_PARTS.match(t)
     if m:

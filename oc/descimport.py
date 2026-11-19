@@ -65,7 +65,9 @@ AS_DRAFTED = [c for c in DESCRIPTION_COLS if c.endswith("(as drafted)")]
 
 
 def _text(fragment):
-    return describe.squash(html.unescape(TAGS.sub(" ", fragment or "")))
+    """A fragment's text: tags dropped, entities decoded, whitespace collapsed, then in NFC, since a combining mark
+    written as an entity ('e&#770;') is decoded after build's NFC copies and must still read as the composed letter."""
+    return unicodedata.normalize("NFC", describe.squash(html.unescape(TAGS.sub(" ", fragment or ""))))
 
 
 def _e(text):
@@ -528,13 +530,12 @@ def _nfc(row):
 
 
 def _nfc_deep(v):
-    """A copy of a brand config with every string in it, nested in dicts and lists too, in NFC."""
+    """A copy of a brand config with every string in it, keys and values of nested dicts too, in NFC. A list is left as
+    it is: build reads no list-valued key (body_html, vendor, unknown and country_names; hold before the copy)."""
     if isinstance(v, str):
         return unicodedata.normalize("NFC", v)
     if isinstance(v, dict):
         return {_nfc_deep(k): _nfc_deep(x) for k, x in v.items()}
-    if isinstance(v, (list, tuple)):
-        return type(v)(_nfc_deep(x) for x in v)
     return v
 
 

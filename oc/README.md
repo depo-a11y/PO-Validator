@@ -639,6 +639,8 @@ stay). A word character always blocks ("Slates"), and a compound only respelt in
 gone. Two things still hold and never write: "Off White" with a space, dropped, leaves "off" on its own, so "Zip-off
 hood" holds; and a gone compound's part on its own holds ("Two front pockets" after "Two-Tone Black" becomes "Black").
 Titles and text are read in one Unicode form (NFC), so "Rosé" typed with a combining accent is the same word.
+Text is put in that form after its HTML entities are decoded, so a combining mark written as an entity (`e&#769;`)
+reads as the composed letter too; the part bullets and the composition check read a composition so at draft as well.
 Finalize reads every Descriptions row, every PO row and the brand config it compares in NFC too, so a retype that only
 changes the form reads as unchanged everywhere, never as an edit or a missed stale bullet, and it groups products on
 the same Title key as PU-new, so two titles that differ only in form stay two products. Lines still as drafted rest on order fields review did not change (no
