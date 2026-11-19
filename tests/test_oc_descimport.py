@@ -1036,6 +1036,25 @@ def test_an_entity_decoded_by_describe_reads_in_one_unicode_form():
     assert describe.composition_problem("100% Ve&#769;r") == describe.composition_problem("100% V&#233;r") == ""
 
 
+def test_a_final_title_typed_into_the_intro_in_the_other_unicode_form_is_written(tmp_path):
+    final = "Orbit Field Jacket in Cr\u00e8me"
+    def edit(ws):   # the person typed the final Title into the intro themselves, decomposed
+        c = desc_cell(ws, td.JACKET)
+        c.value = c.value.replace("Orbit Field Jacket in Slate", unicodedata.normalize("NFD", final))
+    path, _ = reviewed(tmp_path, edit)
+    po_edit(path, td.JACKET, "Title", lambda v: final)
+    checks = run(tmp_path, path)
+    assert f"ACME STUDIO's {final} is " in by_code(tmp_path).get(td.JACKET, ""), check(checks)["Detail"]
+
+
+def test_old_colour_reads_the_final_title_out_of_a_line_in_either_unicode_form():
+    drafted, typed = "Ros\u00e9 Slate Coat in Slate", "Ros\u00e9 Slate Coat in Navy"
+    was = (f"<p>ACME STUDIO's {drafted} is a coat.</p>\n<ul>\n<li>Composition: 100% Wool</li>\n"
+           "  <li>Zip fastening</li>\n</ul><br><p>SKU: X 1</p>")
+    now = was.replace(drafted, typed).replace("Zip fastening", f"{typed} piping")
+    assert descimport.old_colour(now, drafted, unicodedata.normalize("NFD", typed), was) == ""
+
+
 def test_a_brand_country_name_keyed_in_the_other_unicode_form_still_names_the_country(tmp_path):
     key = unicodedata.normalize("NFD", "ITALI\u00cb")   # a combining diaeresis
     assert key != "ITALI\u00cb"
